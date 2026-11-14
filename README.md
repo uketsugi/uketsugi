@@ -92,6 +92,15 @@ It serves `http://127.0.0.1:7410` in the foreground until you press Ctrl-C, so g
 of its own. From another terminal, `ukt doctor` checks the data directory, the token, the server,
 the store and the model, and says what to do about anything that is wrong.
 
+<!-- first-run:start -->
+
+<p align="center">
+  <img src="assets/first-run.gif" width="880" alt="A terminal in a fresh container: the install line, ukt setup downloading the model, and ukt serve starting.">
+</p>
+<p align="center"><sub>Steps 1 to 3 in a fresh Debian 13 container. Pauses are shortened and the two downloads are shown faster than they ran.</sub></p>
+
+<!-- first-run:end -->
+
 **4. Connect Claude Code**
 
 In another terminal:
