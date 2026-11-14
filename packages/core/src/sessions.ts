@@ -1,9 +1,11 @@
 /**
  * Sessions are inferred by the server: no call passes one. A call joins the open
  * session of the same person, client name, conversation and project, or opens a new one. The
- * conversation is the client's own id where it sends one, else the connection its transport saw
- * the call arrive on. Every call is stamped on its session, so a session that is killed still
- * leaves what it did and when, and the next brief can say so.
+ * conversation is the client's own id where the server learns it (the client sends it, or its
+ * hook says which conversation a call belongs to), else the connection its transport saw the call
+ * arrive on. Every call is stamped on its session, so a session that is killed still leaves what
+ * it did and when, and the next brief can say so. A harness whose hook says a conversation is
+ * starting has its session begun before any call, and is handed the brief there.
  */
 import AsyncLock from "async-lock";
 import type { Caller, Session, SessionKey, SessionMark } from "./domain.ts";
@@ -35,8 +37,8 @@ export interface ClientInfo {
   readonly name: string;
   readonly version: string | null;
   /**
-   * The conversation the call belongs to: the client's own id where it sends one, else the id its
-   * transport gave the connection the call came on. Null where neither is known.
+   * The conversation the call belongs to: the client's own id where the server learns it, else
+   * the id its transport gave the connection the call came on. Null where neither is known.
    */
   readonly conversationId: string | null;
 }
@@ -60,6 +62,12 @@ export interface SessionInference {
     project: string | null,
     mark: SessionMark,
   ): Promise<Entered>;
+  /**
+   * The session of a conversation whose harness says it is starting, or starting again after a
+   * resume or a compaction: the one the conversation has open in the project, or a new one. No
+   * call is stamped on it. Whoever asks is handed its brief, so it owes none to its first call.
+   */
+  begin(caller: Caller, client: ClientInfo, project: string): Promise<Session>;
   /** Gives the brief back when the result that was to carry it failed: the next call owes it. */
   releaseBrief(session: Session): Promise<void>;
 }
@@ -109,7 +117,7 @@ export function createSessionInference(
       session !== null && sessionState(session, now) === "open" ? session : null;
     const own = open(await sessions.latestOf(key));
     if (own !== null || key.conversationId !== null || key.project === null) return own;
-    const last = open(await sessions.latest(key.orgId, key.principalId, key.project, null));
+    const last = open(await sessions.latest(key.orgId, key.principalId, key.project));
     return last?.clientName === key.clientName ? last : null;
   }
 
@@ -122,7 +130,7 @@ export function createSessionInference(
     const refused = mark === "refused";
     const latest = await openSessionOf(key, now);
     if (latest !== null) {
-      await sessions.touch(key.orgId, latest.id, now, mark);
+      await sessions.touch(key.orgId, latest.id, now, mark, client.version);
       const owesBrief = !refused && latest.briefedAt === null;
       if (owesBrief) await sessions.setBriefed(key.orgId, latest.id, now);
       return { session: latest, owesBrief };
@@ -139,17 +147,40 @@ export function createSessionInference(
     return { session, owesBrief: !refused };
   }
 
+  async function beginNow(key: SessionKey, client: ClientInfo): Promise<Session> {
+    const now = ports.clock.now();
+    const open = await openSessionOf(key, now);
+    if (open !== null) {
+      await sessions.setBriefed(key.orgId, open.id, now);
+      return open;
+    }
+    const session = { ...newSession(key, ports.ids.uuid(), client.version, now), briefedAt: now };
+    await sessions.open(session);
+    return session;
+  }
+
+  /** One key's calls and beginnings, one at a time. */
+  function inTurn<T>(
+    caller: Caller,
+    client: ClientInfo,
+    project: string | null,
+    work: (key: SessionKey) => Promise<T>,
+  ): Promise<T> {
+    const key: SessionKey = {
+      orgId: caller.orgId,
+      principalId: caller.principalId,
+      clientName: client.name,
+      conversationId: client.conversationId,
+      project,
+    };
+    return turns.acquire(JSON.stringify(Object.values(key)), () => work(key));
+  }
+
   return {
-    enter(caller, client, project, mark) {
-      const key: SessionKey = {
-        orgId: caller.orgId,
-        principalId: caller.principalId,
-        clientName: client.name,
-        conversationId: client.conversationId,
-        project,
-      };
-      return turns.acquire(JSON.stringify(Object.values(key)), () => enterNow(key, client, mark));
-    },
+    enter: (caller, client, project, mark) =>
+      inTurn(caller, client, project, (key) => enterNow(key, client, mark)),
+    begin: (caller, client, project) =>
+      inTurn(caller, client, project, (key) => beginNow(key, client)),
     releaseBrief: (session) => sessions.setBriefed(session.orgId, session.id, null),
   };
 }

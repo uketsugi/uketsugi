@@ -19,7 +19,12 @@ export interface McpTestClient {
   readonly protocol: McpRevision;
   instructions(): string | undefined;
   listTools(): Promise<McpTool[]>;
-  callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult>;
+  /** Calls a tool; `meta` is what the client says beside the call (`_meta`), as a harness that numbers its calls does. */
+  callTool(
+    name: string,
+    args: Record<string, unknown>,
+    meta?: Record<string, unknown>,
+  ): Promise<McpCallResult>;
   listPrompts(): Promise<{ name: string; description?: string | undefined }[]>;
   getPrompt(name: string): Promise<string>;
   close(): Promise<void>;
@@ -54,8 +59,9 @@ export async function connectMcp(options: McpConnectOptions): Promise<McpTestCli
     protocol,
     instructions: () => client.getInstructions(),
     listTools: async () => (await client.listTools()).tools,
-    async callTool(name, args) {
-      const result = await client.callTool({ name, arguments: args });
+    async callTool(name, args, meta) {
+      const said = meta === undefined ? {} : { _meta: meta };
+      const result = await client.callTool({ name, arguments: args, ...said });
       const content = Array.isArray(result.content) ? result.content : [];
       return {
         text: textOf(content),

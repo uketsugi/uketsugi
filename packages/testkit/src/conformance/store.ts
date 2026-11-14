@@ -2,6 +2,7 @@ import { scopeOf, type Caller, type NewFact, type SearchQuery, type Store } from
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { FakeClock, FakeIdGen } from "../fakes.ts";
 import { hostingCases } from "./store-hosting.ts";
+import { sessionCases } from "./store-sessions.ts";
 import {
   content,
   event,
@@ -305,65 +306,6 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
       expect(await as("k1", "person")).not.toBeNull();
     });
 
-    test("a session is read back with its stamps and its note, and a project is created once", async () => {
-      const key = {
-        orgId: alice.orgId,
-        principalId: alice.principalId,
-        clientName: "claude-code",
-        conversationId: null,
-        project: PROJECT,
-      };
-      const opened = clock.now();
-      const stamps = {
-        firstCallAt: opened,
-        lastCallAt: opened,
-        lastSearchAt: null,
-        lastPublishAt: null,
-      };
-      const session = {
-        ...key,
-        id: ids.uuid(),
-        displayId: "s-0001",
-        clientVersion: "2.1",
-        ...stamps,
-        refusedCalls: 0,
-        calls: 1,
-        briefedAt: null,
-        note: null,
-      };
-      const ref = { kind: "repository" as const, key: PROJECT };
-      const first = await store.projects.ensure(alice.orgId, ref, clock.now());
-      expect(await store.projects.ensure(alice.orgId, ref, new Date(0))).toEqual(first);
-      await store.sessions.open(session);
-      expect(await store.sessions.latestOf(key)).toEqual(session);
-      clock.advance(60_000);
-      await store.sessions.touch(alice.orgId, session.id, clock.now(), "search");
-      const note = { text: "Stopped after the queue tests.", final: true, at: clock.now() };
-      await store.sessions.setNote(alice.orgId, session.id, note);
-      const touched = { lastCallAt: clock.now(), lastSearchAt: clock.now(), calls: 2, note };
-      expect(await store.sessions.latestOf(key)).toEqual({ ...session, ...touched });
-      expect(
-        await store.sessions.latestOf({ ...key, project: "github.com/acme/other" }),
-      ).toBeNull();
-      expect(await store.sessions.latestOf({ ...key, conversationId: "c-1" })).toBeNull();
-      const who = [alice.orgId, alice.principalId, PROJECT] as const;
-      expect((await store.sessions.latest(...who, null))?.note).toEqual(note);
-      expect(await store.sessions.latest(...who, session.id)).toBeNull();
-      const activity = await store.sessions.activity(alice.orgId, alice.principalId, opened);
-      expect(activity).toEqual([
-        {
-          clientName: "claude-code",
-          clientVersion: "2.1",
-          sessions: 1,
-          searched: 1,
-          published: 0,
-          refused: 0,
-        },
-      ]);
-      const known = await store.sessions.byIds(alice.orgId, [session.id, ids.uuid()]);
-      expect(known.map((entry) => entry.clientName)).toEqual(["claude-code"]);
-    });
-
     test("names are listed in byte order, whatever the database collates by", async () => {
       const at = clock.now();
       const [here, hyphen] = [PROJECT, "github.com/acme-b/api"];
@@ -389,6 +331,8 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
       const activity = await store.sessions.activity(bob.orgId, bob.principalId, at);
       expect(activity.map((row) => row.clientName)).toEqual(["Zed", "claude-code"]);
     });
+
+    sessionCases({ store: () => store, person: () => alice, clock, ids });
 
     hostingCases({
       store: () => store,

@@ -704,38 +704,32 @@
         "required": ["slug"],
         "additionalProperties": false
       },
-      "SessionNoteRequest": {
+      "ClaudeCodeHook": {
         "type": "object",
-        "description": "`POST /api/session-notes`: where a session stands, in the agent's own last words.",
+        "description": "`POST /api/hooks/claude-code`: what Claude Code hands one of its hooks, sent on as it came. Only what the server reads is named here: the harness sends more, and adds to it between versions.",
         "properties": {
-          "project": {
-            "type": "string",
-            "maxLength": 300,
-            "description": "The project, as a tool call names it. Give this or `cwd`."
-          },
-          "cwd": {
-            "type": "string",
-            "maxLength": 4096,
-            "description": "The session's working directory, for a caller that cannot name the project."
-          },
-          "text": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The note: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept."
-          },
-          "final": {
-            "type": "boolean",
-            "default": false,
-            "description": "True for the session's last word: the note ends the session, and the next call opens a new one whose brief shows it. False for a note at a checkpoint, such as a hook sends after every turn: it replaces the session's note and the session goes on."
-          },
-          "client": {
+          "hook_event_name": {
             "type": "string",
             "maxLength": 80,
-            "description": "The harness's name, when the request is not made by the harness itself."
+            "description": "The event. The server acts on `SessionStart`, `PreToolUse`, `Stop` and `SessionEnd`, and answers any other with nothing."
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Claude Code's own id of the conversation."
+          },
+          "tool_use_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "`PreToolUse`: the id of the tool call about to be made, which the call itself then carries."
+          },
+          "last_assistant_message": {
+            "type": "string",
+            "description": "`Stop`: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept."
           }
         },
-        "required": ["text"],
-        "additionalProperties": false
+        "required": ["hook_event_name", "session_id"]
       },
       "ProjectChoiceRequest": {
         "type": "object",
@@ -883,7 +877,7 @@
               },
               "closing_note": {
                 "type": "boolean",
-                "description": "Whether `POST /api/session-notes` takes notes."
+                "description": "Whether a harness's hook can leave a session's note (`POST /api/hooks/claude-code`)."
               },
               "jobs": {
                 "type": "array",
@@ -1157,26 +1151,25 @@
         },
         "required": ["projects", "sharing"]
       },
-      "SessionNoteResult": {
+      "ClaudeCodeHookOutput": {
         "type": "object",
-        "description": "`POST /api/session-notes`.",
+        "description": "`POST /api/hooks/claude-code`: the hook's output, as Claude Code reads it. Empty for every event but `SessionStart`.",
         "properties": {
-          "session": {
-            "type": "string",
-            "description": "The display id of the session the note was put on."
-          },
-          "project": {
-            "type": "string"
-          },
-          "redactions": {
-            "type": "array",
-            "items": {
-              "type": "string"
+          "hookSpecificOutput": {
+            "type": "object",
+            "properties": {
+              "hookEventName": {
+                "type": "string",
+                "const": "SessionStart"
+              },
+              "additionalContext": {
+                "type": "string",
+                "description": "What the session starts from: the block, then the session's brief where the hook named the project."
+              }
             },
-            "description": "What the scanner removed from the text, by rule name; empty when nothing."
+            "required": ["hookEventName", "additionalContext"]
           }
-        },
-        "required": ["session", "project", "redactions"]
+        }
       },
       "ProjectChoice": {
         "type": "object",
@@ -1761,18 +1754,33 @@
           "type": "string",
           "description": "The harness's name as the page shows it."
         },
+        "plugin": {
+          "type": "object",
+          "description": "The harness's plugin, where it has one and the person asking can install it from here. With it nobody runs set-up or places the block.",
+          "properties": {
+            "install": {
+              "type": "string",
+              "description": "The shell lines that install it, the token read from the variable `token_env` names."
+            },
+            "remove": {
+              "type": "string",
+              "description": "The shell command that takes it out again."
+            },
+            "adds_server": {
+              "type": "boolean",
+              "description": "Whether the plugin also adds the server to the harness: `add` is then for someone who goes without the plugin."
+            }
+          },
+          "required": ["install", "remove", "adds_server"]
+        },
         "add": {
           "type": "string",
-          "description": "What adds the server to the harness: a shell command, configuration text, or the URL itself."
+          "description": "What adds the server to the harness: a shell command, or the URL itself."
         },
         "add_kind": {
           "type": "string",
-          "enum": ["command", "json", "url"],
+          "enum": ["command", "url"],
           "description": "What kind of text `add` is."
-        },
-        "add_file": {
-          "type": "string",
-          "description": "For `json`: the file the text goes in."
         },
         "remove": {
           "type": "string",

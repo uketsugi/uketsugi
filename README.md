@@ -46,8 +46,9 @@ by several people.
 - **Unfinished work becomes a task.** An agent that takes a task holds a lease on it, so a second
   agent is told it is taken rather than doing it twice. It can leave notes, hand the task over
   with a note for whoever is next, or finish it. A task can be left for another repository.
-- **A new session starts with a brief.** The first answer it gets from Uketsugi also says what is
-  open, what the last session here published, and what the project already knows.
+- **A new session starts with a brief.** It says what is open, how your last session here ended
+  and what the project already knows. With the Claude Code plugin the agent has it before your
+  first prompt; elsewhere it comes with the first answer it gets from Uketsugi.
 - **You can see all of it.** A small dashboard shows the facts, the tasks and what each session
   did, project by project.
 
@@ -106,47 +107,60 @@ the store and the model, and says what to do about anything that is wrong.
 In another terminal:
 
 ```sh
+claude plugin install uketsugi --marketplace ~/.local/lib/uketsugi/plugins \
+  --config url=http://127.0.0.1:7410
+printf '{"token":"%s"}' "$(ukt token)" | claude plugin configure uketsugi@uketsugi --values-stdin
+```
+
+The first command installs the plugin that came with the release. The second gives it your token
+on standard input, so the token is never on a command line; Claude Code keeps it with its own
+sign-in. That is all, and you work as you always do. The plugin adds the server to Claude Code,
+and from the next session on:
+
+- **The agent starts with the session's brief**, before your first prompt, and is told to search
+  Uketsugi before investigating how or why something works, and to publish what it establishes,
+  with a citation.
+- **Where each turn ended is kept**: the agent's last message, scanned like everything else and
+  private to you. A session you quit, or one that is killed, still tells the next one where it
+  stopped.
+
+The plugin talks to the server from Claude Code's hooks. A hook that cannot reach the server
+does nothing, and the session goes on without it.
+
+<details>
+<summary>Without the plugin</summary>
+
+Add the server by its URL:
+
+```sh
 export UKT_TOKEN="$(ukt token)"
 claude mcp add --transport http --scope user uketsugi http://127.0.0.1:7410/mcp \
   --header "Authorization: Bearer $UKT_TOKEN"
 ```
 
-Then start Claude Code in a repository and type:
+Then start Claude Code in a repository and type `/uketsugi:setup`. This asks the agent to put a
+short block at the top of your user-level instruction file: `~/.claude/CLAUDE.md`, or `CLAUDE.md`
+in the folder `CLAUDE_CONFIG_DIR` names if you have set one. Claude Code may ask you to approve
+the edit. It is the agent that writes the file, so look afterwards and see that the block is
+there; the dashboard's Connect page shows it. A session then gets its brief with its first answer
+from Uketsugi, and leaves no note of where it stopped.
 
-```
-/uketsugi:setup
-```
+If you connected this way before and now install the plugin, take the old set-up out first:
+`claude mcp remove uketsugi -s user`, and delete the block from the instruction file.
 
-This asks the agent to put a short block at the top of your user-level instruction file. That is
-`~/.claude/CLAUDE.md`, or `CLAUDE.md` in the folder `CLAUDE_CONFIG_DIR` names if you have set one;
-the agent finds it by running one `echo` command. Claude Code may ask you to approve that command
-and the edit. The block tells every later session to search Uketsugi before investigating how or
-why something works, and to publish what it establishes, with a citation.
-
-It is the agent that writes the file, so look afterwards and see that the block is there. You can
-also place it yourself: the dashboard's Connect page shows the block, and it goes at the very top
-of the file. After that you work as you always do.
+</details>
 
 ### Antigravity
 
-Antigravity has no set-up command, so both steps are done by hand:
+```sh
+agy mcp add --header "Authorization: Bearer $(ukt token)" uketsugi http://127.0.0.1:7410/mcp
+agy plugin install ~/.local/lib/uketsugi/plugins/antigravity
+```
 
-1. Put the server in `~/.gemini/config/mcp_config.json`, with your token itself in place of
-   `<token>` (`ukt token` prints it):
-
-   ```json
-   {
-     "mcpServers": {
-       "uketsugi": {
-         "url": "http://127.0.0.1:7410/mcp",
-         "headers": { "Authorization": "Bearer <token>" }
-       }
-     }
-   }
-   ```
-
-2. Copy the block from the Antigravity tab of the dashboard's Connect page to the very top of
-   `~/.gemini/GEMINI.md`.
+The first command adds the server; Antigravity keeps the token in
+`~/.gemini/config/mcp_config.json`. The second installs a plugin that is one rule, always on: the
+same instruction to search before investigating and to publish what is established. A session
+gets its brief with its first answer from Uketsugi.
 
 ### Another MCP client
 
@@ -217,19 +231,21 @@ The server listens on `127.0.0.1` only, unless you start it with `--host`.
   later exports. It does not reach the store's own files or a backup, even one made afterwards.
   If the text was a secret, change the secret as well.
 - `ukt token --rotate` replaces your token, with the server stopped. A harness keeps the token it
-  was added with, so remove the server from it and add it again: for Claude Code,
-  `claude mcp remove uketsugi -s user`, then the two lines of step 4.
+  was given, so give it the new one: for Claude Code, the second command of step 4 again; for
+  Antigravity, `agy mcp remove uketsugi`, then its first command again.
 
-To remove Uketsugi, stop the server and delete those three paths:
+To remove Uketsugi, take it out of your harnesses, stop the server and delete those three paths:
 
 ```sh
+claude plugin marketplace remove uketsugi
+agy plugin uninstall uketsugi && agy mcp remove uketsugi
 rm -rf ~/.local/share/uketsugi ~/.local/lib/uketsugi ~/.local/bin/ukt
-claude mcp remove uketsugi -s user
 ```
 
-Then delete the block between `<!-- uketsugi:start -->` and `<!-- uketsugi:end -->` in the same
-instruction file set-up wrote it to. For Antigravity, take the server out of `mcp_config.json` and
-the block out of `GEMINI.md`.
+The first command uninstalls the Claude Code plugin with the token it was given. If you connected
+Claude Code without the plugin, it is `claude mcp remove uketsugi -s user` instead, and the block
+between `<!-- uketsugi:start -->` and `<!-- uketsugi:end -->` in your instruction file is yours to
+delete.
 
 ## Sharing a server
 
@@ -248,6 +264,20 @@ that can be looked up, and their tasks, under their name. `ukt people` lists who
 To reach it from other machines, start it with `ukt serve --host 0.0.0.0 --allowed-host <name>`.
 It answers only to the names it is given, and it speaks plain HTTP, so put it behind a proxy that
 terminates TLS.
+
+A person you invited needs nothing installed but their harness: the server hands out its own
+plugins. With the server at `https://memory.example.com` and their token in `UKT_TOKEN`, Claude
+Code is connected by:
+
+```sh
+claude plugin install uketsugi --marketplace https://memory.example.com/plugins/marketplace.json \
+  --config url=https://memory.example.com
+printf '{"token":"%s"}' "$UKT_TOKEN" | claude plugin configure uketsugi@uketsugi --values-stdin
+```
+
+The dashboard's Connect page shows these lines with the server's own address in them, and the
+ones for Antigravity. After the server is upgraded, `claude plugin update uketsugi@uketsugi`
+fetches the plugin that goes with it.
 
 ## From source
 

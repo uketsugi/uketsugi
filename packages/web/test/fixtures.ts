@@ -19,7 +19,8 @@ import {
 } from "@uketsugi/contracts";
 
 export const PROJECT = "github.com/acme/billing";
-const MCP_URL = "http://127.0.0.1:7410/mcp";
+const ORIGIN = "http://127.0.0.1:7410";
+const MCP_URL = `${ORIGIN}/mcp`;
 
 export const session: DashboardSession = {
   person: "Dana",
@@ -52,8 +53,14 @@ export const connect: ConnectInfo = {
     {
       id: "claude-code",
       name: "Claude Code",
+      plugin: {
+        install: `claude plugin install uketsugi --marketplace /opt/uketsugi/plugins --config url=${ORIGIN}\nprintf '{"token":"%s"}' "$UKT_TOKEN" | claude plugin configure uketsugi@uketsugi --values-stdin`,
+        remove: "claude plugin marketplace remove uketsugi",
+        adds_server: true,
+      },
       add: `claude mcp add --transport http uketsugi ${MCP_URL} --header "Authorization: Bearer $UKT_TOKEN"`,
       add_kind: "command",
+      remove: "claude mcp remove uketsugi -s user",
       setup: "/uketsugi:setup",
       activate: "/uketsugi:activate",
       instruction_file: "~/.claude/CLAUDE.md",
@@ -62,11 +69,22 @@ export const connect: ConnectInfo = {
     {
       id: "antigravity",
       name: "Antigravity",
-      add: `{ "mcpServers": { "uketsugi": { "url": "${MCP_URL}" } } }`,
-      add_kind: "json",
-      add_file: "~/.gemini/config/mcp_config.json",
+      plugin: {
+        install: "agy plugin install /opt/uketsugi/plugins/antigravity",
+        remove: "agy plugin uninstall uketsugi",
+        adds_server: false,
+      },
+      add: `agy mcp add --header "Authorization: Bearer $UKT_TOKEN" uketsugi ${MCP_URL}`,
+      add_kind: "command",
+      remove: "agy mcp remove uketsugi",
       instruction_file: "~/.gemini/GEMINI.md",
-      note: "Antigravity fills in no variable.",
+    },
+    {
+      id: "other",
+      name: "Another client",
+      add: MCP_URL,
+      add_kind: "url",
+      note: "Any client that takes a remote MCP server by its URL.",
     },
   ],
 };

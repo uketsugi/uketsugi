@@ -2,8 +2,10 @@
  * The request pipeline: one tool call from an authenticated caller to a rendered result.
  * Order: the project is checked first (a call without one is refused with the fixed text and
  * counted), then the arguments, then the project's record and the inferred session, then the use
- * case, and last how the caller's person treats the project, which every result says. The first result of a session also carries the session's brief. A failure the caller
- * can act on is a result with the one error shape, never a throw.
+ * case, and last how the caller's person treats the project, which every result says. The first
+ * result of a session also carries the session's brief, unless its harness was handed the brief
+ * when the session began. A failure the caller can act on is a result with the one error shape,
+ * never a throw.
  */
 import {
   TOOL_NAMES,
@@ -14,7 +16,7 @@ import {
   type ToolName,
   type ToolResults,
 } from "@uketsugi/contracts";
-import { sessionBrief } from "./brief.ts";
+import { sessionBrief, type ComposedBrief } from "./brief.ts";
 import type { CallContext } from "./context.ts";
 import type { Caller } from "./domain.ts";
 import { ToolFailure, internal } from "./failure.ts";
@@ -58,6 +60,12 @@ export interface App {
     args: unknown,
     client: ClientInfo,
   ): Promise<ToolCallResult>;
+  /**
+   * Begins the session of a conversation whose harness says it is starting, in the project its
+   * hook names as a call would, and returns the text of that session's brief. Null where the hook
+   * names no project of the caller's: the brief then rides on the first call, as without a hook.
+   */
+  beginSession(caller: Caller, client: ClientInfo, project: unknown): Promise<string | null>;
 }
 
 export interface AppPorts extends CorePorts {
@@ -111,6 +119,11 @@ async function noticeOf(ports: CorePorts, ctx: CallContext): Promise<string | nu
   return chosen || isPersonal(ctx.project) ? null : UNCHOSEN_NOTICE;
 }
 
+/** A session's brief, with what its person has yet to decide about the project. */
+async function briefOf(ports: CorePorts, ctx: CallContext): Promise<ComposedBrief> {
+  return sessionBrief(ports, ctx, await noticeOf(ports, ctx));
+}
+
 /**
  * Runs the call that owes its session's brief and attaches the brief to its result. A call that
  * fails gives the brief back, so the session's next result carries it. A brief that cannot be
@@ -130,7 +143,7 @@ async function withBrief(
     throw error;
   }
   try {
-    const { brief, text } = await sessionBrief(ports, ctx, await noticeOf(ports, ctx));
+    const { brief, text } = await briefOf(ports, ctx);
     return { result: { ...rendered.result, brief }, text: `${rendered.text}\n\n${text}` };
   } catch (error) {
     pipeline.onError(error);
@@ -178,6 +191,18 @@ export function createApp(ports: AppPorts, options: AppOptions = {}): App {
     authenticate: (bearer) => ports.identity.authenticate(bearer),
     signIn: (key) => ports.identity.signIn(key),
     current: (caller) => ports.identity.current(caller),
+    async beginSession(caller, client, named) {
+      const ref = parseProject(named);
+      const project = ref === null ? null : await resolveProject(ports, caller, ref);
+      if (project === null) return null;
+      const session = await pipeline.sessions.begin(caller, client, project.key);
+      try {
+        return (await briefOf(ports, { caller, project, session })).text;
+      } catch (error) {
+        await pipeline.sessions.releaseBrief(session);
+        throw error;
+      }
+    },
     async callTool(caller, name, args, client) {
       if (!isToolName(name)) throw new UnknownToolError(name);
       try {

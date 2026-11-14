@@ -40,15 +40,13 @@ export class SqlSessions extends Repo implements SessionsRepo {
       .where("principalId", "=", principalId);
   }
 
-  async latestOf(key: SessionKey): Promise<Session | null> {
-    const row = await this.of(key.orgId, key.principalId)
-      .where("clientName", "=", key.clientName)
-      .where("conversationId", "is not distinct from", key.conversationId)
-      .where("project", "is not distinct from", key.project)
-      .orderBy("lastCallAt", "desc")
-      .orderBy("id", "desc")
-      .executeTakeFirst();
-    return row === undefined ? null : toSession(row);
+  latestOf(key: SessionKey): Promise<Session | null> {
+    return this.newest(
+      this.of(key.orgId, key.principalId)
+        .where("clientName", "=", key.clientName)
+        .where("conversationId", "is not distinct from", key.conversationId)
+        .where("project", "is not distinct from", key.project),
+    );
   }
 
   async open(session: Session): Promise<void> {
@@ -80,10 +78,17 @@ export class SqlSessions extends Repo implements SessionsRepo {
     return this.db.updateTable("sessions").where("orgId", "=", orgId).where("id", "=", id);
   }
 
-  async touch(orgId: string, id: string, at: Date, mark: SessionMark): Promise<void> {
+  async touch(
+    orgId: string,
+    id: string,
+    at: Date,
+    mark: SessionMark,
+    version: string | null,
+  ): Promise<void> {
     await this.one(orgId, id)
       .set((eb) => ({
         lastCallAt: at,
+        clientVersion: eb.fn.coalesce("clientVersion", eb.val(version)),
         ...(mark === "search" ? { lastSearchAt: at } : {}),
         ...(mark === "publish" ? { lastPublishAt: at } : {}),
         ...(mark === "refused"
@@ -121,16 +126,42 @@ export class SqlSessions extends Repo implements SessionsRepo {
       .execute();
   }
 
-  async latest(
+  /** The one of some sessions with the most recent call. */
+  private async newest(rows: ReturnType<SqlSessions["of"]>): Promise<Session | null> {
+    const row = await rows.orderBy("lastCallAt", "desc").orderBy("id", "desc").executeTakeFirst();
+    return row === undefined ? null : toSession(row);
+  }
+
+  latest(orgId: string, principalId: string, project: string): Promise<Session | null> {
+    return this.newest(this.of(orgId, principalId).where("project", "=", project));
+  }
+
+  previous(
     orgId: string,
     principalId: string,
     project: string,
-    exceptSession: string | null,
+    session: string,
   ): Promise<Session | null> {
-    let rows = this.of(orgId, principalId).where("project", "=", project);
-    if (exceptSession !== null) rows = rows.where("id", "<>", exceptSession);
-    const row = await rows.orderBy("lastCallAt", "desc").orderBy("id", "desc").executeTakeFirst();
-    return row === undefined ? null : toSession(row);
+    return this.newest(
+      this.of(orgId, principalId)
+        .where("project", "=", project)
+        .where("id", "<>", session)
+        .where((eb) => eb.or([eb("calls", ">", 0), eb("noteText", "is not", null)])),
+    );
+  }
+
+  latestIn(
+    orgId: string,
+    principalId: string,
+    clientName: string,
+    conversationId: string,
+  ): Promise<Session | null> {
+    return this.newest(
+      this.of(orgId, principalId)
+        .where("clientName", "=", clientName)
+        .where("conversationId", "=", conversationId)
+        .where("project", "is not", null),
+    );
   }
 
   async recent(orgId: string, principalId: string, limit: number): Promise<Session[]> {

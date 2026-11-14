@@ -30,8 +30,14 @@ import {
   type McpHttpHandler,
   type ServerContext,
 } from "@modelcontextprotocol/server";
-import { CONVERSATION_ID_KEYS, instructionFileOf, SERVER_NAME } from "./connect.ts";
+import {
+  CONVERSATION_ID_KEYS,
+  instructionFileOf,
+  SERVER_NAME,
+  TOOL_USE_ID_KEYS,
+} from "./connect.ts";
 import { createConnections, type Connections } from "./connections.ts";
+import type { ToolUses } from "./tool-uses.ts";
 
 /** A client's word about itself, trimmed and bounded: it becomes part of a session's key. */
 function textOf(value: unknown, max = 120): string | null {
@@ -60,22 +66,24 @@ function saidBy(server: Server, ctx: ServerContext): ClientInfo {
   };
 }
 
-/** What every request is read with: who sent it, and the connections it may have come on. */
+/** What every request is read with: who sent it, and what tells which conversation it belongs to. */
 interface Asked {
   readonly caller: Caller;
   readonly connections: Connections;
+  readonly toolUses: ToolUses;
 }
 
 /**
  * The client of a request, with the conversation the request belongs to: the client's own id
- * where it sends one, else the connection the request came on. Every request is read with this,
- * the lists a client opens with among them, since a connection is known from its beginning.
- * `call` is given for a tool call: its arguments, which name its project.
+ * where it sends one; else the conversation its hook said this call belongs to; else the
+ * connection the request came on. Every request is read with this, the lists a client opens with
+ * among them, since a connection is known from its beginning. `call` is given for a tool call:
+ * its arguments, which name its project.
  */
 function clientOf(
   server: Server,
   ctx: ServerContext,
-  { caller, connections }: Asked,
+  { caller, connections, toolUses }: Asked,
   call?: Record<string, unknown>,
 ): ClientInfo {
   const said = saidBy(server, ctx);
@@ -88,7 +96,10 @@ function clientOf(
     call: call !== undefined,
     project: typeof project === "string" ? project : null,
   });
-  return { ...said, conversationId: connection };
+  const meta: Record<string, unknown> = ctx.mcpReq._meta ?? {};
+  const toolUse = TOOL_USE_ID_KEYS.map((key) => textOf(meta[key])).find((id) => id !== null);
+  const told = toolUse === undefined ? null : toolUses.of(caller.principalId, toolUse);
+  return { ...said, conversationId: told ?? connection };
 }
 
 function isPromptName(name: string): name is PromptName {
@@ -168,6 +179,7 @@ export interface McpEndpoint {
 export function createMcpEndpoint(
   app: App,
   ports: { clock: Clock; ids: IdGen },
+  toolUses: ToolUses,
   onError: (error: unknown) => void,
 ): McpEndpoint {
   const connections = createConnections(ports);
@@ -176,7 +188,7 @@ export function createMcpEndpoint(
       const caller = ctx.authInfo?.extra?.caller as Caller | undefined;
       if (caller === undefined)
         throw new Error("an MCP server was built for an unauthenticated request");
-      return serverFor(app, { caller, connections });
+      return serverFor(app, { caller, connections, toolUses });
     },
     { legacy: "stateless", onerror: onError },
   );

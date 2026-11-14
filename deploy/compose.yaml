@@ -10,6 +10,11 @@
 # The container knows only its own port: where another is published (UKT_PUBLISH), put that port
 # in the sign-in link and in the URL in place of 7410. The time on the link is UTC.
 #
+# The plugins a harness installs are files in the container. The dashboard's Connect page names
+# their folder as the container sees it; to install from this machine, copy the folder out first
+# and name the copy in its place:
+#   docker compose -f deploy/compose.yaml cp uketsugi:/opt/uketsugi/plugins ./uketsugi-plugins
+#
 # For several people, each gets a token for their harness and a key that signs them, and nobody
 # else, in to the dashboard. These verbs use the host's own secret on the volume, not the token:
 #   docker compose -f deploy/compose.yaml exec uketsugi ukt invite <name> --operator-name <your name>

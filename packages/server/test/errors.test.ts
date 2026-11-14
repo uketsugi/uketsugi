@@ -97,7 +97,7 @@ describe("every failure the server answers with has the one error shape", () => 
     const foreign = await send("/api/facts", { headers: { origin: "https://evil.example" } });
     expect(await refusal(foreign, "forbidden")).toBe(403);
     const json = { "content-type": "application/json" };
-    const malformed = await send("/api/session-notes", {
+    const malformed = await send("/api/hooks/claude-code", {
       method: "POST",
       body: "{",
       headers: json,
@@ -106,10 +106,11 @@ describe("every failure the server answers with has the one error shape", () => 
     // What only a person may do is refused to a token before its body is read.
     const byToken = await send("/api/projects", { method: "POST", body: "{}", headers: json });
     expect(await refusal(byToken, "forbidden")).toBe(403);
-    const huge = JSON.stringify({ project: "github.com/a/b", text: "x".repeat(300_000) });
+    const hook = { hook_event_name: "Stop", session_id: "c-1" };
+    const huge = JSON.stringify({ ...hook, last_assistant_message: "x".repeat(300_000) });
     // The server answers before it has read the body, so this connection is not one to use again.
     const once = { ...json, connection: "close" };
-    const tooLarge = await send("/api/session-notes", {
+    const tooLarge = await send("/api/hooks/claude-code", {
       method: "POST",
       body: huge,
       headers: once,
@@ -119,12 +120,12 @@ describe("every failure the server answers with has the one error shape", () => 
 
   test("a query or a body its contract refuses, and a route that does not exist", async () => {
     expect(await refusal(await send("/api/facts?limit=many"), "invalid_input")).toBe(422);
-    const noText = await send("/api/session-notes", {
+    const noSession = await send("/api/hooks/claude-code", {
       method: "POST",
       body: "{}",
       headers: { "content-type": "application/json" },
     });
-    expect(await refusal(noText, "invalid_input")).toBe(422);
+    expect(await refusal(noSession, "invalid_input")).toBe(422);
     expect(await refusal(await send("/api/nowhere"), "not_found")).toBe(404);
   });
 

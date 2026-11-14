@@ -7,8 +7,8 @@ import type {
   ActivityReport,
   FactPage,
   RulingList,
+  ClaudeCodeHookOutput,
   SearchFactsResult,
-  SessionNoteResult,
 } from "@uketsugi/contracts";
 import { startLocalServer, type LocalServer } from "@uketsugi/server";
 import {
@@ -122,25 +122,26 @@ describe.runIf(TEST_POSTGRES_URL !== "")("the server on a PostgreSQL server", ()
     expect(done.content).toMatchObject({ task: { state: "done" } });
   });
 
-  test("a final note ends the session, and the dashboard's API reads what the agents did", async () => {
-    const before = await call<{ session: string }>("search_facts", { query: "retry backoff" });
-    const noted = await api("/api/session-notes", {
-      method: "POST",
-      body: JSON.stringify({ project: PROJECT, text: "Retries are documented.", final: true }),
-    });
-    expect((await noted.json()) as SessionNoteResult).toMatchObject({
-      session: before.content.session,
-      project: PROJECT,
-    });
-    const next = await call<{ session: string; brief: { last_session: object } }>("search_facts", {
-      query: "retry backoff",
-    });
-    expect(next.content.session).not.toBe(before.content.session);
-    expect(next.content.brief.last_session).toMatchObject({
-      session: before.content.session,
-      closed: true,
-      note: "Retries are documented.",
-    });
+  test("a session its harness's hooks begin, note and end is what the next brief tells of, and the dashboard's API reads what the agents did", async () => {
+    const hook = async (conversation: string, event: string, more: object = {}) => {
+      const answered = await fetch(`${server.url}/api/hooks/claude-code`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+          "x-uketsugi-origin": `https://${PROJECT}.git`,
+        },
+        body: JSON.stringify({ hook_event_name: event, session_id: conversation, ...more }),
+      });
+      const output = (await answered.json()) as ClaudeCodeHookOutput;
+      return output.hookSpecificOutput?.additionalContext ?? "";
+    };
+    expect(await hook("c-first", "SessionStart")).toContain(`Session brief for ${PROJECT}`);
+    await hook("c-first", "Stop", { last_assistant_message: "Retries are documented." });
+    await hook("c-first", "SessionEnd");
+    const next = await hook("c-second", "SessionStart");
+    expect(next).toMatch(/Your previous session here \(s-[0-9a-f]{4}, claude-code\) closed at/);
+    expect(next).toContain('"Retries are documented."');
     const activity = (await (await api("/api/activity?days=1")).json()) as ActivityReport;
     expect(activity.clients).toContainEqual(
       expect.objectContaining({ client: "uketsugi-testkit", published: 1 }),

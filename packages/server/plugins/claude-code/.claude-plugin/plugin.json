@@ -1,0 +1,30 @@
+{
+  "name": "uketsugi",
+  "description": "Memory and task handoff for this project's agents: the server's tools, a brief before the first prompt, and a note of where each session stopped.",
+  "homepage": "https://github.com/uketsugi/uketsugi",
+  "license": "Apache-2.0",
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Server address",
+      "description": "Where your uketsugi server is, without /mcp: on its own machine, http://127.0.0.1:7410.",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Token",
+      "description": "The token your harness sends: `ukt token` prints it on the server's host, or whoever runs the server gave you one.",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "mcpServers": {
+    "uketsugi": {
+      "type": "http",
+      "url": "${user_config.url}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.token}"
+      }
+    }
+  }
+}

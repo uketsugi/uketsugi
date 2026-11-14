@@ -10,8 +10,12 @@
  * - On `/mcp` and `/api`, a request a browser marks as coming from another origin is refused
  *   whatever it carries. A harness or a script sends no such mark.
  */
-import { validateHostHeader, validateOriginHeader } from "@modelcontextprotocol/server";
-import type { MiddlewareHandler } from "hono";
+import {
+  localhostAllowedHostnames,
+  validateHostHeader,
+  validateOriginHeader,
+} from "@modelcontextprotocol/server";
+import type { Context, MiddlewareHandler } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { failed, foreign } from "./errors.ts";
 
@@ -33,6 +37,29 @@ export const DEFAULT_HOST = LOCAL[0].loopback;
 /** The loopback address at which this machine reaches a listener bound to every address; null for any other host. */
 export function loopbackOfEvery(host: string): string | null {
   return LOCAL.find((family) => family.every === host)?.loopback ?? null;
+}
+
+/**
+ * Whether the request reached the server over TLS: directly, or through a proxy that ends TLS and
+ * says so (`X-Forwarded-Proto`, or `Forwarded`). A client that says so falsely only gets a cookie
+ * its own plain requests will not carry, and addresses it cannot use.
+ */
+export function overTls(c: Context): boolean {
+  const forwarded = /(?:^|[;,\s])proto="?https"?(?:$|[;,\s])/i.test(
+    c.req.header("forwarded") ?? "",
+  );
+  const proto = (c.req.header("x-forwarded-proto") ?? "").split(",")[0]?.trim().toLowerCase();
+  return new URL(c.req.url).protocol === "https:" || proto === "https" || forwarded;
+}
+
+/** The address the other end reached this server by, as they would type it again: no path. */
+export function reachedAt(c: Context): string {
+  return `${overTls(c) ? "https" : "http"}://${new URL(c.req.url).host}`;
+}
+
+/** Whether the other end reached this server by a name of this machine's own, so is on it. */
+export function reachedLocally(c: Context): boolean {
+  return localhostAllowedHostnames().includes(new URL(c.req.url).hostname);
 }
 
 /** Whether an Origin header names the same host and port the request was sent to. */

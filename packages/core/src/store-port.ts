@@ -344,20 +344,46 @@ export interface SessionsRepo {
   /** The session with this key whose last call is the most recent. Whether it is still open is the reader's to judge. */
   latestOf(key: SessionKey): Promise<Session | null>;
   open(session: Session): Promise<void>;
-  /** Stamps the session's last call, and its last search or publish, or counts a refused call. */
-  touch(orgId: string, id: string, at: Date, mark: SessionMark): Promise<void>;
+  /**
+   * Stamps the session's last call, and its last search or publish, or counts a refused call. A
+   * session that began before its client's version was known takes `version` where it is given.
+   */
+  touch(
+    orgId: string,
+    id: string,
+    at: Date,
+    mark: SessionMark,
+    version: string | null,
+  ): Promise<void>;
   /** One person's sessions whose last call is at or after `since`, counted per client name and version. */
   activity(orgId: string, principalId: string, since: Date): Promise<ActivityRow[]>;
   /** Records that a result carries the session's brief (`at`), or that it did not after all (null). */
   setBriefed(orgId: string, id: string, at: Date | null): Promise<void>;
   /** Sets the session's note; the note it had is replaced. */
   setNote(orgId: string, id: string, note: SessionNote): Promise<void>;
-  /** The person's session in a project with the most recent call, leaving out `exceptSession`. */
-  latest(
+  /** The person's session in a project with the most recent call. */
+  latest(orgId: string, principalId: string, project: string): Promise<Session | null>;
+  /**
+   * The person's session in a project before `session`, as a brief tells of it: the one with the
+   * most recent call that made a call or left a note. A session that only began says nothing of
+   * how work stands, and is passed over.
+   */
+  previous(
     orgId: string,
     principalId: string,
     project: string,
-    exceptSession: string | null,
+    session: string,
+  ): Promise<Session | null>;
+  /**
+   * The session of a client's conversation with the most recent call, whichever project it is in:
+   * where a note is left by a hook that cannot name the project. A session without a project is
+   * not one.
+   */
+  latestIn(
+    orgId: string,
+    principalId: string,
+    clientName: string,
+    conversationId: string,
   ): Promise<Session | null>;
   /** The person's sessions, most recent call first. */
   recent(orgId: string, principalId: string, limit: number): Promise<Session[]>;

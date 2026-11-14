@@ -35,11 +35,6 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
-/** The working directory the server can read an origin for, and the remote it reads. */
-const KNOWN_DIRECTORY = "/work/billing";
-const originOf = (cwd: string): Promise<string | null> =>
-  Promise.resolve(cwd === KNOWN_DIRECTORY ? "git@github.com:acme/billing-service.git" : null);
-
 export async function startServer(): Promise<RunningServer> {
   const clock = new FakeClock(new Date("2026-11-13T09:00:00.000Z"));
   const webDir = await mkdtemp(join(tmpdir(), "uketsugi-web-"));
@@ -54,7 +49,7 @@ export async function startServer(): Promise<RunningServer> {
     key: HOST_KEY,
     caller: () => ensureOwner(ports),
   };
-  const server = composeServer({ ports, webDir, originOf, operator });
+  const server = composeServer({ ports, webDir, operator });
   const { url } = await server.listen({ port: 0 });
   const clients: McpTestClient[] = [];
   const bearer = { authorization: `Bearer ${TOKEN}` };

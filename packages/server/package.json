@@ -20,6 +20,7 @@
     "@uketsugi/contracts": "workspace:*",
     "@uketsugi/core": "workspace:*",
     "@uketsugi/store": "workspace:*",
+    "fflate": "0.8.3",
     "hono": "4.13.16",
     "uuid": "14.0.3"
   },

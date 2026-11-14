@@ -73,6 +73,13 @@ describe("the release, installed by its script into an empty home with no node",
     // The licence and the notice travel with every copy of the release.
     const shipped = await readdir(join(root, "home", ".local", "lib", "uketsugi"));
     expect(shipped).toEqual(expect.arrayContaining(["LICENSE", "NOTICE"]));
+    // So do the plugins, at the path a person gives their harness.
+    const plugins = join(root, "home", ".local", "lib", "uketsugi", "plugins");
+    expect((await readdir(plugins)).sort()).toEqual([
+      ".claude-plugin",
+      "antigravity",
+      "claude-code",
+    ]);
     expect((await run(ukt, ["--version"], { env })).stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
@@ -110,6 +117,13 @@ describe("the release, installed by its script into an empty home with no node",
       query: "how often are webhooks retried?",
     });
     await client.close();
+
+    // The installed server finds the release's plugins and hands them out by its own address.
+    const base = String(started.data?.["mcp_url"]).replace(/\/mcp$/, "");
+    const marketplace = await fetch(`${base}/plugins/marketplace.json`);
+    expect(await marketplace.json()).toMatchObject({
+      plugins: [{ name: "uketsugi", source: { source: "archive" } }],
+    });
 
     expect(started).toMatchObject({ ok: true, data: { model: expect.any(String) as string } });
     expect(published.isError).toBe(false);

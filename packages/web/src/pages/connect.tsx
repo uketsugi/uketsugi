@@ -1,7 +1,8 @@
 /**
- * Connect: for each harness the server describes, its address, the variable that holds the token,
- * and then the one command to type. Where a harness offers that command nobody pastes the block
- * and it is shown for reference; where it does not, the block is given to copy.
+ * Connect: for each harness the server describes, what the person runs to connect it. A harness
+ * with a plugin is connected by installing it: nobody types set-up or places the block, and the
+ * route without the plugin is kept behind a disclosure. Where there is none, the server is added
+ * by its URL, and the block goes in by the set-up command or by hand.
  */
 import { Collapsible } from "@base-ui/react/collapsible";
 import { Tabs } from "@base-ui/react/tabs";
@@ -40,43 +41,63 @@ function Step({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/** Where the server is and where its token comes from: what every way of connecting starts from. */
+function ServerAndToken({ info, typed }: { info: ConnectInfo; typed: boolean }) {
+  return (
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5">
+      <dt className="text-ink-muted">Server URL</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        <code className={INLINE_CODE}>{info.mcp_url}</code>
+        <CopyButton text={info.mcp_url} label="the server URL" />
+      </dd>
+      <dt className="text-ink-muted">Token</dt>
+      <dd>
+        {typed ? (
+          <>
+            read from the environment variable <code className={INLINE_CODE}>{info.token_env}</code>
+            ;{" "}
+          </>
+        ) : null}
+        this page never shows the token itself. On the server&apos;s host,{" "}
+        <code className={INLINE_CODE}>ukt token</code> prints yours.
+      </dd>
+    </dl>
+  );
+}
+
 /**
- * How the server is added. A harness that is added by a command reads the token from a variable
- * of the shell the command runs in, so the line that sets it comes first: with it unset the
- * harness is added without a token and the server refuses it.
+ * Lines a person runs in a shell, which read the token from a variable of that shell. The line
+ * that sets it comes first: with it unset the harness is given no token and the server refuses it.
  */
-function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
-  const typed = harness.add_kind === "command";
+function TokenLines({ lines, label, info }: { lines: string; label: string; info: ConnectInfo }) {
   const variable = <code className={INLINE_CODE}>{info.token_env}</code>;
   return (
+    <>
+      <p>
+        Run these in one terminal on the server&apos;s host. The first line puts your token in{" "}
+        {variable}, where the rest read it:
+      </p>
+      <CodeBlock text={`${info.token_command}\n${lines}`} label={label} />
+      <p className="text-ink-muted">
+        On another machine, set {variable} to the token you were given in place of the first line.
+      </p>
+    </>
+  );
+}
+
+/** How the server is added to a harness by its URL: a command to run, or the URL to give the client. */
+function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
+  const typed = harness.add_kind === "command";
+  return (
     <Step title={`Add the server to ${harness.name}`}>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5">
-        <dt className="text-ink-muted">Server URL</dt>
-        <dd className="flex flex-wrap items-center gap-2">
-          <code className={INLINE_CODE}>{info.mcp_url}</code>
-          <CopyButton text={info.mcp_url} label="the server URL" />
-        </dd>
-        <dt className="text-ink-muted">Token</dt>
-        <dd>
-          {typed ? <>read from the environment variable {variable}; </> : null}
-          this page never shows the token itself. On the server&apos;s host,{" "}
-          <code className={INLINE_CODE}>ukt token</code> prints yours.
-        </dd>
-      </dl>
+      <ServerAndToken info={info} typed={typed} />
       {typed ? (
         <>
-          <p>
-            Run these in one terminal on the server&apos;s host. The first line puts your token in{" "}
-            {variable}, where the second reads it:
-          </p>
-          <CodeBlock
-            text={`${info.token_command}\n${harness.add}`}
+          <TokenLines
+            lines={harness.add}
             label={`what adds the server to ${harness.name}`}
+            info={info}
           />
-          <p className="text-ink-muted">
-            On another machine, set {variable} to the token you were given in place of the first
-            line.
-          </p>
           {harness.remove === undefined ? null : (
             <p className="text-ink-muted">
               {harness.name} keeps the token it was added with. To give it another, after{" "}
@@ -88,10 +109,54 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
         </>
       ) : (
         <>
-          <p>Put this in {harness.add_file ?? "the client's configuration"}:</p>
+          <p>Give the client this URL:</p>
           <CodeBlock text={harness.add} label={`what adds the server to ${harness.name}`} />
         </>
       )}
+    </Step>
+  );
+}
+
+type Plugin = NonNullable<ConnectHarness["plugin"]>;
+
+/**
+ * The step that installs a harness's plugin. Where the plugin adds the server too it is the only
+ * step, and its lines read the token; where it does not, the server was added in the step before.
+ */
+function InstallPlugin({
+  harness,
+  plugin,
+  info,
+}: {
+  harness: ConnectHarness;
+  plugin: Plugin;
+  info: ConnectInfo;
+}) {
+  const label = `what installs the plugin for ${harness.name}`;
+  const taken = (
+    <>
+      To take it out again: <code className={INLINE_CODE}>{plugin.remove}</code>.
+    </>
+  );
+  if (!plugin.adds_server)
+    return (
+      <Step title="Install the plugin">
+        <CodeBlock text={plugin.install} label={label} />
+        <p className="text-ink-muted">
+          The plugin gives every session the block as a standing rule, so nobody places it in a
+          file. {taken}
+        </p>
+      </Step>
+    );
+  return (
+    <Step title={`Install the plugin for ${harness.name}`}>
+      <ServerAndToken info={info} typed />
+      <TokenLines lines={plugin.install} label={label} info={info} />
+      <p className="text-ink-muted">
+        The plugin adds the server. Every later session starts with its project&apos;s brief in
+        front of the agent and uses memory with nothing typed, and where a session stopped is kept
+        as a note for the next one. To give it another token, run the last line again. {taken}
+      </p>
     </Step>
   );
 }
@@ -147,22 +212,63 @@ function WriteBlock({ harness, info }: { harness: ConnectHarness; info: ConnectI
   );
 }
 
+/** The command that uses memory in one session and writes nothing, where the harness offers it. */
+function OneSession({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
+  if (harness.activate === undefined) return null;
+  return (
+    <div className="space-y-2 border-t border-line pt-4">
+      <h2 className="font-semibold">Or, for one session only</h2>
+      <CodeBlock text={harness.activate} label="the command for one session" />
+      <p className="text-ink-muted">
+        {info.commands.activate.description} It writes nothing: type it again in the next session.
+      </p>
+    </div>
+  );
+}
+
+/** What a person does who goes without the plugin: what the plugin would have done, by hand. */
+function WithoutPlugin({
+  harness,
+  plugin,
+  info,
+}: {
+  harness: ConnectHarness;
+  plugin: Plugin;
+  info: ConnectInfo;
+}) {
+  return (
+    <Collapsible.Root className="border-t border-line pt-3">
+      <Collapsible.Trigger className="group flex cursor-pointer items-center gap-1 rounded-sm font-medium">
+        <ChevronRight aria-hidden className="size-4 group-data-panel-open:rotate-90" />
+        Without the plugin
+      </Collapsible.Trigger>
+      <Collapsible.Panel className="space-y-5 pt-3">
+        <ol className="list-decimal space-y-5 pl-5 marker:font-semibold">
+          {plugin.adds_server ? <AddServer harness={harness} info={info} /> : null}
+          <WriteBlock harness={harness} info={info} />
+        </ol>
+        <OneSession harness={harness} info={info} />
+      </Collapsible.Panel>
+    </Collapsible.Root>
+  );
+}
+
 function Steps({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
+  const { plugin } = harness;
   return (
     <div className="space-y-5 p-5">
       <ol className="list-decimal space-y-5 pl-5 marker:font-semibold">
-        <AddServer harness={harness} info={info} />
-        <WriteBlock harness={harness} info={info} />
+        {plugin?.adds_server === true ? null : <AddServer harness={harness} info={info} />}
+        {plugin === undefined ? (
+          <WriteBlock harness={harness} info={info} />
+        ) : (
+          <InstallPlugin harness={harness} plugin={plugin} info={info} />
+        )}
       </ol>
-      {harness.activate === undefined ? null : (
-        <div className="space-y-2 border-t border-line pt-4">
-          <h2 className="font-semibold">Or, for one session only</h2>
-          <CodeBlock text={harness.activate} label="the command for one session" />
-          <p className="text-ink-muted">
-            {info.commands.activate.description} It writes nothing: type it again in the next
-            session.
-          </p>
-        </div>
+      {plugin === undefined ? (
+        <OneSession harness={harness} info={info} />
+      ) : (
+        <WithoutPlugin harness={harness} plugin={plugin} info={info} />
       )}
       {harness.note === undefined ? null : <p className="text-ink-muted">{harness.note}</p>}
       <p className="border-t border-line pt-4 text-ink-muted">
@@ -286,10 +392,7 @@ function RecentSessions() {
 export function ConnectPage() {
   const connect = useQuery(connectQuery);
   return (
-    <Page
-      title="Connect an agent"
-      lead="Pick where you work. Add the server by its URL, then type one command."
-    >
+    <Page title="Connect an agent" lead="Pick where you work, then run what it shows.">
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
         {connect.isPending ? (
           <Loading what="the set-up" />

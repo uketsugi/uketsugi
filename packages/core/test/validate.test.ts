@@ -81,9 +81,12 @@ describe("input contracts and failures", () => {
         "The request's query is not what this route takes: days must be",
       );
     }
-    expect(validateRequest("SessionNoteRequest", "body", { text: "t", cwd: "/w" }).final).toBe(
-      false,
-    );
+    // What a harness hands its hook is taken as it came: the harness names more than is read.
+    const hook = { hook_event_name: "Stop", session_id: "c-1", background_tasks: [] };
+    expect(validateRequest("ClaudeCodeHook", "body", hook)).toEqual(hook);
+    expect(
+      refusalOf(() => validateRequest("ClaudeCodeHook", "body", { hook_event_name: "Stop" })),
+    ).toContain("must have required property 'session_id'");
     expect(refusalOf(() => validateRequest("NewProjectRequest", "body", { slug: 5 }))).toContain(
       "The request's body is not what this route takes: slug must be string",
     );

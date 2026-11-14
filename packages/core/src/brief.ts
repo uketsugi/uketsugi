@@ -326,7 +326,7 @@ export async function sessionBrief(
     store.tasks.list(scope, { project, states: ["open", "claimed", "handed_off"], limit: 50 }),
     store.facts.list(scope, { project, limit: LIMITS.factPool }),
     store.facts.count(scope, project),
-    store.sessions.latest(caller.orgId, caller.principalId, project, session.id),
+    store.sessions.previous(caller.orgId, caller.principalId, project, session.id),
   ]);
   const standing = pool.filter(isLive);
   const taskIds = tasks.map((task) => task.id);

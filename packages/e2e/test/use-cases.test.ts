@@ -1,9 +1,13 @@
 /** The write use cases: a publish, a correction, the limits, a session's note and the follow-up jobs. */
 import { LIMITS } from "@uketsugi/contracts";
-import { createWorker, recordSessionNote } from "@uketsugi/core";
+import { createWorker, noteSession } from "@uketsugi/core";
 import { targetOf } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { CLIENT, describeUseCases, PROJECT } from "./use-case-world.ts";
+
+const SECRET = `ghp_${"16C7e42F292c6912E7710c838347Ae178B4a"}`;
+/** A conversation of a harness whose hook names the project. */
+const conversation = (id: string) => ({ client: "claude-code", id, project: PROJECT });
 
 describeUseCases("the write use cases", (w) => {
   const { clock, ids, embedder, plain, embedding, portsWith, callsOn } = w;
@@ -223,22 +227,33 @@ describeUseCases("the write use cases", (w) => {
   });
 
   test("a session's note is cut to its beginning after the scan, so a secret across the cut goes whole", async () => {
-    const secret = `ghp_${"16C7e42F292c6912E7710c838347Ae178B4a"}`;
-    const text = `${"word ".repeat(798)}${secret} is the deploy token. ${"word ".repeat(2_000)}`;
-    const noted = await recordSessionNote(portsWith(null), w.owner, {
-      project: PROJECT,
-      text,
-      final: false,
-    });
-    expect(noted.redactions).toEqual(["github-token"]);
-    const session = await w.store.sessions.latest(
-      w.owner.orgId,
-      w.owner.principalId,
-      PROJECT,
-      null,
-    );
-    const kept = session?.note?.text ?? "";
+    const text = `${"word ".repeat(798)}${SECRET} is the deploy token. ${"word ".repeat(2_000)}`;
+    const noted = await noteSession(portsWith(null), w.owner, conversation("c-cut"), text);
+    const kept = noted?.note?.text ?? "";
     expect(kept).toHaveLength(LIMITS.closing_note_chars);
     expect(kept.slice(3_990)).toBe("[redacted:");
+    const stored = await w.store.sessions.latest(w.owner.orgId, w.owner.principalId, PROJECT);
+    expect(stored?.note).toEqual({ text: kept, final: false, at: clock.now() });
+  });
+
+  test("of a message longer than is read, nothing is kept that could be the beginning of a secret cut where the reading stops", async () => {
+    const read = 16 * LIMITS.closing_note_chars;
+    // Read whole, a long message keeps its beginning.
+    const long = await noteSession(
+      portsWith(null),
+      w.owner,
+      conversation("c-long"),
+      "word ".repeat(30_000),
+    );
+    expect(long?.note?.text).toBe("word ".repeat(800).trim());
+
+    // A key the scanner replaces with a few characters, then a token that the end of the reading
+    // cuts in two: what is left of the token is no rule's to find, and the scan has brought it
+    // to the front.
+    const key = `-----BEGIN RSA PRIVATE KEY-----\n${"MIIEvQIBADANBgkqhkiG9w0BAQEFAASC".repeat(1_900)}\n-----END RSA PRIVATE KEY-----\n`;
+    const head = `${key}${"word ".repeat(1_000)}`.slice(0, read - 25);
+    const cut = `${head}${SECRET} is the deploy token. ${"word ".repeat(2_000)}`;
+    const noted = await noteSession(portsWith(null), w.owner, conversation("c-key"), cut);
+    expect(noted?.note?.text ?? "").not.toContain("ghp_");
   });
 });

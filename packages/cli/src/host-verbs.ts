@@ -142,7 +142,7 @@ export async function setup(
       token_file: onFile ? home.tokenFile : null,
       model: { state: model.state, id: CATALOG.embedModel, dir: home.modelDir },
       mcp_url: url,
-      next: [next.serve, next.token, "add the server to a harness", "/uketsugi:setup"],
+      next: [next.serve, next.token, "connect a harness"],
     },
     lines: [
       `data directory  ${home.dataDir}${madeDir ? " (created)" : ""}`,
@@ -155,9 +155,8 @@ export async function setup(
       `  1. Start the server:  ${next.serve}`,
       "  2. In another terminal, put your token where a harness's command reads it:",
       `       ${next.token}`,
-      "  3. From that terminal, add the server to your harness.",
-      `     \`${next.ui}\` opens the page that shows the exact command for each harness.`,
-      "  4. In the harness, type:  /uketsugi:setup",
+      "  3. From that terminal, connect your harness.",
+      `     \`${next.ui}\` opens the page that shows the lines to run for each harness.`,
       "",
       "An agent names its project by the repository's origin remote. For work in a directory",
       "without one, make a project name on the dashboard's Projects page.",
@@ -202,9 +201,9 @@ async function rotate(io: Io, home: Home, options: TokenOptions): Promise<Report
       "Every earlier token of yours has stopped working.",
       "Next:",
       `  1. Start the server again:  ukt serve${dir}`,
-      "  2. Give each harness the new token. A harness that was added by a command keeps the token",
-      `     it was added with, so setting ${TOKEN_ENV} is not enough: remove the server from the`,
-      `     harness and add it again. \`ukt ui${dir}\` opens the Connect page, which shows both commands.`,
+      "  2. Give each harness the new token. A harness keeps the token it was given, so setting",
+      `     ${TOKEN_ENV} is not enough. \`ukt ui${dir}\` opens the Connect page, which shows what to run`,
+      "     again for each harness.",
       ...(home.givenToken === undefined
         ? []
         : [

@@ -24,7 +24,7 @@
  * | POST   | `/api/projects`           | cookie             | `NewProjectRequest`    | `ApiProject`           |
  * | POST   | `/api/projects/choice`    | cookie             | `ProjectChoiceRequest` | `ProjectChoice`        |
  * | GET    | `/api/export`             | cookie or token    | `ExportParams`         | `text/markdown`        |
- * | POST   | `/api/session-notes`      | cookie or token    | `SessionNoteRequest`   | `SessionNoteResult`    |
+ * | POST   | `/api/hooks/claude-code`  | cookie or token    | `ClaudeCodeHook`       | `ClaudeCodeHookOutput` |
  * | GET    | `/api/host-proof`         | nobody, loopback   | `HostProofParams`      | `HostProof`            |
  * | POST   | `/api/sign-in-codes`      | host, loopback     | none                   | `SignInCode`           |
  * | GET    | `/api/backup`             | host, loopback     | none                   | `application/gzip`     |
@@ -34,7 +34,7 @@
  *
  * Three credentials sign a request in, and none does another's work.
  * - **token**: the agent token a harness sends as a bearer. It calls the tools on `/mcp`, reads
- *   through `/api`, and leaves a session's note.
+ *   through `/api`, and is what the harness's hooks send: a session's start, its note, its end.
  * - **cookie**: a person's dashboard session. It is opened by what no harness holds: the person's
  *   own dashboard key, typed into the sign-in page (`POST /sign-in`), or on the host a one-time
  *   link (`ukt ui`). What only a person may do takes it and never a token: choosing how a project

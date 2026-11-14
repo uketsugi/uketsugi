@@ -36,6 +36,7 @@ import { bearerAuth } from "hono/bearer-auth";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
 import { failed, foreign, notOperator, unauthorized } from "./errors.ts";
+import { overTls } from "./guard.ts";
 
 /** How long a one-time code can be exchanged. */
 const CODE_TTL_MS = 2 * 60 * 1000;
@@ -180,19 +181,6 @@ function sweep(entries: Map<string, { expiresAt: Date }>, now: number): void {
 
 function cookieName(c: Context): string {
   return `ukt_session_${new URL(c.req.url).port || "0"}`;
-}
-
-/**
- * Whether the browser reached the server over TLS: directly, or through a proxy that ends TLS and
- * says so (`X-Forwarded-Proto`, or `Forwarded`). The cookie is then kept to TLS. A client that
- * says so falsely only gets a cookie its own plain requests will not carry.
- */
-function overTls(c: Context): boolean {
-  const forwarded = /(?:^|[;,\s])proto="?https"?(?:$|[;,\s])/i.test(
-    c.req.header("forwarded") ?? "",
-  );
-  const proto = (c.req.header("x-forwarded-proto") ?? "").split(",")[0]?.trim().toLowerCase();
-  return new URL(c.req.url).protocol === "https:" || proto === "https" || forwarded;
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

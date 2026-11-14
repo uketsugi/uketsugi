@@ -9,19 +9,40 @@ describe("Connect", () => {
   mockApi();
   afterEach(() => vi.useRealTimers());
 
-  it("gives the first harness the server's URL, the token variable and the command to type", async () => {
+  /** The code block that holds exactly this text. */
+  const codeOf = (text: string) => (_: string, shown: Element | null) =>
+    shown?.tagName === "CODE" && shown.textContent === text;
+
+  it("connects the first harness by installing its plugin: the lines to run, the token read from a variable", async () => {
     open("/connect");
     expect(await screen.findByRole("tab", { name: "Claude Code", selected: true })).toBeTruthy();
     const panel = within(screen.getByRole("tabpanel"));
-    expect(panel.getByText(connect.mcp_url)).toBeTruthy();
-    // The command reads the token from a variable, so the line that sets it is given with it.
     const [claude] = connect.harnesses;
-    const typed = `${connect.token_command}\n${claude?.add}`;
+    expect(panel.getByRole("heading", { name: "Install the plugin for Claude Code" })).toBeTruthy();
+    expect(panel.getByText(connect.mcp_url)).toBeTruthy();
+    // The lines read the token from a variable, so the line that sets it is given with them.
     expect(
-      panel.getByText((_, shown) => shown?.tagName === "CODE" && shown.textContent === typed),
+      panel.getByText(codeOf(`${connect.token_command}\n${claude?.plugin?.install}`)),
     ).toBeTruthy();
     expect(panel.getAllByText(connect.token_env).length).toBeGreaterThan(0);
     expect(panel.getByText("ukt token")).toBeTruthy();
+    expect(panel.getByText(/starts with its project's brief/)).toBeTruthy();
+    expect(panel.getByText(claude?.plugin?.remove ?? "missing")).toBeTruthy();
+    // With the plugin nobody adds the server by hand or types set-up: both are behind a disclosure.
+    expect(panel.queryByRole("heading", { name: "Type the set-up command" })).toBeNull();
+    expect(panel.queryByText(codeOf(`${connect.token_command}\n${claude?.add}`))).toBeNull();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("keeps the way without the plugin: the server added by its URL, then the set-up command", async () => {
+    const user = open("/connect");
+    const disclosure = await screen.findByRole("button", { name: "Without the plugin" });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    await user.click(disclosure);
+    const panel = within(screen.getByRole("tabpanel"));
+    const [claude] = connect.harnesses;
+    expect(panel.getByText(codeOf(`${connect.token_command}\n${claude?.add}`))).toBeTruthy();
+    expect(panel.getByText(claude?.remove ?? "missing")).toBeTruthy();
     // The file is not in one place on every machine: the page gives the usual place and the
     // command the agent finds it with, and promises no path the agent may not write to.
     expect(panel.getByText("~/.claude/CLAUDE.md")).toBeTruthy();
@@ -46,36 +67,50 @@ describe("Connect", () => {
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
     expect(tabs).toEqual(connect.harnesses.map((harness) => harness.name));
     expect(screen.getByRole("tab", { name: "Antigravity", selected: true })).toBeTruthy();
+    // A harness whose plugin does not bring the server: the server is added first, then the plugin.
     const antigravity = within(screen.getByRole("tabpanel"));
-    expect(antigravity.getByText(connect.mcp_url)).toBeTruthy();
-    expect(antigravity.getByText("Put this in ~/.gemini/config/mcp_config.json:")).toBeTruthy();
-    // A harness that is not added by a command reads no variable: the page says where the token is.
-    expect(antigravity.queryByText(connect.token_env)).toBeNull();
-    expect(antigravity.queryByText(connect.token_command, { exact: false })).toBeNull();
-    expect(antigravity.getByText("ukt token")).toBeTruthy();
+    const added = connect.harnesses[1];
+    expect(
+      antigravity
+        .getAllByRole("heading", { level: 2 })
+        .slice(0, 2)
+        .map((heading) => heading.textContent),
+    ).toEqual(["Add the server to Antigravity", "Install the plugin"]);
+    expect(antigravity.getByText(codeOf(`${connect.token_command}\n${added?.add}`))).toBeTruthy();
+    expect(antigravity.getByText(codeOf(added?.plugin?.install ?? "missing"))).toBeTruthy();
+    expect(antigravity.getByText(/nobody places it in a file/)).toBeTruthy();
     expect(antigravity.queryByRole("heading", { name: "Type the set-up command" })).toBeNull();
-    expect(antigravity.getByText("Antigravity fills in no variable.")).toBeTruthy();
+    expect(await violations()).toEqual([]);
   });
 
-  it("gives a harness with no set-up command the block to copy and the file it goes in", async () => {
+  it("gives a harness with no set-up command the block to copy and the file it goes in, for someone without its plugin", async () => {
     const user = open("/connect?harness=antigravity");
     const panel = within(await screen.findByRole("tabpanel"));
+    await user.click(panel.getByRole("button", { name: "Without the plugin" }));
     expect(
       panel.getByRole("heading", { name: "Put the block in the instruction file" }),
     ).toBeTruthy();
     // Nothing writes the block for this harness, so the step names the file and holds the block.
     expect(panel.getByText(/Antigravity does not offer a server's commands/)).toBeTruthy();
     expect(panel.getByText("~/.gemini/GEMINI.md")).toBeTruthy();
-    expect(
-      panel.getByText(
-        (_, shown) => shown?.tagName === "CODE" && shown.textContent === connect.block,
-      ),
-    ).toBeTruthy();
+    expect(panel.getByText(codeOf(connect.block))).toBeTruthy();
     await user.click(panel.getByRole("button", { name: "Copy the block" }));
     expect(await navigator.clipboard.readText()).toBe(connect.block);
     // The block is not shown a second time for reference.
     expect(panel.queryByRole("button", { name: "The block set-up writes" })).toBeNull();
     expect(await violations()).toEqual([]);
+  });
+
+  it("gives a client that is neither its URL, and the block to place", async () => {
+    open("/connect?harness=other");
+    const panel = within(await screen.findByRole("tabpanel"));
+    expect(panel.getByText("Give the client this URL:")).toBeTruthy();
+    // The URL is said once and given once to copy.
+    expect(panel.getAllByText(codeOf(connect.mcp_url))).toHaveLength(2);
+    expect(panel.queryByRole("button", { name: "Without the plugin" })).toBeNull();
+    expect(
+      panel.getByRole("heading", { name: "Put the block in the instruction file" }),
+    ).toBeTruthy();
   });
 
   it("says where a directory with no origin remote gets a project name", async () => {
@@ -99,6 +134,7 @@ describe("Connect", () => {
 
   it("copies the set-up command and says so", async () => {
     const user = open("/connect");
+    await user.click(await screen.findByRole("button", { name: "Without the plugin" }));
     await user.click(await screen.findByRole("button", { name: "Copy the set-up command" }));
     expect(await navigator.clipboard.readText()).toBe("/uketsugi:setup");
     expect(await screen.findByText("Copied the set-up command")).toBeTruthy();

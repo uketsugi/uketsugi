@@ -1,0 +1,14 @@
+{
+  "name": "uketsugi",
+  "description": "The plugin of the uketsugi server these files came with.",
+  "owner": {
+    "name": "uketsugi"
+  },
+  "plugins": [
+    {
+      "name": "uketsugi",
+      "source": "./claude-code",
+      "description": "Memory and task handoff for this project's agents: the server's tools, a brief before the first prompt, and a note of where each session stopped."
+    }
+  ]
+}

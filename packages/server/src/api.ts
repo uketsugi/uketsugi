@@ -1,7 +1,7 @@
 /**
- * `/api`: the dashboard's routes, the ones the host's command line calls and the one a hook calls
- * (a session's note). The shapes are the contract's; every query and body is checked against its
- * schema by core, and every decision is a use case of core's. A request is a person's by its
+ * `/api`: the dashboard's routes, the ones the host's command line calls and the one a harness's
+ * hooks call (`hooks.ts`). The shapes are the contract's; every query and body is checked against
+ * its schema by core, and every decision is a use case of core's. A request is a person's by its
  * bearer token or by the dashboard's cookie session.
  *
  * Two kinds of route are narrower than that. What reaches every person's data or administers
@@ -30,7 +30,6 @@ import {
   listProjects,
   listRulings,
   listTasks,
-  recordSessionNote,
   redactFact,
   revertRuling,
   revokeToken,
@@ -38,7 +37,6 @@ import {
   validateRequest,
   type App,
   type AppPorts,
-  type OriginOf,
 } from "@uketsugi/core";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -55,7 +53,10 @@ import {
 } from "./auth.ts";
 import { capabilityDescriptor, connectInfo } from "./connect.ts";
 import { errorHandler, failed, noRoute, noSnapshot, personOnly, unauthorized } from "./errors.ts";
-import { LOOPBACK_ADDRESSES } from "./guard.ts";
+import { LOOPBACK_ADDRESSES, reachedAt } from "./guard.ts";
+import { answerClaudeCode, ORIGIN_HEADER } from "./hooks.ts";
+import { pluginsFrom } from "./plugins.ts";
+import type { ToolUses } from "./tool-uses.ts";
 
 export interface ApiDeps {
   readonly app: App;
@@ -64,13 +65,15 @@ export interface ApiDeps {
   readonly onError: (error: unknown) => void;
   /** Whoever runs this server. Left out, nobody does, and its routes for them do not exist. */
   readonly operator?: Operator;
-  /** The origin remote of a directory on this machine, where the server may read it. */
-  readonly originOf?: OriginOf;
+  /** Which conversation a harness's hook says a tool call belongs to. */
+  readonly toolUses: ToolUses;
+  /** The folder of plugins this server ships, as it stands on this machine; null where it has none. */
+  readonly plugins: string | null;
   /** A copy of the whole store while it serves, where the store's host can make one. */
   readonly snapshot?: () => Promise<Blob>;
 }
 
-/** The largest request body `/api` reads: a session's note is an agent's last message, not a file. */
+/** The largest request body `/api` reads: what a hook sends holds an agent's last message, not a file. */
 const MAX_BODY_BYTES = 256 * 1024;
 
 /** Checks a request's query against its schema in the contract; a mismatch is a failure in the one shape. */
@@ -167,10 +170,11 @@ function operatorRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
 
 /**
  * What the dashboard and an agent's token both reach, as whoever the request acts as: every read,
- * and a session's note, which is an agent's own to leave.
+ * and what a harness's hooks send of its own session.
  */
-function personRoutes(api: Hono<AuthEnv>, { ports, originOf, operator }: ApiDeps): void {
-  api.get("/connect", (c) => c.json(connectInfo(new URL(c.req.url).origin)));
+function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
+  const { ports } = deps;
+  api.get("/connect", (c) => c.json(connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins))));
   api.get("/facts", query("FactListParams"), async (c) =>
     c.json(await listFacts(ports, c.get("caller"), c.req.valid("query"))),
   );
@@ -194,11 +198,9 @@ function personRoutes(api: Hono<AuthEnv>, { ports, originOf, operator }: ApiDeps
     c.header("Content-Disposition", 'attachment; filename="uketsugi-export.md"');
     return c.body(files.map((file) => file.content).join("\n"));
   });
-  // A working directory is a path on this machine: only the host's own person's is looked up.
-  api.post("/session-notes", body("SessionNoteRequest"), async (c) => {
-    const caller = c.get("caller");
-    const origin = caller.principalId === operator?.principalId ? originOf : undefined;
-    return c.json(await recordSessionNote(ports, caller, c.req.valid("json"), origin));
+  api.post("/hooks/claude-code", body("ClaudeCodeHook"), async (c) => {
+    const origin = c.req.header(ORIGIN_HEADER);
+    return c.json(await answerClaudeCode(deps, c.get("caller"), c.req.valid("json"), origin));
   });
 }
 

@@ -270,14 +270,14 @@ describe("with the server stopped", () => {
     await serving.close();
 
     expect(rotated.data).toEqual({ token: fresh, revoked: 1 });
-    // A harness added by a command stored the token itself: the advice has to say it is added again.
+    // A harness stored the token itself: the advice has to say it is given the new one.
     expect(rotated.lines.slice(1)).toEqual([
       "Every earlier token of yours has stopped working.",
       "Next:",
       `  1. Start the server again:  ukt serve --data-dir ${dataDir}`,
-      "  2. Give each harness the new token. A harness that was added by a command keeps the token",
-      "     it was added with, so setting UKT_TOKEN is not enough: remove the server from the",
-      `     harness and add it again. \`ukt ui --data-dir ${dataDir}\` opens the Connect page, which shows both commands.`,
+      "  2. Give each harness the new token. A harness keeps the token it was given, so setting",
+      `     UKT_TOKEN is not enough. \`ukt ui --data-dir ${dataDir}\` opens the Connect page, which shows what to run`,
+      "     again for each harness.",
       'This shell\'s UKT_TOKEN still holds an old token: export UKT_TOKEN="$(ukt token)"',
     ]);
     expect(stale).toMatchObject({

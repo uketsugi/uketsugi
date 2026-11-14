@@ -3,8 +3,8 @@
 #
 #   uketsugi-<version>-linux-x64.tar.gz          the Node runtime found on this machine, the built
 #                                                server with its production dependencies, the
-#                                                dashboard's files, the `ukt` launcher, and the
-#                                                LICENSE and NOTICE
+#                                                dashboard's files, the plugins harnesses install,
+#                                                the `ukt` launcher, and the LICENSE and NOTICE
 #   uketsugi-<version>-linux-x64.tar.gz.sha256   its SHA-256, as `sha256sum` prints it
 #   install.sh                                   deploy/install.sh with that name, SHA-256 and size set
 #
@@ -51,6 +51,12 @@ find "$stage/app" -type f \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' 
 server_package=$(cd "$stage/app/node_modules/@uketsugi/server" && pwd -P)
 mkdir -p "$server_package/../web"
 cp -R "$root/packages/web/dist" "$server_package/../web/dist"
+
+# The plugins harnesses install are the server package's own files. A person points a harness at
+# them, so they sit at the top of the release, where the path is short and stays the same from
+# one release to the next, and the server finds them through a link.
+mv "$server_package/plugins" "$stage/plugins"
+ln -s "$(realpath --relative-to="$server_package" "$stage/plugins")" "$server_package/plugins"
 
 cp "$node_bin" "$stage/node/bin/node"
 node_license="$(dirname "$node_bin")/../LICENSE"

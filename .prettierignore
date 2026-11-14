@@ -2,3 +2,4 @@ dist/
 node_modules/
 pnpm-lock.yaml
 packages/contracts/src/generated.ts
+packages/server/plugins/antigravity/rules/AGENTS.md

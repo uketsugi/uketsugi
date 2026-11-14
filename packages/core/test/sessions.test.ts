@@ -51,9 +51,10 @@ function world() {
     latest: async (_org: string, person: string, project: string) =>
       latestFirst(rows.filter((row) => row.principalId === person && row.project === project)),
     open: async (session: Session) => void rows.push(session),
-    touch: async (_org: string, id: string, at: Date, mark: string) =>
+    touch: async (_org: string, id: string, at: Date, mark: string, version: string | null) =>
       change(id, (row) => ({
         ...row,
+        clientVersion: row.clientVersion ?? version,
         lastCallAt: at,
         lastSearchAt: mark === "search" ? at : row.lastSearchAt,
         lastPublishAt: mark === "publish" ? at : row.lastPublishAt,
@@ -207,6 +208,50 @@ describe("session inference", () => {
     expect(refused.owesBrief).toBe(false);
     expect(accepted.session.id).not.toBe(refused.session.id);
     expect(rows[0]).toMatchObject({ project: null, refusedCalls: 2, calls: 0, briefedAt: null });
+  });
+
+  test("a session its harness begins has made no call and owes its first call no brief", async () => {
+    const { sessions, rows, advance } = world();
+    // The hook that says a conversation starts does not know its client's version.
+    const hook: ClientInfo = {
+      name: "claude-code",
+      version: null,
+      conversationId: "conversation-1",
+    };
+    const begun = await sessions.begin(CALLER, hook, API);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      calls: 0,
+      clientVersion: null,
+      conversationId: "conversation-1",
+    });
+    expect(rows[0]?.briefedAt).not.toBeNull();
+
+    advance(60_000);
+    const first = await sessions.enter(CALLER, { ...hook, version: "2.1.325" }, API, "search");
+    expect(first).toMatchObject({ session: { id: begun.id }, owesBrief: false });
+    expect(rows[0]).toMatchObject({ calls: 1, clientVersion: "2.1.325" });
+    // The same conversation begun again, as after a compaction, goes on in its session.
+    expect((await sessions.begin(CALLER, hook, API)).id).toBe(begun.id);
+    // Another conversation, or the same one in another project, begins a session of its own.
+    const other = await sessions.begin(CALLER, { ...hook, conversationId: "conversation-2" }, API);
+    const elsewhere = await sessions.begin(CALLER, hook, WEB);
+    expect(new Set([begun.id, other.id, elsewhere.id]).size).toBe(3);
+  });
+
+  test("a conversation begun again after its session ended, or went quiet, begins a new one", async () => {
+    const { sessions, note, advance } = world();
+    const hook: ClientInfo = {
+      name: "claude-code",
+      version: null,
+      conversationId: "conversation-1",
+    };
+    const first = await sessions.begin(CALLER, hook, API);
+    await note(first.id, true);
+    const resumed = await sessions.begin(CALLER, hook, API);
+    expect(resumed.id).not.toBe(first.id);
+    advance(SESSION_IDLE_MS + 1);
+    expect((await sessions.begin(CALLER, hook, API)).id).not.toBe(resumed.id);
   });
 });
 

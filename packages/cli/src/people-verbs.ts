@@ -98,9 +98,9 @@ export async function invitePerson(
   const howTo = [
     "",
     `Give ${person} both, and this server's address. They:`,
-    "  1. add the server to their harness with the harness token;",
-    "  2. sign in to the dashboard at the server's address with the dashboard key;",
-    "  3. choose there, on Projects, which projects to share. Until they do, each is private to them.",
+    "  1. sign in to the dashboard at the server's address with the dashboard key;",
+    "  2. connect their harness with the harness token: the Connect page there shows the lines to run;",
+    "  3. choose, on Projects, which projects to share. Until they do, each is private to them.",
   ];
   return {
     data: { ...invited },

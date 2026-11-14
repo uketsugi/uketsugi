@@ -10,15 +10,13 @@ import {
   type ActivityReport,
   type Brief,
   type CapabilityDescriptor,
-  type Invitation,
-  type SessionNoteResult,
 } from "@uketsugi/contracts";
 import { SESSION_IDLE_MS } from "@uketsugi/core";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { McpCallResult } from "@uketsugi/testkit";
 import { CITATION, CLAIM, PROJECT, startServer, type RunningServer } from "./running-server.ts";
 
-describe("the server over /mcp: the contract, sessions, the brief and closing notes", () => {
+describe("the server over /mcp: the contract, sessions and the brief", () => {
   let server: RunningServer;
   let url: string;
   const clock = () => server.clock;
@@ -114,54 +112,6 @@ describe("the server over /mcp: the contract, sessions, the brief and closing no
       calls: 1,
     });
     expect(unclosed.text).toContain("never closed: 1 call, the last at 2026-11-13T09:0");
-
-    const noted = await post("/api/session-notes", {
-      project: `https://${PROJECT}.git`,
-      text: "Stopped with the retry cap confirmed; the dunning job is next.",
-      final: true,
-    });
-    expect(noted.status).toBe(200);
-    expect((await noted.json()) as SessionNoteResult).toEqual({
-      session: unclosed.structuredContent?.session,
-      project: PROJECT,
-      redactions: [],
-    });
-    clock().advance(SESSION_IDLE_MS + 60_000);
-    const next = await client.callTool("search_facts", { project: PROJECT, query: "dunning" });
-    expect(briefOf(next.structuredContent)?.last_session).toMatchObject({
-      session: unclosed.structuredContent?.session,
-      closed: true,
-      note: "Stopped with the retry cap confirmed; the dunning job is next.",
-    });
-  });
-
-  test("a note at a checkpoint leaves its session open; a final note ends it, and the next call is told how it ended", async () => {
-    const client = await connect("close-check");
-    const project = "github.com/acme/search";
-    const first = await client.callTool("search_facts", { project, query: "ranking" });
-    const turn = { project, text: "Ranking is half tuned." };
-    for (const sent of [turn, { ...turn, final: false }]) {
-      expect((await post("/api/session-notes", sent)).status).toBe(200);
-      clock().advance(60_000);
-      const same = await client.callTool("search_facts", { project, query: "ranking weights" });
-      expect(same.structuredContent?.session).toBe(first.structuredContent?.session);
-      expect(briefOf(same.structuredContent)).toBeUndefined();
-    }
-    const text = "Ranking is tuned; the synonyms file is next.";
-    expect((await post("/api/session-notes", { project, text, final: true })).status).toBe(200);
-
-    clock().advance(2 * 60_000);
-    const next = await client.callTool("search_facts", { project, query: "synonyms" });
-    expect(next.structuredContent?.session).not.toBe(first.structuredContent?.session);
-    expect(briefOf(next.structuredContent)?.last_session).toMatchObject({
-      session: first.structuredContent?.session,
-      closed: true,
-      note: text,
-    });
-
-    const again = await client.callTool("search_facts", { project, query: "synonyms file" });
-    expect(again.structuredContent?.session).toBe(next.structuredContent?.session);
-    expect(briefOf(again.structuredContent)).toBeUndefined();
   });
 
   test("a client that starts anew gets its brief on its first call, seconds after the one before it stopped", async () => {
@@ -251,63 +201,12 @@ describe("the server over /mcp: the contract, sessions, the brief and closing no
     );
   });
 
-  test("a closing note is scanned, finds its session by working directory, and is refused when it can find none", async () => {
-    const client = await connect("note-check");
-    const project = "github.com/acme/ledger";
-    const opened = await client.callTool("search_facts", { project, query: "rounding" });
-    const secret = `ghp_${"16C7e42F292c6912E7710c838347Ae178B4a"}`;
-    const byOpenSession = await post("/api/session-notes", {
-      cwd: "/somewhere/else",
-      text: `Rounding is settled. I used ${secret} to read the upstream issue.`,
-      final: true,
-    });
-    expect((await byOpenSession.json()) as SessionNoteResult).toEqual({
-      session: opened.structuredContent?.session,
-      project,
-      redactions: ["github-token"],
-    });
-
-    const byOrigin = await post("/api/session-notes", {
-      cwd: "/work/billing",
-      text: "Billing: nothing left open.",
-    });
-    expect((await byOrigin.json()) as SessionNoteResult).toMatchObject({ project: PROJECT });
-
-    clock().advance(SESSION_IDLE_MS + 60_000);
-    const next = await client.callTool("search_facts", { project, query: "rounding" });
-    const note = briefOf(next.structuredContent)?.last_session?.note ?? "";
-    expect(note).toContain("[redacted:github-token]");
-    expect(next.text).not.toContain(secret);
-
-    clock().advance(SESSION_IDLE_MS + 60_000);
-    const nowhere = await post("/api/session-notes", {
-      cwd: "/tmp",
-      text: "Done.",
-    });
-    expect(nowhere.status).toBe(422);
-    expect(await nowhere.json()).toMatchObject({ error: { code: "project_required" } });
-    const empty = await post("/api/session-notes", { project, text: "   " });
-    expect(empty.status).toBe(422);
-    expect((await post("/api/session-notes", { text: "No place." })).status).toBe(422);
-  });
-
-  test("a note is scanned only as far as it could be kept, and a field a route does not take is refused", async () => {
-    const client = await connect("long-note");
-    const project = "github.com/acme/notes";
-    await client.callTool("search_facts", { project, query: "queues" });
-    const secret = `ghp_${"16C7e42F292c6912E7710c838347Ae178B4a"}`;
-
-    // A note keeps its first 4,000 characters. What lies far beyond them is never read.
-    const far = `Done with the queue. ${"word ".repeat(40_000)}${secret}`;
-    const unread = await post("/api/session-notes", { project, text: far });
-    expect((await unread.json()) as SessionNoteResult).toMatchObject({ redactions: [] });
-
-    const unknown = await post("/api/session-notes", { project, text: "Done.", source: "hook" });
+  test("a field a route does not take is refused by name", async () => {
+    const unknown = await api("/api/facts?limit=5&offset=10");
     expect(unknown.status).toBe(422);
     expect(await unknown.json()).toMatchObject({
-      error: { code: "invalid_input", what: expect.stringContaining("source") as string },
+      error: { code: "invalid_input", what: expect.stringContaining("offset") as string },
     });
-    expect((await api("/api/facts?limit=5&offset=10")).status).toBe(422);
   });
 
   test("a refused call teaches the project and lists the person's named projects", async () => {
@@ -356,33 +255,5 @@ describe("the server over /mcp: the contract, sessions, the brief and closing no
       client: "refusal-check",
       project: "me/q4-expenses",
     });
-  });
-});
-
-describe("a note from a person who does not run the server", () => {
-  test("names its project itself: a working directory is a path on the host, looked up for its operator alone", async () => {
-    const server = await startServer();
-    try {
-      const mine = await server.post("/api/session-notes", { cwd: "/work/billing", text: "Done." });
-      expect((await mine.json()) as SessionNoteResult).toMatchObject({ project: PROJECT });
-      const invited = await server.host("/api/people", {
-        method: "POST",
-        body: JSON.stringify({ name: "bob", operator_name: "ann" }),
-      });
-      const token = ((await invited.json()) as Invitation).issued[0]?.secret ?? "";
-      const theirs = (body: object) =>
-        fetch(`${server.url}/api/session-notes`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      const byDirectory = await theirs({ cwd: "/work/billing", text: "Billing: done." });
-      expect(byDirectory.status).toBe(422);
-      expect(await byDirectory.json()).toMatchObject({ error: { code: "project_required" } });
-      const byName = await theirs({ project: PROJECT, text: "Billing: done." });
-      expect((await byName.json()) as SessionNoteResult).toMatchObject({ project: PROJECT });
-    } finally {
-      await server.close();
-    }
   });
 });

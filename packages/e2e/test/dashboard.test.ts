@@ -172,7 +172,7 @@ describe("the dashboard's side of the server: sign-in, the guard, the files and 
     });
     expect(connect.harnesses.map((harness) => [harness.id, harness.add_kind])).toEqual([
       ["claude-code", "command"],
-      ["antigravity", "json"],
+      ["antigravity", "command"],
       ["other", "url"],
     ]);
     expect(connect.harnesses.at(-1)).toMatchObject({ add: `${url}/mcp` });

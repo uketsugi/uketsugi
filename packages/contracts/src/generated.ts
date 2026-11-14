@@ -226,7 +226,7 @@ export interface ContractTypes {
   ExportParams?: ExportParams;
   HostProofParams?: HostProofParams;
   NewProjectRequest?: NewProjectRequest;
-  SessionNoteRequest?: SessionNoteRequest;
+  ClaudeCodeHook?: ClaudeCodeHook;
   ProjectChoiceRequest?: ProjectChoiceRequest;
   SignInRequest?: SignInRequest;
   InviteRequest?: InviteRequest;
@@ -244,7 +244,7 @@ export interface ContractTypes {
   RevertResult?: RevertResult;
   ActivityReport?: ActivityReport;
   ProjectList?: ProjectList;
-  SessionNoteResult?: SessionNoteResult;
+  ClaudeCodeHookOutput?: ClaudeCodeHookOutput;
   ProjectChoice?: ProjectChoice;
   PeopleList?: PeopleList;
   Invitation?: Invitation;
@@ -791,29 +791,25 @@ export interface NewProjectRequest {
   name?: string;
 }
 /**
- * `POST /api/session-notes`: where a session stands, in the agent's own last words.
+ * `POST /api/hooks/claude-code`: what Claude Code hands one of its hooks, sent on as it came. Only what the server reads is named here: the harness sends more, and adds to it between versions.
  */
-export interface SessionNoteRequest {
+export interface ClaudeCodeHook {
   /**
-   * The project, as a tool call names it. Give this or `cwd`.
+   * The event. The server acts on `SessionStart`, `PreToolUse`, `Stop` and `SessionEnd`, and answers any other with nothing.
    */
-  project?: string;
+  hook_event_name: string;
   /**
-   * The session's working directory, for a caller that cannot name the project.
+   * Claude Code's own id of the conversation.
    */
-  cwd?: string;
+  session_id: string;
   /**
-   * The note: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept.
+   * `PreToolUse`: the id of the tool call about to be made, which the call itself then carries.
    */
-  text: string;
+  tool_use_id?: string;
   /**
-   * True for the session's last word: the note ends the session, and the next call opens a new one whose brief shows it. False for a note at a checkpoint, such as a hook sends after every turn: it replaces the session's note and the session goes on.
+   * `Stop`: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept.
    */
-  final: boolean;
-  /**
-   * The harness's name, when the request is not made by the harness itself.
-   */
-  client?: string;
+  last_assistant_message?: string;
 }
 /**
  * `POST /api/projects/choice`: the person's choice for one project. Only a signed-in browser makes it.
@@ -922,7 +918,7 @@ export interface CapabilityDescriptor {
      */
     brief: boolean;
     /**
-     * Whether `POST /api/session-notes` takes notes.
+     * Whether a harness's hook can leave a session's note (`POST /api/hooks/claude-code`).
      */
     closing_note: boolean;
     /**
@@ -1006,17 +1002,30 @@ export interface ConnectHarness {
    */
   name: string;
   /**
-   * What adds the server to the harness: a shell command, configuration text, or the URL itself.
+   * The harness's plugin, where it has one and the person asking can install it from here. With it nobody runs set-up or places the block.
+   */
+  plugin?: {
+    /**
+     * The shell lines that install it, the token read from the variable `token_env` names.
+     */
+    install: string;
+    /**
+     * The shell command that takes it out again.
+     */
+    remove: string;
+    /**
+     * Whether the plugin also adds the server to the harness: `add` is then for someone who goes without the plugin.
+     */
+    adds_server: boolean;
+  };
+  /**
+   * What adds the server to the harness: a shell command, or the URL itself.
    */
   add: string;
   /**
    * What kind of text `add` is.
    */
-  add_kind: "command" | "json" | "url";
-  /**
-   * For `json`: the file the text goes in.
-   */
-  add_file?: string;
+  add_kind: "command" | "url";
   /**
    * For `command`: what takes the server out of the harness again. A harness keeps the token it was added with, so this comes before adding it with another.
    */
@@ -1344,18 +1353,16 @@ export interface ApiProject {
   chosen: boolean;
 }
 /**
- * `POST /api/session-notes`.
+ * `POST /api/hooks/claude-code`: the hook's output, as Claude Code reads it. Empty for every event but `SessionStart`.
  */
-export interface SessionNoteResult {
-  /**
-   * The display id of the session the note was put on.
-   */
-  session: string;
-  project: string;
-  /**
-   * What the scanner removed from the text, by rule name; empty when nothing.
-   */
-  redactions: string[];
+export interface ClaudeCodeHookOutput {
+  hookSpecificOutput?: {
+    hookEventName: "SessionStart";
+    /**
+     * What the session starts from: the block, then the session's brief where the hook named the project.
+     */
+    additionalContext: string;
+  };
 }
 /**
  * `POST /api/projects/choice`: the choice as it now stands, and what it moved.
@@ -1489,7 +1496,7 @@ export interface ApiRequests {
   ExportParams: ExportParams;
   HostProofParams: HostProofParams;
   NewProjectRequest: NewProjectRequest;
-  SessionNoteRequest: SessionNoteRequest;
+  ClaudeCodeHook: ClaudeCodeHook;
   ProjectChoiceRequest: ProjectChoiceRequest;
   SignInRequest: SignInRequest;
   InviteRequest: InviteRequest;

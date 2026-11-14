@@ -5,8 +5,8 @@
  *
  * In order, a request meets: the guard (Host, Origin and fetch metadata, on every route) and the
  * response headers; then `/healthz`, `/mcp` behind a bearer token, `/sign-in` (a one-time code,
- * or the person's dashboard key), `/api`, and last the dashboard's built files, with `index.html`
- * for a deep link.
+ * or the person's dashboard key), `/api`, the plugins a harness fetches (`/plugins`), and last the
+ * dashboard's built files, with `index.html` for a deep link.
  */
 import { existsSync } from "node:fs";
 import type { Server as NodeServer } from "node:http";
@@ -21,7 +21,6 @@ import {
   validateRequest,
   type AppPorts,
   type ClaimedJob,
-  type OriginOf,
 } from "@uketsugi/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -31,6 +30,8 @@ import { createSignIn, sentByHost, tokenAuth, type AuthEnv, type Operator } from
 import { errorHandler, failed, HARNESS_REFUSALS, noOAuth } from "./errors.ts";
 import { DEFAULT_HOST, loopbackOfEvery, requestGuard, responseHeaders } from "./guard.ts";
 import { createMcpEndpoint } from "./mcp.ts";
+import { pluginRoutes, PLUGINS_PATH, pluginsFolder } from "./plugins.ts";
+import { createToolUses } from "./tool-uses.ts";
 
 export interface ComposeOptions {
   /** Every port the server runs on. The caller opened them and closes them. */
@@ -44,14 +45,14 @@ export interface ComposeOptions {
   readonly allowedHosts?: readonly string[];
   /** The folder of the dashboard's built files. Left out or missing, no page is served. */
   readonly webDir?: string;
+  /** The folder of the plugins harnesses install. Left out or missing, none is offered or served. */
+  readonly pluginsDir?: string;
   /**
    * Whoever runs this server: the person its routes over every person's data act as (a snapshot,
-   * people and their credentials, a sign-in code), the secret those routes need, and the only
-   * person whose working directory is looked up on this machine. Left out, nobody is.
+   * people and their credentials, a sign-in code), and the secret those routes need. Left out,
+   * nobody is.
    */
   readonly operator?: Operator;
-  /** The origin remote of a directory on this machine, for a session's note that names only one. */
-  readonly originOf?: OriginOf;
   /** A copy of the whole store while it serves, for the operator's backup. Left out, the server offers none. */
   readonly snapshot?: () => Promise<Blob>;
 }
@@ -147,7 +148,7 @@ const SIGN_IN_BODY_BYTES = 4096;
 
 /** Builds the server from its ports. */
 export function composeServer(options: ComposeOptions): UketsugiServer {
-  const { webDir, originOf, snapshot, operator } = options;
+  const { webDir, snapshot, operator } = options;
   const onError = options.onError ?? ((error: unknown) => console.error(error));
   // The outbox worker runs in this process. Its store wakes it when a unit leaves a job.
   const worker = createWorker(options.ports, {
@@ -155,7 +156,9 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   });
   const ports = { ...options.ports, store: worker.store };
   const app = createApp(ports, { onError });
-  const mcp = createMcpEndpoint(app, ports, onError);
+  const toolUses = createToolUses(ports);
+  const mcp = createMcpEndpoint(app, ports, toolUses, onError);
+  const plugins = pluginsFolder(options.pluginsDir);
   const signIn = createSignIn(ports, app);
   const http = new Hono<AuthEnv>();
   const listeners: Listening[] = [];
@@ -185,7 +188,9 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
     validator("json", (sent) => validateRequest("SignInRequest", "body", sent)),
     (c) => signIn.withKey(c, c.req.valid("json").key),
   );
-  http.route("/api", apiRoutes({ app, ports, signIn, onError, operator, originOf, snapshot }));
+  const api = { app, ports, signIn, onError, operator, snapshot, toolUses, plugins };
+  http.route("/api", apiRoutes(api));
+  if (plugins !== null) http.route(PLUGINS_PATH, pluginRoutes(plugins));
   if (webDir !== undefined && existsSync(webDir)) serveDashboard(http, webDir);
 
   return {

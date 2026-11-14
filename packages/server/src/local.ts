@@ -4,9 +4,7 @@
  * itself: the embedded engine in a data directory, or a PostgreSQL server when it is given one's
  * address.
  */
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   acceptToken,
@@ -116,25 +114,8 @@ export interface LocalServer {
 
 /** Where the dashboard's built files are when this package runs from the workspace or a release. */
 const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web/dist", import.meta.url));
-/** How long `git` may take to name a directory's origin. */
-const GIT_ANSWER_MS = 3000;
-
-/**
- * The origin remote of a directory on this machine, by the command the block gives an agent
- * (`git remote get-url origin`), so that both name one project. Null when the directory is not a
- * repository, has no origin, or `git` is not there.
- */
-function gitOriginOf(cwd: string): Promise<string | null> {
-  if (!isAbsolute(cwd)) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    execFile(
-      "git",
-      ["-C", cwd, "remote", "get-url", "origin"],
-      { timeout: GIT_ANSWER_MS, windowsHide: true },
-      (error, stdout) => resolve(error === null && stdout.trim() !== "" ? stdout.trim() : null),
-    );
-  });
-}
+/** Where the plugins are: this package's own folder of them, beside its code. */
+const PLUGINS_DIR = fileURLToPath(new URL("../plugins", import.meta.url));
 
 /** Starts the whole server on a store, for its owner and whoever they add: what `ukt serve` runs. */
 export async function startLocalServer(options: LocalServerOptions): Promise<LocalServer> {
@@ -154,6 +135,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
       ports,
       allowedHosts: options.allowedHosts,
       webDir: options.webDir ?? DEFAULT_WEB_DIR,
+      pluginsDir: PLUGINS_DIR,
       operator:
         options.hostKey === undefined
           ? undefined
@@ -162,7 +144,6 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
               key: options.hostKey,
               caller: () => ensureOwner(ports),
             },
-      originOf: gitOriginOf,
       snapshot: local.snapshot ?? undefined,
     });
     const listening = await server.listen({

@@ -42,7 +42,7 @@ export { exportMarkdown } from "./usecases/facts/export.ts";
 export { factDetail, listFacts } from "./usecases/facts/list.ts";
 export { redactFact } from "./usecases/facts/redact.ts";
 export { listTasks, taskDetail } from "./usecases/tasks/list.ts";
-export { recordSessionNote, type OriginOf } from "./usecases/session-note.ts";
+export { endSession, noteSession, type Conversation } from "./usecases/session-note.ts";
 export { chooseTreatment } from "./usecases/sharing.ts";
 export { toHex } from "./hash.ts";
 export { normalizeText } from "./text/analyze.ts";
