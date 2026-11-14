@@ -1,0 +1,5 @@
+#!/bin/sh
+# The uketsugi command line, on the Node runtime shipped beside it. A Node on the PATH is never
+# used, and none needs to be installed.
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
+exec "$here/../node/bin/node" "$here/../app/dist/index.js" "$@"

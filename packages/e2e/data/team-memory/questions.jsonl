@@ -1,0 +1,200 @@
+{"id": "p01", "kind": "paraphrase", "text": "When a customer's payment method gets rejected, on what schedule do we attempt the charge again?", "answers": ["a001"], "split": "dev"}
+{"id": "p02", "kind": "paraphrase", "text": "Which component produces the billing documents customers download, and how long does the download address keep working?", "answers": ["a002"], "split": "dev"}
+{"id": "p03", "kind": "paraphrase", "text": "If somebody moves to a bigger plan halfway through the month, how much do they end up paying?", "answers": ["a003"], "split": "dev"}
+{"id": "p04", "kind": "paraphrase", "text": "Our payment provider sometimes notifies us about the same thing twice; how do we stop acting on it again?", "answers": ["a004"], "split": "heldout"}
+{"id": "p05", "kind": "paraphrase", "text": "Does a support person need sign-off from anybody before giving a customer their money back?", "answers": ["a007"], "split": "heldout"}
+{"id": "p06", "kind": "paraphrase", "text": "Can I use a floating point number for a price in the billing code?", "answers": ["a008"], "split": "heldout"}
+{"id": "p07", "kind": "paraphrase", "text": "A workspace's evaluation period ran out and nobody added a payment method. What does the customer lose and when?", "answers": ["a009"], "split": "dev"}
+{"id": "p08", "kind": "paraphrase", "text": "How soon is somebody forced to sign in again on the web app?", "answers": ["a010"], "split": "dev"}
+{"id": "p09", "kind": "paraphrase", "text": "The certificate we use for enterprise single sign-on is about to expire; what's the procedure for swapping it?", "answers": ["a011"], "split": "heldout"}
+{"id": "p10", "kind": "paraphrase", "text": "Someone dropped their phone in a lake and can't pass two-factor. How do we let them back into their account?", "answers": ["a013"], "split": "heldout"}
+{"id": "p11", "kind": "paraphrase", "text": "What algorithm and cost settings protect stored user credentials?", "answers": ["a014"], "split": "dev"}
+{"id": "p12", "kind": "paraphrase", "text": "How often do the keys behind our access tokens change and how do verifiers learn about the new one?", "answers": ["a015"], "split": "heldout"}
+{"id": "p13", "kind": "paraphrase", "text": "What stops an attacker from guessing credentials over and over on the sign-in form?", "answers": ["a016"], "split": "heldout"}
+{"id": "p14", "kind": "paraphrase", "text": "When one of our backend services calls another, how does the callee know who is calling?", "answers": ["a018"], "split": "heldout"}
+{"id": "p15", "kind": "paraphrase", "text": "I need a new mandatory field on a huge table while the site stays up. What's the safe sequence?", "answers": ["a019"], "split": "dev"}
+{"id": "p16", "kind": "paraphrase", "text": "How many simultaneous Postgres links can the app open in prod, and what sits between the pods and the server?", "answers": ["a021"], "split": "dev"}
+{"id": "p17", "kind": "paraphrase", "text": "Can I send a query to a secondary right after writing the row?", "answers": ["a022"], "split": "dev"}
+{"id": "p18", "kind": "paraphrase", "text": "The primary got corrupted and we must go back to yesterday evening. How do we recover the data and how long will it take?", "answers": ["a023"], "split": "heldout"}
+{"id": "p19", "kind": "paraphrase", "text": "What should I use for the id column when I create a table?", "answers": ["a025"], "split": "heldout"}
+{"id": "p20", "kind": "paraphrase", "text": "Disk use on the append-heavy activity table keeps growing with dead tuples; what did we change to control that?", "answers": ["a026"], "split": "heldout"}
+{"id": "p21", "kind": "paraphrase", "text": "If a row gets removed, is it really gone or just flagged?", "answers": ["a027"], "split": "dev"}
+{"id": "p22", "kind": "paraphrase", "text": "How many times will the platform attempt a failed async task before giving up and with what spacing?", "answers": ["a028"], "split": "heldout"}
+{"id": "p23", "kind": "paraphrase", "text": "A batch of tasks ended up parked after failing. How do I push them through again without repeating work?", "answers": ["a029"], "split": "dev"}
+{"id": "p24", "kind": "paraphrase", "text": "Can two tasks for the same recipient run concurrently, or is there a way to serialize them?", "answers": ["a032"], "split": "heldout"}
+{"id": "p25", "kind": "paraphrase", "text": "Someone set a recurring task to 9am. 9am where?", "answers": ["a033"], "split": "dev"}
+{"id": "p26", "kind": "paraphrase", "text": "How much parallelism does a single queue consumer pod have and what adds more pods?", "answers": ["a034"], "split": "heldout"}
+{"id": "p27", "kind": "paraphrase", "text": "We're shipping a new version while a long-running task is mid-flight. Does the task get lost?", "answers": ["a035"], "split": "heldout"}
+{"id": "p28", "kind": "paraphrase", "text": "A retried task could notify a customer a second time. What stops the duplicate message?", "answers": ["a036"], "split": "dev"}
+{"id": "p29", "kind": "paraphrase", "text": "The release we shipped ten minutes ago is broken. What's the fastest way back to the earlier version?", "answers": ["a037"], "split": "heldout"}
+{"id": "p30", "kind": "paraphrase", "text": "What's the traffic ramp when new code goes live and what stops it automatically?", "answers": ["a038"], "split": "heldout"}
+{"id": "p31", "kind": "paraphrase", "text": "Is it okay to ship on Friday evening or over the holidays?", "answers": ["a039"], "split": "dev"}
+{"id": "p32", "kind": "paraphrase", "text": "Why did a small package upgrade make the whole pipeline rebuild from scratch?", "answers": ["a040"], "split": "heldout"}
+{"id": "p33", "kind": "paraphrase", "text": "I can't get a shell inside a running container. What are our containers built on and how do I inspect one?", "answers": ["a041"], "split": "dev"}
+{"id": "p34", "kind": "paraphrase", "text": "How do I turn a new capability on for a small share of users first and how long can the toggle stay around?", "answers": ["a042"], "split": "heldout"}
+{"id": "p35", "kind": "paraphrase", "text": "Where should an API key for a third party go so the app can read it at runtime?", "answers": ["a044"], "split": "heldout"}
+{"id": "p36", "kind": "paraphrase", "text": "Which colour is the sign-in screen's banner?", "answers": ["a069"], "split": "heldout"}
+{"id": "p37", "kind": "paraphrase", "text": "Will I get woken up at 3am for a minor problem?", "answers": ["a046"], "split": "dev"}
+{"id": "p38", "kind": "paraphrase", "text": "How much downtime can the API have in a month before we're out of budget?", "answers": ["a047"], "split": "dev"}
+{"id": "p39", "kind": "paraphrase", "text": "How far back can I look up what the service printed, say five months ago?", "answers": ["a048"], "split": "dev"}
+{"id": "p40", "kind": "paraphrase", "text": "Do we record every request as a distributed trace, or only some?", "answers": ["a049"], "split": "dev"}
+{"id": "p41", "kind": "paraphrase", "text": "Where can I see how many tasks are waiting?", "answers": ["a050"], "split": "dev"}
+{"id": "p42", "kind": "paraphrase", "text": "Our metrics server was killed because of too many time series. What was the culprit and what prevents a repeat?", "answers": ["a051"], "split": "heldout"}
+{"id": "p43", "kind": "paraphrase", "text": "A major outage just began. What are the first steps and what paperwork follows?", "answers": ["a052"], "split": "heldout"}
+{"id": "p44", "kind": "paraphrase", "text": "What tells us that customers can still sign in and pay when nobody's looking?", "answers": ["a053"], "split": "dev"}
+{"id": "p45", "kind": "paraphrase", "text": "How many calls per minute can one client key make?", "answers": ["a054"], "split": "dev"}
+{"id": "p46", "kind": "paraphrase", "text": "My long-running endpoint gets cut off and the client sees a 504. How long do I have and what's the pattern for slow work?", "answers": ["a057"], "split": "heldout"}
+{"id": "p47", "kind": "paraphrase", "text": "How do we evolve the external interface without breaking integrators and how long do they get to migrate?", "answers": ["a058"], "split": "heldout"}
+{"id": "p48", "kind": "paraphrase", "text": "A client's web app can't call us from their own site because of cross-origin errors. Where's that configured?", "answers": ["a059"], "split": "heldout"}
+{"id": "p49", "kind": "paraphrase", "text": "How can a receiver be sure a callback really came from us?", "answers": ["a060"], "split": "heldout"}
+{"id": "p50", "kind": "paraphrase", "text": "If a client sends the same create request twice because of a network glitch, do we make two objects?", "answers": ["a061"], "split": "heldout"}
+{"id": "p51", "kind": "paraphrase", "text": "We changed a mapping and the whole corpus has to be processed again. How do we do that without an outage?", "answers": ["a062"], "split": "dev"}
+{"id": "p52", "kind": "paraphrase", "text": "I just updated a document and it isn't showing when I look it up. How long until it's findable?", "answers": ["a063"], "split": "heldout"}
+{"id": "p53", "kind": "paraphrase", "text": "How much does a match in the heading count compared with the content, and does age matter?", "answers": ["a065"], "split": "dev"}
+{"id": "p54", "kind": "paraphrase", "text": "Could a person who just lost access to a group still see a restricted document's name in results?", "answers": ["a067"], "split": "dev"}
+{"id": "p55", "kind": "paraphrase", "text": "What feeds the type-ahead dropdown?", "answers": ["a068"], "split": "heldout"}
+{"id": "p56", "kind": "paraphrase", "text": "Which libraries keep track of data on the browser side?", "answers": ["a070"], "split": "heldout"}
+{"id": "p57", "kind": "paraphrase", "text": "How do the UI strings get to other languages?", "answers": ["a072"], "split": "dev"}
+{"id": "p58", "kind": "paraphrase", "text": "What do we have to meet for users of screen readers and keyboard navigation?", "answers": ["a074"], "split": "dev"}
+{"id": "p59", "kind": "paraphrase", "text": "Why was the marketing price page slow to paint and what fixed it?", "answers": ["a076"], "split": "dev"}
+{"id": "p60", "kind": "paraphrase", "text": "What adds machines to the cluster and does it use cheap interruptible ones?", "answers": ["a077"], "split": "dev"}
+{"id": "p61", "kind": "paraphrase", "text": "How much RAM can a backend container use before the kernel kills it?", "answers": ["a079"], "split": "heldout"}
+{"id": "p62", "kind": "paraphrase", "text": "Lookups for outside hostnames were failing now and then inside the cluster. What was behind that?", "answers": ["a080"], "split": "heldout"}
+{"id": "p63", "kind": "paraphrase", "text": "Can I just change a load balancer setting in the AWS web UI?", "answers": ["a081"], "split": "dev"}
+{"id": "p64", "kind": "paraphrase", "text": "Where is customer data physically hosted?", "answers": ["a082"], "split": "dev"}
+{"id": "p65", "kind": "paraphrase", "text": "Who handles HTTPS certificate expiry so that we don't get an outage?", "answers": ["a083"], "split": "dev"}
+{"id": "p66", "kind": "paraphrase", "text": "Users see bad gateway errors for a few seconds whenever new pods replace old ones. How was that solved?", "answers": ["a084"], "split": "heldout"}
+{"id": "p67", "kind": "paraphrase", "text": "A test fails randomly and blocks merges. What's the process?", "answers": ["a087"], "split": "dev"}
+{"id": "p68", "kind": "paraphrase", "text": "What's the recommended way to set up rows a spec needs?", "answers": ["a089"], "split": "dev"}
+{"id": "p69", "kind": "paraphrase", "text": "A former user asks us to erase everything we hold about them. What do we run and how long until it's really gone?", "answers": ["a094"], "split": "dev"}
+{"id": "p70", "kind": "paraphrase", "text": "Can analysts see customers' email addresses in Snowflake?", "answers": ["a099"], "split": "heldout"}
+{"id": "i01", "kind": "identifier", "text": "PAY-4021", "answers": ["a005"], "split": "heldout"}
+{"id": "i02", "kind": "identifier", "text": "What should support do about PAY-4012?", "answers": ["a006"], "split": "dev"}
+{"id": "i03", "kind": "identifier", "text": "AUTH-1107", "answers": ["a012"], "split": "dev"}
+{"id": "i04", "kind": "identifier", "text": "what's the default of SAML_CLOCK_SKEW_SECONDS", "answers": ["a012"], "split": "heldout"}
+{"id": "i05", "kind": "identifier", "text": "worker log shows JOB-503, what happened?", "answers": ["a030"], "split": "dev"}
+{"id": "i06", "kind": "identifier", "text": "JOB-530 on enqueue", "answers": ["a031"], "split": "heldout"}
+{"id": "i07", "kind": "identifier", "text": "merge queue says CI-117", "answers": ["a043"], "split": "heldout"}
+{"id": "i08", "kind": "identifier", "text": "customer is hitting GW-4291", "answers": ["a055"], "split": "dev"}
+{"id": "i09", "kind": "identifier", "text": "GW-4219 on upload", "answers": ["a056"], "split": "dev"}
+{"id": "i10", "kind": "identifier", "text": "SRCH-702 from the query service", "answers": ["a066"], "split": "dev"}
+{"id": "i11", "kind": "identifier", "text": "SQLSTATE 40P01", "answers": ["a024"], "split": "dev"}
+{"id": "i12", "kind": "identifier", "text": "redirect_uri_mismatch on preview", "answers": ["a017"], "split": "dev"}
+{"id": "i13", "kind": "identifier", "text": "stripe_events_seen TTL", "answers": ["a004"], "split": "heldout"}
+{"id": "i14", "kind": "identifier", "text": "why did no-float-money fail my build", "answers": ["a008"], "split": "heldout"}
+{"id": "i15", "kind": "identifier", "text": "value of SESSION_ABSOLUTE_TTL", "answers": ["a010"], "split": "heldout"}
+{"id": "i16", "kind": "identifier", "text": "default_pool_size in prod", "answers": ["a021"], "split": "heldout"}
+{"id": "i17", "kind": "identifier", "text": "why lock_timeout=5s on migrations", "answers": ["a020"], "split": "dev"}
+{"id": "i18", "kind": "identifier", "text": "autovacuum_vacuum_scale_factor on the events table", "answers": ["a026"], "split": "heldout"}
+{"id": "i19", "kind": "identifier", "text": "WORKER_CONCURRENCY", "answers": ["a034"], "split": "heldout"}
+{"id": "i20", "kind": "identifier", "text": "promlint-cardinality failed on my PR", "answers": ["a051"], "split": "heldout"}
+{"id": "i21", "kind": "identifier", "text": "sampling in otel/collector.yaml", "answers": ["a049"], "split": "dev"}
+{"id": "i22", "kind": "identifier", "text": "which dashboard shows job_queue_depth", "answers": ["a050"], "split": "heldout"}
+{"id": "i23", "kind": "identifier", "text": "what does sku_analyzer do", "answers": ["a064"], "split": "dev"}
+{"id": "i24", "kind": "identifier", "text": "title boost in search/query-builder.ts", "answers": ["a065"], "split": "dev"}
+{"id": "i25", "kind": "identifier", "text": "where is color.brand.teal600 used", "answers": ["a069"], "split": "dev"}
+{"id": "i26", "kind": "identifier", "text": "REDIS_URL missing, pod in CrashLoopBackOff", "answers": ["a078"], "split": "heldout"}
+{"id": "i27", "kind": "identifier", "text": "why --max-old-space-size=1536", "answers": ["a079"], "split": "heldout"}
+{"id": "i28", "kind": "identifier", "text": "hookTimeout 120000", "answers": ["a092"], "split": "dev"}
+{"id": "i29", "kind": "identifier", "text": "warehouse_export DAG schedule", "answers": ["a093"], "split": "heldout"}
+{"id": "i30", "kind": "identifier", "text": "unique_order_id test failed", "answers": ["a097"], "split": "dev"}
+{"id": "s01", "kind": "agent_short", "text": "card decline retry schedule", "answers": ["a001"], "split": "heldout"}
+{"id": "s02", "kind": "agent_short", "text": "invoice pdf link expiry", "answers": ["a002"], "split": "heldout"}
+{"id": "s03", "kind": "agent_short", "text": "upgrade proration mid cycle", "answers": ["a003"], "split": "heldout"}
+{"id": "s04", "kind": "agent_short", "text": "refund approval limit", "answers": ["a007"], "split": "heldout"}
+{"id": "s05", "kind": "agent_short", "text": "trial expired no card", "answers": ["a009"], "split": "dev"}
+{"id": "s06", "kind": "agent_short", "text": "rotate saml cert", "answers": ["a011"], "split": "heldout"}
+{"id": "s07", "kind": "agent_short", "text": "reset mfa lost device", "answers": ["a013"], "split": "dev"}
+{"id": "s08", "kind": "agent_short", "text": "jwt key rotation period", "answers": ["a015"], "split": "dev"}
+{"id": "s09", "kind": "agent_short", "text": "login lockout threshold", "answers": ["a016"], "split": "dev"}
+{"id": "s10", "kind": "agent_short", "text": "add not null column safely", "answers": ["a019"], "split": "heldout"}
+{"id": "s11", "kind": "agent_short", "text": "replica read after write", "answers": ["a022"], "split": "dev"}
+{"id": "s12", "kind": "agent_short", "text": "postgres restore steps", "answers": ["a023"], "split": "heldout"}
+{"id": "s13", "kind": "agent_short", "text": "pk type new tables", "answers": ["a025"], "split": "dev"}
+{"id": "s14", "kind": "agent_short", "text": "soft delete policy", "answers": ["a027"], "split": "dev"}
+{"id": "s15", "kind": "agent_short", "text": "job retry backoff max attempts", "answers": ["a028"], "split": "dev"}
+{"id": "s16", "kind": "agent_short", "text": "replay dlq command", "answers": ["a029"], "split": "dev"}
+{"id": "s17", "kind": "agent_short", "text": "cron timezone", "answers": ["a033"], "split": "heldout"}
+{"id": "s18", "kind": "agent_short", "text": "jobs during deploy sigterm", "answers": ["a035"], "split": "dev"}
+{"id": "s19", "kind": "agent_short", "text": "rollback prod deploy command", "answers": ["a037"], "split": "heldout"}
+{"id": "s20", "kind": "agent_short", "text": "canary abort criteria", "answers": ["a038"], "split": "heldout"}
+{"id": "s21", "kind": "agent_short", "text": "deploy freeze dates", "answers": ["a039"], "split": "heldout"}
+{"id": "s22", "kind": "agent_short", "text": "feature flag cleanup rule", "answers": ["a042"], "split": "heldout"}
+{"id": "s23", "kind": "agent_short", "text": "where do secrets live", "answers": ["a044"], "split": "dev"}
+{"id": "s24", "kind": "agent_short", "text": "which alerts page oncall", "answers": ["a046"], "split": "heldout"}
+{"id": "s25", "kind": "agent_short", "text": "api slo burn alert", "answers": ["a047"], "split": "dev"}
+{"id": "s26", "kind": "agent_short", "text": "log retention", "answers": ["a048"], "split": "dev"}
+{"id": "s27", "kind": "agent_short", "text": "postmortem deadline", "answers": ["a052"], "split": "dev"}
+{"id": "s28", "kind": "agent_short", "text": "default rate limit per token", "answers": ["a054"], "split": "dev"}
+{"id": "s29", "kind": "agent_short", "text": "gateway timeout exports route", "answers": ["a057"], "split": "heldout"}
+{"id": "s30", "kind": "agent_short", "text": "api version header deprecation", "answers": ["a058"], "split": "dev"}
+{"id": "s31", "kind": "agent_short", "text": "verify webhook signature", "answers": ["a060"], "split": "dev"}
+{"id": "s32", "kind": "agent_short", "text": "reindex search zero downtime", "answers": ["a062"], "split": "heldout"}
+{"id": "s33", "kind": "agent_short", "text": "js bundle budget", "answers": ["a071"], "split": "heldout"}
+{"id": "s34", "kind": "agent_short", "text": "hydration error dashboard date", "answers": ["a073"], "split": "dev"}
+{"id": "s35", "kind": "agent_short", "text": "design tokens source", "answers": ["a075"], "split": "dev"}
+{"id": "s36", "kind": "agent_short", "text": "dns timeouts ndots", "answers": ["a080"], "split": "heldout"}
+{"id": "s37", "kind": "agent_short", "text": "checkout e2e flake cause", "answers": ["a085"], "split": "heldout"}
+{"id": "s38", "kind": "agent_short", "text": "coverage requirement prs", "answers": ["a088"], "split": "heldout"}
+{"id": "s39", "kind": "agent_short", "text": "fake time in tests", "answers": ["a090"], "split": "dev"}
+{"id": "s40", "kind": "agent_short", "text": "csv export row limit", "answers": ["a095"], "split": "heldout"}
+{"id": "n01", "kind": "no_answer_near", "text": "What's the maximum number of seats on the starter plan?", "answers": [], "split": "dev"}
+{"id": "n02", "kind": "no_answer_near", "text": "How do we handle chargebacks from the card networks?", "answers": [], "split": "heldout"}
+{"id": "n03", "kind": "no_answer_near", "text": "Which VAT rate do we charge customers in Norway?", "answers": [], "split": "heldout"}
+{"id": "n04", "kind": "no_answer_near", "text": "Do we support paying by bank transfer or ACH?", "answers": [], "split": "heldout"}
+{"id": "n05", "kind": "no_answer_near", "text": "Can users sign in with a passkey?", "answers": [], "split": "dev"}
+{"id": "n06", "kind": "no_answer_near", "text": "How long are password reset links valid?", "answers": [], "split": "heldout"}
+{"id": "n07", "kind": "no_answer_near", "text": "What's the process for offboarding an employee's access to production?", "answers": [], "split": "dev"}
+{"id": "n08", "kind": "no_answer_near", "text": "What SCIM provisioning do we support?", "answers": [], "split": "dev"}
+{"id": "n09", "kind": "no_answer_near", "text": "Which Postgres extensions are enabled in production?", "answers": [], "split": "dev"}
+{"id": "n10", "kind": "no_answer_near", "text": "What's the statement timeout for the reporting role?", "answers": [], "split": "dev"}
+{"id": "n11", "kind": "no_answer_near", "text": "How do we upgrade the Postgres major version?", "answers": [], "split": "heldout"}
+{"id": "n12", "kind": "no_answer_near", "text": "Who owns the orders table schema?", "answers": [], "split": "dev"}
+{"id": "n13", "kind": "no_answer_near", "text": "How do I pause a queue during maintenance?", "answers": [], "split": "heldout"}
+{"id": "n14", "kind": "no_answer_near", "text": "What's the priority order between the queues?", "answers": [], "split": "heldout"}
+{"id": "n15", "kind": "no_answer_near", "text": "How do we send a batch of SMS notifications?", "answers": [], "split": "heldout"}
+{"id": "n16", "kind": "no_answer_near", "text": "Which worker handles thumbnail generation?", "answers": [], "split": "dev"}
+{"id": "n17", "kind": "no_answer_near", "text": "Who approves a production hotfix outside of business hours?", "answers": [], "split": "dev"}
+{"id": "n18", "kind": "no_answer_near", "text": "How long do we keep old container images in the registry?", "answers": [], "split": "dev"}
+{"id": "n19", "kind": "no_answer_near", "text": "How do I run the CI pipeline locally?", "answers": [], "split": "heldout"}
+{"id": "n20", "kind": "no_answer_near", "text": "What's the branch naming convention?", "answers": [], "split": "heldout"}
+{"id": "n21", "kind": "no_answer_near", "text": "What's the latency SLO for the search endpoint?", "answers": [], "split": "heldout"}
+{"id": "n22", "kind": "no_answer_near", "text": "Which Slack channel do customer status updates go to?", "answers": [], "split": "dev"}
+{"id": "n23", "kind": "no_answer_near", "text": "How much do we spend on Datadog per month?", "answers": [], "split": "dev"}
+{"id": "n24", "kind": "no_answer_near", "text": "How do I add a disk usage panel to a dashboard?", "answers": [], "split": "heldout"}
+{"id": "n25", "kind": "no_answer_near", "text": "Does the public API support GraphQL?", "answers": [], "split": "dev"}
+{"id": "n26", "kind": "no_answer_near", "text": "How do we block a specific abusive IP at the edge?", "answers": [], "split": "dev"}
+{"id": "n27", "kind": "no_answer_near", "text": "Is there an SDK for Python customers?", "answers": [], "split": "heldout"}
+{"id": "n28", "kind": "no_answer_near", "text": "What's the pagination limit on list endpoints?", "answers": [], "split": "dev"}
+{"id": "n29", "kind": "no_answer_near", "text": "How many shards does the documents index have?", "answers": [], "split": "heldout"}
+{"id": "n30", "kind": "no_answer_near", "text": "How do we add synonyms to search?", "answers": [], "split": "heldout"}
+{"id": "n31", "kind": "no_answer_near", "text": "Does the web app work offline?", "answers": [], "split": "heldout"}
+{"id": "n32", "kind": "no_answer_near", "text": "Which browsers do we support?", "answers": [], "split": "heldout"}
+{"id": "n33", "kind": "no_answer_near", "text": "How do we enable dark mode in the dashboard?", "answers": [], "split": "heldout"}
+{"id": "n34", "kind": "no_answer_near", "text": "What version of Kubernetes is the cluster on?", "answers": [], "split": "dev"}
+{"id": "n35", "kind": "no_answer_near", "text": "How do I get kubectl access to production?", "answers": [], "split": "dev"}
+{"id": "n36", "kind": "no_answer_near", "text": "What's our disaster recovery RTO?", "answers": [], "split": "dev"}
+{"id": "n37", "kind": "no_answer_near", "text": "How do we mock the payment provider in unit tests?", "answers": [], "split": "dev"}
+{"id": "n38", "kind": "no_answer_near", "text": "How long may the full test suite take before it breaks the budget?", "answers": [], "split": "dev"}
+{"id": "n39", "kind": "no_answer_near", "text": "How often is the customer health score recalculated?", "answers": [], "split": "heldout"}
+{"id": "n40", "kind": "no_answer_near", "text": "Can customers get their exports as Parquet?", "answers": [], "split": "heldout"}
+{"id": "f01", "kind": "no_answer_far", "text": "What's the capital of Mongolia?", "answers": [], "split": "heldout"}
+{"id": "f02", "kind": "no_answer_far", "text": "How do you bake a chocolate cake at home?", "answers": [], "split": "dev"}
+{"id": "f03", "kind": "no_answer_far", "text": "Who wrote Pride and Prejudice?", "answers": [], "split": "dev"}
+{"id": "f04", "kind": "no_answer_far", "text": "What is the boiling point of water at high altitude?", "answers": [], "split": "heldout"}
+{"id": "f05", "kind": "no_answer_far", "text": "What's a good stretch for lower back pain?", "answers": [], "split": "heldout"}
+{"id": "f06", "kind": "no_answer_far", "text": "When did the Roman Empire fall?", "answers": [], "split": "dev"}
+{"id": "f07", "kind": "no_answer_far", "text": "How many moons does Jupiter have?", "answers": [], "split": "dev"}
+{"id": "f08", "kind": "no_answer_far", "text": "What's the best time of year to visit Japan?", "answers": [], "split": "dev"}
+{"id": "f09", "kind": "no_answer_far", "text": "How do I repot an orchid?", "answers": [], "split": "dev"}
+{"id": "f10", "kind": "no_answer_far", "text": "What are the rules of cricket?", "answers": [], "split": "dev"}
+{"id": "f11", "kind": "no_answer_far", "text": "Who painted the ceiling of the Sistine Chapel?", "answers": [], "split": "heldout"}
+{"id": "f12", "kind": "no_answer_far", "text": "How long should I boil an egg for a soft yolk?", "answers": [], "split": "heldout"}
+{"id": "f13", "kind": "no_answer_far", "text": "What is the largest desert in the world?", "answers": [], "split": "heldout"}
+{"id": "f14", "kind": "no_answer_far", "text": "How do honeybees make honey?", "answers": [], "split": "heldout"}
+{"id": "f15", "kind": "no_answer_far", "text": "What's the plot of Moby Dick?", "answers": [], "split": "heldout"}
+{"id": "f16", "kind": "no_answer_far", "text": "Which planet has the strongest winds?", "answers": [], "split": "dev"}
+{"id": "f17", "kind": "no_answer_far", "text": "what wine goes with salmon", "answers": [], "split": "heldout"}
+{"id": "f18", "kind": "no_answer_far", "text": "guitar chords for beginners", "answers": [], "split": "heldout"}
+{"id": "f19", "kind": "no_answer_far", "text": "tallest mountain in south america", "answers": [], "split": "dev"}
+{"id": "f20", "kind": "no_answer_far", "text": "how to fold a fitted sheet", "answers": [], "split": "dev"}

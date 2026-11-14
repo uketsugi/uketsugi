@@ -1,0 +1,342 @@
+/** What a server would answer, typed by the contract, for the pages' tests. */
+import {
+  FENCED_BLOCK,
+  PROMPT_DESCRIPTIONS,
+  TOOL_NAMES,
+  TOKEN_ENV,
+  type ActivityReport,
+  type ApiError,
+  type ApiFact,
+  type ApiTask,
+  type CapabilityDescriptor,
+  type ConnectInfo,
+  type DashboardSession,
+  type FactDetail,
+  type ProjectList,
+  type RulingList,
+  type TaskDetail,
+  type TaskPage,
+} from "@uketsugi/contracts";
+
+export const PROJECT = "github.com/acme/billing";
+const MCP_URL = "http://127.0.0.1:7410/mcp";
+
+export const session: DashboardSession = {
+  person: "Dana",
+  csrf: "csrf-7f2c",
+  expires_at: "2026-11-14T09:00:00Z",
+};
+
+export const capabilities: CapabilityDescriptor = {
+  edition: "community",
+  contract_version: "0.3.0",
+  mcp_revisions: ["2025-06-18", "2025-11-25"],
+  features: { vector: false, tasks: true, brief: true, closing_note: false, jobs: ["embed"] },
+  model_runners: [],
+  tools: [...TOOL_NAMES],
+  prompts: ["setup", "activate"],
+  degraded: ["no_model"],
+};
+
+export const connect: ConnectInfo = {
+  mcp_url: MCP_URL,
+  server_name: "uketsugi",
+  token_env: TOKEN_ENV,
+  token_command: `export ${TOKEN_ENV}="$(ukt token)"`,
+  commands: {
+    setup: { name: "setup", description: PROMPT_DESCRIPTIONS.setup },
+    activate: { name: "activate", description: PROMPT_DESCRIPTIONS.activate },
+  },
+  block: FENCED_BLOCK,
+  harnesses: [
+    {
+      id: "claude-code",
+      name: "Claude Code",
+      add: `claude mcp add --transport http uketsugi ${MCP_URL} --header "Authorization: Bearer $UKT_TOKEN"`,
+      add_kind: "command",
+      setup: "/uketsugi:setup",
+      activate: "/uketsugi:activate",
+      instruction_file: "~/.claude/CLAUDE.md",
+      instruction_file_command: 'echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"',
+    },
+    {
+      id: "antigravity",
+      name: "Antigravity",
+      add: `{ "mcpServers": { "uketsugi": { "url": "${MCP_URL}" } } }`,
+      add_kind: "json",
+      add_file: "~/.gemini/config/mcp_config.json",
+      instruction_file: "~/.gemini/GEMINI.md",
+      note: "Antigravity fills in no variable.",
+    },
+  ],
+};
+
+export const projects: ProjectList = {
+  projects: [
+    {
+      key: PROJECT,
+      kind: "repository",
+      name: null,
+      facts: 41,
+      treatment: "private",
+      chosen: false,
+    },
+    {
+      key: "me/q4-expenses",
+      kind: "named",
+      name: "Q4 expenses",
+      facts: 1,
+      treatment: "private",
+      chosen: true,
+    },
+  ],
+  sharing: true,
+};
+
+export const CLAIM = "Invoice webhooks retry five times with exponential backoff";
+
+export const retries: ApiFact = {
+  id: "0193-retries",
+  project: PROJECT,
+  audience: "shared",
+  claim: CLAIM,
+  detail: "The first retry is after 2 s; the sixth failure goes to the dead-letter queue.",
+  question: "what is the retry policy for invoice webhooks",
+  citations: [
+    { ref: "services/billing/webhooks/retry.rs:41-88@9f3c2e1", kind: "file", class: "checkable" },
+    {
+      ref: "https://wiki.acme.example/runbooks/webhooks",
+      kind: "web",
+      class: "testimony",
+      reason: "needs sign-in",
+    },
+  ],
+  status: "confirmed",
+  flags: [],
+  trust: "reviewed",
+  author: "Dana's Claude Code",
+  own: true,
+  redacted: false,
+  created_at: "2026-11-01T10:00:00Z",
+  updated_at: "2026-11-10T10:00:00Z",
+  confirmed_at: "2026-11-12T10:00:00Z",
+  superseded_by: null,
+};
+
+export const idempotency: ApiFact = {
+  ...retries,
+  id: "0193-idempotency",
+  audience: "private",
+  claim: "The idempotency key is generated in the request middleware",
+  detail: null,
+  question: null,
+  citations: [{ ref: "9f3c2e1", kind: "commit", class: "checkable" }],
+  status: "unconfirmed",
+  flags: ["marked_stale"],
+  trust: "unreviewed",
+  confirmed_at: null,
+};
+
+export const retriesDetail: FactDetail = {
+  fact: retries,
+  confirmations: [
+    {
+      person: "Dana",
+      by_author: false,
+      at: "2026-11-12T10:00:00Z",
+      checked: "read retry.rs",
+      source_version: "9f3c2e1",
+    },
+  ],
+  history: [
+    { kind: "FactConfirmed", actor: "Dana", at: "2026-11-12T10:00:00Z" },
+    { kind: "FactPublished", actor: "Dana's Claude Code", at: "2026-11-01T10:00:00Z" },
+  ],
+};
+
+export const TASK = "Move webhook retries to the queue";
+export const HANDOFF = "Left: switch the dunning job. Start in jobs/dunning.ts.";
+
+/** Handed over by the reader's own agent, in a project they share. */
+export const handedOff: ApiTask = {
+  id: "0194-retries",
+  project: PROJECT,
+  title: TASK,
+  state: "handed_off",
+  version: 5,
+  publisher: "you",
+  audience: "shared",
+  note: HANDOFF,
+  note_kind: "handoff",
+  note_by: "you",
+  note_client: "claude-code",
+  note_at: "2026-11-13T08:40:00Z",
+  created_at: "2026-11-13T08:00:00Z",
+  updated_at: "2026-11-13T08:40:00Z",
+};
+
+/** Another person's claim whose lease ran out: open again, and it says who held it. */
+export const lapsed: ApiTask = {
+  id: "0194-runbook",
+  project: PROJECT,
+  title: "Write the runbook",
+  state: "open",
+  lapsed: true,
+  version: 2,
+  publisher: "Lee",
+  holder: "Lee",
+  holder_client: "antigravity",
+  lease_expires_at: "2026-11-13T07:00:00Z",
+  audience: "shared",
+  created_at: "2026-11-12T08:00:00Z",
+  updated_at: "2026-11-13T06:45:00Z",
+};
+
+/** A step of the reader's own agent's plan, held under a lease that has not ended. */
+export const held: ApiTask = {
+  id: "0194-schema",
+  project: "github.com/acme/ledger",
+  title: "Step 1: read the schema",
+  state: "claimed",
+  tracked: true,
+  version: 2,
+  publisher: "you",
+  holder: "you",
+  holder_client: "claude-code",
+  lease_expires_at: "2099-01-01T00:00:00Z",
+  audience: "private",
+  created_at: "2026-11-13T09:00:00Z",
+  updated_at: "2026-11-13T09:00:00Z",
+};
+
+export const tasks: TaskPage = { tasks: [handedOff, lapsed, held], matched: 3 };
+
+export const handedOffDetail: TaskDetail = {
+  task: { ...handedOff, description: "Retries run inline today and block the worker." },
+  notes: [
+    {
+      kind: "note",
+      text: "Retry path moved.",
+      author: "Lee",
+      client: "antigravity",
+      at: "2026-11-13T08:20:00Z",
+    },
+    {
+      kind: "handoff",
+      text: HANDOFF,
+      author: "you",
+      client: "claude-code",
+      at: "2026-11-13T08:40:00Z",
+    },
+  ],
+  history: [
+    {
+      event: "published",
+      by: "you",
+      client: "claude-code",
+      session: "s-7f2c",
+      at: "2026-11-13T08:00:00Z",
+    },
+    { event: "claimed", by: "Lee", client: "antigravity", at: "2026-11-13T08:05:00Z" },
+    {
+      event: "claimed",
+      by: "you",
+      client: "claude-code",
+      session: "s-51d2",
+      at: "2026-11-13T08:30:00Z",
+      after: "lapsed",
+    },
+    {
+      event: "handed_off",
+      by: "you",
+      client: "claude-code",
+      session: "s-51d2",
+      at: "2026-11-13T08:40:00Z",
+    },
+  ],
+};
+
+export const activity: ActivityReport = {
+  since: "2026-11-06T00:00:00Z",
+  clients: [
+    {
+      client: "claude-code",
+      version: "2.1.0",
+      sessions: 12,
+      searched: 9,
+      published: 7,
+      refused: 1,
+    },
+    { client: "antigravity", version: null, sessions: 30, searched: 28, published: 25, refused: 0 },
+  ],
+  recent: [
+    {
+      session: "s-7f2c",
+      client: "claude-code",
+      version: "2.1.0",
+      project: PROJECT,
+      first_call_at: "2026-11-13T09:00:00Z",
+      last_call_at: "2026-11-13T09:20:00Z",
+      last_search_at: "2026-11-13T09:01:00Z",
+      last_publish_at: null,
+      refused_calls: 2,
+    },
+  ],
+};
+
+export const rulings: RulingList = {
+  rulings: [
+    {
+      id: "r-merge",
+      decision: "merge_duplicate",
+      fact: idempotency.id,
+      actor: "consolidate",
+      runner: "rules",
+      reasons: ["same_claim"],
+      at: "2026-11-13T08:00:00Z",
+      reverted_by: null,
+      revertible: true,
+    },
+    {
+      id: "r-redact",
+      decision: "redact",
+      fact: retries.id,
+      actor: "Dana",
+      reasons: ["person_asked"],
+      at: "2026-11-12T08:00:00Z",
+      reverted_by: null,
+      revertible: false,
+    },
+  ],
+};
+
+export const unavailable: ApiError = {
+  error: {
+    code: "unavailable",
+    what: "The store did not answer.",
+    meaning: "Nothing was read and nothing was changed.",
+    next: "Wait a moment, then try again.",
+    retry: true,
+  },
+};
+
+/** What the server answers a browser without a session, as it answers any request nobody signed. */
+export const unauthorized: ApiError = {
+  error: {
+    code: "unauthorized",
+    what: "Nobody is signed in on this request.",
+    meaning: "The dashboard's session has ended, or the request carried no token the server knows.",
+    next: "Sign in with your dashboard key on the sign-in page, or on the host run `ukt ui` and open the link it prints. A script sends a harness token as a bearer token.",
+    retry: false,
+  },
+};
+
+export const unknownKey: ApiError = {
+  error: {
+    code: "unauthorized",
+    what: "That is not a dashboard key this server knows.",
+    meaning: "Nobody was signed in. The token a harness sends does not sign a person in.",
+    next: "Paste the dashboard key you were given with your invitation, whole.",
+    retry: false,
+  },
+};

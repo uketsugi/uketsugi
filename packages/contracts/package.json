@@ -1,0 +1,23 @@
+{
+  "name": "@uketsugi/contracts",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "@uketsugi/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "generate": "node scripts/generate-types.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "json-schema-to-typescript": "16.0.0"
+  }
+}

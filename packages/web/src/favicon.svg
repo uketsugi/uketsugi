@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- The mark beside the name in the navigation: a square in each theme's accent (styles.css). -->
+  <style>
+    rect { fill: #2b5a4c; }
+    @media (prefers-color-scheme: dark) { rect { fill: #8fd0b6; } }
+  </style>
+  <rect width="16" height="16" rx="2" />
+</svg>

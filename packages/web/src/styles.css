@@ -1,0 +1,127 @@
+@import "tailwindcss" source("../src");
+
+/*
+ * The design tokens. Every colour a component uses is one of these, in a light and a dark value;
+ * both themes share one density. Each text colour is at least 4.5:1 on the surfaces it is used on,
+ * and each control border and the focus ring at least 3:1.
+ */
+:root {
+  color-scheme: light dark;
+  --canvas: #f5f3ee;
+  --sidebar: #efece6;
+  --surface: #ffffff;
+  --sunken: #f0ede7;
+  --line: #dcd8cf;
+  --line-strong: #8c877c;
+  --ink: #1d1c19;
+  --ink-muted: #5f5c55;
+  --accent: #2b5a4c;
+  --on-accent: #ffffff;
+  --accent-soft: #dde9e2;
+  --accent-ink: #1c4638;
+  --ok-soft: #d9eadf;
+  --ok-ink: #1b5537;
+  --warn-soft: #f5e2b5;
+  --warn-ink: #5e4108;
+  --neutral-soft: #e6e3db;
+  --neutral-ink: #45423c;
+  --info-soft: #dbe5f5;
+  --info-ink: #264a85;
+  --danger: #a1271d;
+  --on-danger: #ffffff;
+  --danger-soft: #f6dcd8;
+  --danger-ink: #7c1a12;
+  --code: #1f1e1b;
+  --code-ink: #f2efe9;
+  --code-muted: #b5b1a7;
+  --focus: #1f5fbf;
+  --focus-on-code: #8ab4ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #171715;
+    --sidebar: #1c1c19;
+    --surface: #222220;
+    --sunken: #2a2a27;
+    --line: #383732;
+    --line-strong: #7d796f;
+    --ink: #eceae4;
+    --ink-muted: #aba79d;
+    --accent: #8fd0b6;
+    --on-accent: #10261f;
+    --accent-soft: #23382f;
+    --accent-ink: #a9dcc7;
+    --ok-soft: #1f3a2b;
+    --ok-ink: #a3dcb9;
+    --warn-soft: #43340f;
+    --warn-ink: #f0d48a;
+    --neutral-soft: #33322e;
+    --neutral-ink: #d0cdc4;
+    --info-soft: #1f2f4d;
+    --info-ink: #b3cbf2;
+    --danger: #f0958b;
+    --on-danger: #2a0d0a;
+    --danger-soft: #4a1f1b;
+    --danger-ink: #f6b8b0;
+    --code: #0f0f0e;
+    --code-ink: #eceae4;
+    --code-muted: #aba79d;
+    --focus: #8ab4ff;
+    --focus-on-code: #8ab4ff;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-ink: var(--ok-ink);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-ink: var(--warn-ink);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-neutral-ink: var(--neutral-ink);
+  --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
+  --color-danger: var(--danger);
+  --color-on-danger: var(--on-danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
+  --color-code: var(--code);
+  --color-code-ink: var(--code-ink);
+  --color-code-muted: var(--code-muted);
+  --color-focus: var(--focus);
+}
+
+@layer base {
+  html {
+    background: var(--canvas);
+    color: var(--ink);
+  }
+
+  body {
+    font-size: 0.875rem;
+    line-height: 1.45;
+  }
+
+  /* Base UI's popups are portalled to the body; the app is its own stacking context below them. */
+  #root {
+    isolation: isolate;
+  }
+
+  /* One focus ring for every control, in both themes. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}

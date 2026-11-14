@@ -1,0 +1,33 @@
+{
+  "name": "@uketsugi/store",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "@uketsugi/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.14",
+    "@electric-sql/pglite-pgvector": "0.0.15",
+    "@uketsugi/core": "workspace:*",
+    "kysely": "0.29.9",
+    "pg": "8.23.1",
+    "proper-lockfile": "4.1.2",
+    "write-file-atomic": "8.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "@types/proper-lockfile": "4.1.4",
+    "@types/write-file-atomic": "4.0.3",
+    "@uketsugi/contracts": "workspace:*",
+    "@uketsugi/testkit": "workspace:*"
+  }
+}

@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 258" width="880" height="258" role="img" aria-labelledby="t d">
+  <title id="t">How Uketsugi is used</title>
+  <desc id="d">Three steps: an agent writes down what it worked out, with where it comes from; a later agent finds it before investigating again; unfinished work is left as a task for whoever comes next.</desc>
+  <!-- 1: learn it once -->
+  <g transform="translate(206 84) rotate(7) scale(1.2)">
+    <rect x="-28" y="-24" width="56" height="48" rx="7" fill="#2a2926" stroke="#ebe8e1" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M-19 -13 H19" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/><path d="M-19 -4 H19" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/><path d="M-19 5 H4" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M9 13 h10" stroke="#8fd0b6" stroke-width="3" stroke-linecap="round"/><circle cx="4" cy="13" r="2.4" fill="#8fd0b6"/>
+  </g>
+  <g transform="translate(106 122) scale(1.15) rotate(0)">
+    <rect x="-19" y="27" width="15" height="9" rx="4.5" fill="#8fd0b6" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="27" width="15" height="9" rx="4.5" fill="#8fd0b6" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <rect x="-31" y="-31" width="62" height="60" rx="23" fill="#27483b" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M0 -31 V-43" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="0" cy="-47" r="4.6" fill="#8fd0b6" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-19 -19 Q-10 -26 2 -25" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <circle cx="-8" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="-7" cy="-7.2" r="1" fill="#1b1a18"/><circle cx="14" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="15" cy="-7.2" r="1" fill="#1b1a18"/>
+    <ellipse cx="-16" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/><ellipse cx="22" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/>
+    <path d="M-3 3 Q3 12 9 3Z" fill="#ebe8e1"/>
+    <path d="M30 9 Q40 -8 50 -18" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="50" cy="-18" r="4.2" fill="#27483b" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="M252 26 Q253.44 32.56 260 34 Q253.44 35.44 252 42 Q250.56 35.44 244 34 Q250.56 32.56 252 26Z" fill="#f0cf7a"/><path d="M160 25 Q160.9 29.1 165 30 Q160.9 30.9 160 35 Q159.1 30.9 155 30 Q159.1 29.1 160 25Z" fill="#f0cf7a"/>
+  <text x="150" y="214" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', 'Noto Sans', sans-serif" font-size="18" font-weight="650" fill="#e3e0d8">Learn it once</text><text x="150" y="238" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', 'Noto Sans', sans-serif" font-size="14" fill="#aaa59b">a fact, with where it comes from</text>
+  <path d="M281 104 h28 m-10 -9 l10 9 l-10 9" stroke="#8f8a80" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 2: find it later -->
+  <g transform="translate(384 96) rotate(-6) scale(1.2)">
+    <rect x="-28" y="-24" width="56" height="48" rx="7" fill="#2a2926" stroke="#ebe8e1" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M-19 -13 H19" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/><path d="M-19 -4 H19" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/><path d="M-19 5 H4" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M9 13 h10" stroke="#8fd0b6" stroke-width="3" stroke-linecap="round"/><circle cx="4" cy="13" r="2.4" fill="#8fd0b6"/>
+  </g>
+  <g transform="translate(418 70)"><circle r="22" fill="#2a2926" fill-opacity=".4" stroke="#ebe8e1" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"/><path d="M16 16 L33 33" stroke="#ebe8e1" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"/><path d="M-11 -5 Q-5 -14 6 -13" stroke="#f0d48a" stroke-width="3" stroke-linecap="round" fill="none"/></g>
+  <g transform="translate(498 122) scale(1.15) rotate(0)">
+    <rect x="-19" y="27" width="15" height="9" rx="4.5" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="27" width="15" height="9" rx="4.5" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <rect x="-31" y="-31" width="62" height="60" rx="23" fill="#5a4513" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M0 -31 V-39" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M0 -39 C-3 -50 -15 -50 -17 -44 C-12 -38 -4 -38 0 -39Z" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M0 -39 C3 -50 15 -50 17 -44 C12 -38 4 -38 0 -39Z" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-19 -19 Q-10 -26 2 -25" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <circle cx="-14" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="-13" cy="-7.2" r="1" fill="#1b1a18"/><circle cx="8" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="9" cy="-7.2" r="1" fill="#1b1a18"/>
+    <ellipse cx="-22" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/><ellipse cx="16" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/>
+    <path d="M-8 4 Q-3 9 2 4" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M-30 9 Q-37 4 -44 -6" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="-44" cy="-6" r="4.2" fill="#5a4513" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="440" y="214" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', 'Noto Sans', sans-serif" font-size="18" font-weight="650" fill="#e3e0d8">Find it later</text><text x="440" y="238" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', 'Noto Sans', sans-serif" font-size="14" fill="#aaa59b">before working it out again</text>
+  <path d="M571 104 h28 m-10 -9 l10 9 l-10 9" stroke="#8f8a80" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 3: hand it on -->
+  <g transform="translate(734 92) rotate(-6) scale(1.2)"><rect x="-24" y="-17" width="48" height="34" rx="6" fill="#2a2926" stroke="#ebe8e1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/><path d="M-14 -5 l5 5 l9 -10" stroke="#b3cbf2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M6 -4 h10 M-14 8 h30" stroke="#8f8a80" stroke-width="2.6" stroke-linecap="round"/></g>
+  <g transform="translate(654 124) scale(1.05) rotate(0)">
+    <rect x="-19" y="27" width="15" height="9" rx="4.5" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="27" width="15" height="9" rx="4.5" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <rect x="-31" y="-31" width="62" height="60" rx="23" fill="#5a4513" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M0 -31 V-39" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M0 -39 C-3 -50 -15 -50 -17 -44 C-12 -38 -4 -38 0 -39Z" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M0 -39 C3 -50 15 -50 17 -44 C12 -38 4 -38 0 -39Z" fill="#f0d48a" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-19 -19 Q-10 -26 2 -25" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <circle cx="-8" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="-7" cy="-7.2" r="1" fill="#1b1a18"/><circle cx="14" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="15" cy="-7.2" r="1" fill="#1b1a18"/>
+    <ellipse cx="-16" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/><ellipse cx="22" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/>
+    <path d="M-2 4 Q3 9 8 4" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M30 9 Q40 -10 50 -22" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="50" cy="-22" r="4.2" fill="#5a4513" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g transform="translate(814 124) scale(1.05) rotate(0)">
+    <rect x="-19" y="27" width="15" height="9" rx="4.5" fill="#b3cbf2" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="27" width="15" height="9" rx="4.5" fill="#b3cbf2" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-24 -24 L-27 -42 L-11 -31Z" fill="#26395e" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 -24 L27 -42 L11 -31Z" fill="#26395e" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="-31" y="-31" width="62" height="60" rx="23" fill="#26395e" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <path d="M-19 -19 Q-10 -26 2 -25" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <circle cx="-14" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="-13" cy="-7.2" r="1" fill="#1b1a18"/><circle cx="8" cy="-6" r="3.1" fill="#f4f1ea"/><circle cx="9" cy="-7.2" r="1" fill="#1b1a18"/>
+    <ellipse cx="-22" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/><ellipse cx="16" cy="2" rx="4.6" ry="3" fill="#e8897d" opacity=".75"/>
+    <path d="M-9 3 Q-3 12 3 3Z" fill="#ebe8e1"/>
+    <path d="M-30 9 Q-40 -6 -50 -18" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="-50" cy="-18" r="4.2" fill="#26395e" stroke="#ebe8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="M734 29 Q735.26 34.74 741 36 Q735.26 37.26 734 43 Q732.74 37.26 727 36 Q732.74 34.74 734 29Z" fill="#f0cf7a"/>
+  <text x="734" y="214" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', 'Noto Sans', sans-serif" font-size="18" font-weight="650" fill="#e3e0d8">Hand it on</text><text x="734" y="238" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', 'Noto Sans', sans-serif" font-size="14" fill="#aaa59b">a task the next one can pick up</text>
+</svg>

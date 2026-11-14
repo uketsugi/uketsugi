@@ -1,0 +1,48 @@
+# A server host: uketsugi in one container, with its store, token and embedding model on one volume.
+#
+#   deploy/build.sh                            # makes deploy/dist/uketsugi-<version>-linux-x64.tar.gz
+#   docker compose -f deploy/compose.yaml up -d --build
+#   docker compose -f deploy/compose.yaml exec uketsugi ukt token     # the bearer token for harnesses
+#   docker compose -f deploy/compose.yaml exec uketsugi ukt ui --no-open   # a sign-in link to the dashboard
+#   docker compose -f deploy/compose.yaml exec uketsugi ukt doctor
+#
+# A harness is then added by URL, http://<host>:7410/mcp, with that token as its bearer token.
+# The container knows only its own port: where another is published (UKT_PUBLISH), put that port
+# in the sign-in link and in the URL in place of 7410. The time on the link is UTC.
+#
+# For several people, each gets a token for their harness and a key that signs them, and nobody
+# else, in to the dashboard. These verbs use the host's own secret on the volume, not the token:
+#   docker compose -f deploy/compose.yaml exec uketsugi ukt invite <name> --operator-name <your name>
+#   docker compose -f deploy/compose.yaml exec uketsugi ukt people         # each credential's kind, label, making and last use
+#   docker compose -f deploy/compose.yaml exec uketsugi ukt revoke <id>
+#
+# The server speaks plain HTTP and answers only to names it is told. As written it is published on
+# this machine's loopback address alone. To serve other machines, put a proxy that terminates TLS
+# in front of it, and set UKT_PUBLIC_HOST to the name the proxy is reached by. The proxy must say
+# that the browser came over TLS (`X-Forwarded-Proto: https`, which most send unasked): the
+# dashboard's cookie is then marked Secure.
+services:
+  uketsugi:
+    build:
+      context: .
+      args:
+        RELEASE: dist/uketsugi-${UKT_VERSION:-0.1.0}-linux-x64.tar.gz
+    init: true
+    restart: unless-stopped
+    environment:
+      # Names the server is reached by besides localhost, comma-separated; empty for none.
+      UKT_ALLOWED_HOSTS: ${UKT_PUBLIC_HOST:-}
+    ports:
+      - "${UKT_PUBLISH:-127.0.0.1:7410}:7410"
+    volumes:
+      - uketsugi-data:/data
+    healthcheck:
+      test: ["CMD", "ukt", "doctor"]
+      interval: 5m
+      timeout: 30s
+      # The first start fetches the embedding model, a download of about 170 MB.
+      start_period: 3m
+    stop_grace_period: 30s
+
+volumes:
+  uketsugi-data:

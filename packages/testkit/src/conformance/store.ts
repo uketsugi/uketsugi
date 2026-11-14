@@ -1,0 +1,400 @@
+import { scopeOf, type Caller, type NewFact, type SearchQuery, type Store } from "@uketsugi/core";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { FakeClock, FakeIdGen } from "../fakes.ts";
+import { hostingCases } from "./store-hosting.ts";
+import {
+  content,
+  event,
+  hash,
+  openWithPeople,
+  person,
+  PROJECT,
+  targetOf,
+  type StoreHarness,
+} from "./support.ts";
+
+function query(caller: Caller, text: string, project = PROJECT): SearchQuery {
+  const tuning = { vectorCutoff: 0.78, admissionCoverage: 0.6, trigramThreshold: 0.5 };
+  const asked = { scope: scopeOf(caller), project, query: text, idents: [], embedding: null };
+  return { ...asked, ...tuning, passLimit: 50 };
+}
+
+/** What every Store adapter must do for the use cases: units, repeat safety, scoping, search and jobs. */
+export function describeStoreConformance(name: string, harness: StoreHarness): void {
+  describe(`${name}: Store conformance`, () => {
+    const clock = new FakeClock();
+    const ids = new FakeIdGen(7);
+    let store: Store;
+    let alice: Caller;
+    let bob: Caller;
+
+    function fact(caller: Caller, claim: string, detail: string | null = null): NewFact {
+      const author = caller.principalId;
+      const draft = { id: ids.uuid(), project: PROJECT, author };
+      return { ...draft, content: content(claim, detail), vector: null };
+    }
+
+    async function publish(
+      caller: Caller,
+      claim: string,
+      detail: string | null = null,
+    ): Promise<string> {
+      const draft = fact(caller, claim, detail);
+      await store.unit(targetOf(caller, clock.now()), async (unit) => {
+        await unit.facts.insert(draft);
+        await unit.append(event(draft.id, caller.principalId));
+        await unit.enqueue({
+          id: ids.uuid(),
+          kind: "embed",
+          subject: draft.id,
+          runAfter: clock.now(),
+        });
+      });
+      return draft.id;
+    }
+
+    const actorOf = (caller: Caller) => ({ kind: "person" as const, id: caller.principalId });
+
+    beforeAll(async () => {
+      ({ store, alice, bob } = await openWithPeople(harness, ids));
+    });
+    afterAll(() => store.close());
+
+    test("a subject resolves to one caller however often it is ensured", async () => {
+      const again = await person(store, ids, "test:alice");
+      expect(again).toEqual(alice);
+      expect(bob.orgId).not.toBe(alice.orgId);
+    });
+
+    test("one unit commits the fact, its event and its job together", async () => {
+      const id = await publish(alice, "Invoice webhooks retry five times with backoff");
+      const stored = await store.facts.get(scopeOf(alice), id);
+      expect(stored).toMatchObject({
+        id,
+        status: "unconfirmed",
+        project: PROJECT,
+        embedded: false,
+      });
+      const events = await store.review.events(scopeOf(alice), alice.privateAudienceId, 0, 10);
+      expect(events.map((entry) => [entry.seq, entry.subject])).toEqual([[1, id]]);
+      const jobs = await store.jobs.claim(clock.now(), 60_000, 10);
+      expect(jobs.map((job) => [job.kind, job.subject, job.attempts])).toEqual([["embed", id, 1]]);
+      await store.jobs.complete(jobs[0] ?? { orgId: "", id: "" });
+      expect(await store.jobs.counts()).toEqual({ waiting: 0, dead: 0 });
+    });
+
+    test("a unit that throws leaves nothing behind, and the next event takes the next sequence", async () => {
+      const draft = fact(alice, "The gateway times out after three seconds");
+      const target = targetOf(alice, clock.now());
+      const failed = store.unit(target, async (unit) => {
+        await unit.facts.insert(draft);
+        await unit.append(event(draft.id, alice.principalId));
+        throw new Error("stop");
+      });
+      await expect(failed).rejects.toThrow("stop");
+      expect(await store.facts.get(scopeOf(alice), draft.id)).toBeNull();
+      await publish(alice, "The ledger lock is held for up to four seconds");
+      const events = await store.review.events(scopeOf(alice), alice.privateAudienceId, 0, 10);
+      expect(events.map((entry) => entry.seq)).toEqual([1, 2]);
+    });
+
+    test("a repeated publish finds the author's own claim inside the unit", async () => {
+      const claim = "Handlers are idempotent on the event id";
+      const id = await publish(alice, claim);
+      const target = targetOf(alice, clock.now());
+      const found = await store.unit(target, (unit) =>
+        unit.facts.findByClaimHash(alice.principalId, PROJECT, content(claim).claimHash),
+      );
+      expect(found?.id).toBe(id);
+    });
+
+    test("a fact outside the reader's organization and audiences reads as absent", async () => {
+      const id = await publish(alice, "Refunds are settled nightly by the batch job");
+      expect(await store.facts.get(scopeOf(bob), id)).toBeNull();
+      expect(await store.facts.getMany(scopeOf(bob), [id])).toEqual([]);
+      expect(await store.facts.list(scopeOf(bob), { limit: 10 })).toEqual([]);
+      expect(await store.search.passes(query(bob, "refunds settled nightly"))).toEqual([]);
+      const wrongAudience = { orgId: alice.orgId, audienceIds: [bob.privateAudienceId] };
+      expect(await store.facts.get(wrongAudience, id)).toBeNull();
+    });
+
+    test("the keyword pass finds a fact by a stemmed word, in its own project only", async () => {
+      const id = await publish(alice, "Sessions expire after thirty minutes of inactivity");
+      const hits = await store.search.passes(query(alice, "when does a session expire"));
+      expect(hits.filter((row) => row.pass === "keyword").map((row) => row.factId)).toContain(id);
+      expect(
+        await store.search.passes(query(alice, "session expire", "github.com/acme/other")),
+      ).toEqual([]);
+      const kept = await store.search.candidates(query(alice, "session expire"), [id]);
+      expect(kept[0]?.lexemeCoverage).toBe(1);
+      const near = await store.search.trigram(query(alice, "sesions expire after thirty minutes"), [
+        id,
+      ]);
+      expect(near.map((row) => row.factId)).toEqual([id]);
+    });
+
+    test("a stored vector is found by cosine, and only while the content it was made for stands", async () => {
+      const id = await publish(alice, "Vectors live in the row beside the claim");
+      const vector = new Float32Array(384).fill(0.05);
+      expect(await store.facts.setVector(alice.orgId, id, hash("stale"), vector)).toBe(false);
+      const current = (await store.facts.get(scopeOf(alice), id))?.contentHash ?? "";
+      expect(await store.facts.setVector(alice.orgId, id, current, vector)).toBe(true);
+      const hits = await store.search.passes({
+        ...query(alice, "unrelated words"),
+        embedding: vector,
+      });
+      expect(hits).toContainEqual({ factId: id, pass: "vector", rank: 1 });
+    });
+
+    test("a superseded fact names the fact that replaced it and leaves search", async () => {
+      const oldId = await publish(alice, "Exports run hourly from the reporting replica");
+      const nextId = await publish(alice, "Exports run every fifteen minutes from the replica");
+      const target = targetOf(alice, clock.now());
+      await store.unit(target, (unit) => unit.facts.supersede(oldId, nextId));
+      const old = await store.facts.get(scopeOf(alice), oldId);
+      expect(old).toMatchObject({ status: "superseded", supersededBy: nextId });
+      const hits = await store.search.passes(query(alice, "exports replica"));
+      expect(hits.map((row) => row.factId)).toEqual([nextId]);
+    });
+
+    test("a chain of three ends at one live fact, and undoing a link touches only that link", async () => {
+      const scope = scopeOf(alice);
+      const [a, b, c] = await Promise.all(
+        ["first", "second", "third"].map((n) => publish(alice, `The ${n} wording of one claim`)),
+      );
+      if (a === undefined || b === undefined || c === undefined) throw new Error("no facts");
+      const target = targetOf(alice, clock.now());
+      const refused = await store.unit(target, async (unit) => {
+        await unit.facts.supersede(a, b);
+        await unit.facts.supersede(b, c);
+        // No fact supersedes itself, a superseded fact supersedes nothing, and a link is written once.
+        const outcomes: string[] = [];
+        for (const [id, by] of [
+          [c, c],
+          [c, a],
+          [a, c],
+        ] as const) {
+          const tried = unit.facts.supersede(id, by);
+          outcomes.push(
+            await tried.then(
+              () => "done",
+              (error: unknown) => String(error),
+            ),
+          );
+        }
+        return outcomes;
+      });
+      expect(refused).toEqual(Array(3).fill(expect.stringContaining("was not superseded by")));
+      const linked = await store.facts.get(scope, a);
+      expect(linked?.supersededBy).toBe(b);
+      const heads = new Map([
+        [a, c],
+        [b, c],
+      ]);
+      expect(await store.facts.heads(scope, [a, b, c])).toEqual(heads);
+      expect(await store.facts.heads(scopeOf(bob), [a])).toEqual(new Map());
+
+      clock.advance(1000);
+      const later = { ...target, at: clock.now() };
+      const inside = await store.unit(later, async (unit) => {
+        await unit.facts.restore(b, "unconfirmed");
+        return unit.facts.heads([a, b]);
+      });
+      expect(inside).toEqual(new Map([[a, b]]));
+      expect(await store.facts.get(scope, a)).toEqual(linked);
+      expect(await store.facts.get(scope, b)).toMatchObject({ status: "unconfirmed" });
+    });
+
+    test("a question never admits a fact, an identifier it holds does, and a kept fact carries what standing reads", async () => {
+      const draft = fact(alice, "Refund batch BATCH-02 settles at two in the morning");
+      const question = "why did ZEP-9 trip the zeppelin quorum?";
+      const target = targetOf(alice, clock.now());
+      await store.unit(target, async (unit) => {
+        const content = { ...draft.content, question, idents: ["batch-02"] };
+        await unit.facts.insert({ ...draft, content });
+      });
+      const asked = query(alice, "zeppelin quorum");
+      expect(await store.search.passes({ ...asked, idents: ["zep-9"] })).toEqual([]);
+      expect(await store.search.passes({ ...asked, idents: ["zep-9", "batch-02"] })).toEqual([
+        { factId: draft.id, pass: "identifier", rank: 1 },
+      ]);
+      const covered = query(alice, "refund batch zeppelin");
+      const kept = {
+        factId: draft.id,
+        cosine: null,
+        lexemeCoverage: 2 / 3,
+        status: "unconfirmed",
+        author: alice.principalId,
+        updatedAt: clock.now(),
+      };
+      expect(await store.search.candidates(covered, [draft.id])).toEqual([
+        { ...kept, flagged: false, confirmedAt: null },
+      ]);
+      await store.unit(target, async (unit) => {
+        const check = { factId: draft.id, at: clock.now(), sourceVersion: null, checked: null };
+        await unit.review.confirm({ ...check, person: alice.principalId });
+        const stale = { factId: draft.id, kind: "marked_stale" as const, raisedBy: actorOf(bob) };
+        await unit.review.raiseFlag({ ...stale, id: ids.uuid() });
+      });
+      expect(await store.search.candidates(covered, [draft.id])).toEqual([
+        { ...kept, flagged: true, confirmedAt: clock.now() },
+      ]);
+    });
+
+    test("confirmations and flags are one per person and kind, and a correction clears other people's", async () => {
+      const id = await publish(alice, "Feature flags are read once at start-up");
+      const target = targetOf(alice, clock.now());
+      const check = {
+        factId: id,
+        at: clock.now(),
+        sourceVersion: "a41d07c",
+        checked: "read config.ts",
+      };
+      const flag = { factId: id, kind: "marked_stale" as const };
+      const raisedBy = { kind: "person" as const, id: alice.principalId };
+      const raised = await store.unit(target, async (unit) => {
+        await unit.review.confirm({ ...check, person: alice.principalId });
+        await unit.review.confirm({ ...check, person: alice.principalId });
+        await unit.review.confirm({ ...check, person: bob.principalId });
+        const first = await unit.review.raiseFlag({ ...flag, id: ids.uuid(), raisedBy });
+        const second = await unit.review.raiseFlag({ ...flag, id: ids.uuid(), raisedBy });
+        return [first, second];
+      });
+      expect(raised).toEqual([true, false]);
+      expect(await store.review.confirmations(scopeOf(alice), [id])).toHaveLength(2);
+      expect(
+        (await store.review.openFlags(scopeOf(alice), [id])).map((entry) => entry.kind),
+      ).toEqual(["marked_stale"]);
+      const cleared = await store.unit(target, (unit) =>
+        unit.review.clearConfirmations(id, alice.principalId),
+      );
+      expect(cleared).toBe(1);
+    });
+
+    test("a secret's hash names its caller, as its own kind only, until the credential is revoked, and its use is stamped once a minute", async () => {
+      const { directory } = store;
+      const credential = { orgId: alice.orgId, id: ids.uuid(), principalId: alice.principalId };
+      const made = clock.now();
+      const token = { ...credential, kind: "agent" as const, label: "test", createdAt: made };
+      await directory.addCredential({ ...token, tokenHash: hash("t1") });
+      const held = () => directory.credentials(alice.orgId, alice.principalId);
+      expect(await held()).toMatchObject([{ kind: "agent", createdAt: made, lastUsedAt: null }]);
+      const signedIn = { ...alice, credentialId: credential.id };
+      const as = (secret: string, kind: "agent" | "person" = "agent") =>
+        directory.callerByTokenHash(hash(secret), kind, clock.now());
+      expect(await as("t1")).toEqual(signedIn);
+      expect(await as("t2")).toBeNull();
+      // What a harness sends does not sign a person in, and a person's key calls no tool.
+      expect(await as("t1", "person")).toBeNull();
+      const key = { ...token, id: ids.uuid(), kind: "person" as const, tokenHash: hash("k1") };
+      await directory.addCredential(key);
+      expect(await as("k1")).toBeNull();
+      expect(await as("k1", "person")).toEqual({ ...alice, credentialId: key.id });
+      clock.advance(30_000);
+      await as("t1");
+      expect((await held())[0]?.lastUsedAt).toEqual(made);
+      clock.advance(31_000);
+      await as("t1");
+      expect((await held())[0]?.lastUsedAt).toEqual(clock.now());
+      expect(await directory.callerOfCredential(alice.orgId, credential.id)).toEqual(signedIn);
+      expect(await directory.callerOf(alice.orgId, alice.principalId)).toEqual(alice);
+      expect(await directory.callerOf(alice.orgId, bob.principalId)).toBeNull();
+      expect(await directory.revokeCredential(alice.orgId, credential.id, clock.now())).toBe(true);
+      expect(await as("t1")).toBeNull();
+      expect(await directory.callerOfCredential(alice.orgId, credential.id)).toBeNull();
+      expect(await as("k1", "person")).not.toBeNull();
+    });
+
+    test("a session is read back with its stamps and its note, and a project is created once", async () => {
+      const key = {
+        orgId: alice.orgId,
+        principalId: alice.principalId,
+        clientName: "claude-code",
+        conversationId: null,
+        project: PROJECT,
+      };
+      const opened = clock.now();
+      const stamps = {
+        firstCallAt: opened,
+        lastCallAt: opened,
+        lastSearchAt: null,
+        lastPublishAt: null,
+      };
+      const session = {
+        ...key,
+        id: ids.uuid(),
+        displayId: "s-0001",
+        clientVersion: "2.1",
+        ...stamps,
+        refusedCalls: 0,
+        calls: 1,
+        briefedAt: null,
+        note: null,
+      };
+      const ref = { kind: "repository" as const, key: PROJECT };
+      const first = await store.projects.ensure(alice.orgId, ref, clock.now());
+      expect(await store.projects.ensure(alice.orgId, ref, new Date(0))).toEqual(first);
+      await store.sessions.open(session);
+      expect(await store.sessions.latestOf(key)).toEqual(session);
+      clock.advance(60_000);
+      await store.sessions.touch(alice.orgId, session.id, clock.now(), "search");
+      const note = { text: "Stopped after the queue tests.", final: true, at: clock.now() };
+      await store.sessions.setNote(alice.orgId, session.id, note);
+      const touched = { lastCallAt: clock.now(), lastSearchAt: clock.now(), calls: 2, note };
+      expect(await store.sessions.latestOf(key)).toEqual({ ...session, ...touched });
+      expect(
+        await store.sessions.latestOf({ ...key, project: "github.com/acme/other" }),
+      ).toBeNull();
+      expect(await store.sessions.latestOf({ ...key, conversationId: "c-1" })).toBeNull();
+      const who = [alice.orgId, alice.principalId, PROJECT] as const;
+      expect((await store.sessions.latest(...who, null))?.note).toEqual(note);
+      expect(await store.sessions.latest(...who, session.id)).toBeNull();
+      const activity = await store.sessions.activity(alice.orgId, alice.principalId, opened);
+      expect(activity).toEqual([
+        {
+          clientName: "claude-code",
+          clientVersion: "2.1",
+          sessions: 1,
+          searched: 1,
+          published: 0,
+          refused: 0,
+        },
+      ]);
+      const known = await store.sessions.byIds(alice.orgId, [session.id, ids.uuid()]);
+      expect(known.map((entry) => entry.clientName)).toEqual(["claude-code"]);
+    });
+
+    test("names are listed in byte order, whatever the database collates by", async () => {
+      const at = clock.now();
+      const [here, hyphen] = [PROJECT, "github.com/acme-b/api"];
+      for (const key of [here, hyphen]) {
+        await store.projects.ensure(bob.orgId, { kind: "repository", key }, at);
+        await store.projects.choose(bob.orgId, bob.principalId, key, "private");
+      }
+      const listed = await store.projects.listOf(bob.orgId, bob.principalId);
+      expect(listed.map((project) => project.key)).toEqual([hyphen, here]);
+      const who = { orgId: bob.orgId, principalId: bob.principalId, conversationId: null };
+      const calls = { firstCallAt: at, lastCallAt: at, lastSearchAt: null, lastPublishAt: null };
+      const counts = {
+        refusedCalls: 0,
+        calls: 1,
+        briefedAt: null,
+        clientVersion: null,
+        note: null,
+      };
+      for (const clientName of ["claude-code", "Zed"]) {
+        const session = { ...who, clientName, project: here, id: ids.uuid(), displayId: "s-1" };
+        await store.sessions.open({ ...session, ...calls, ...counts });
+      }
+      const activity = await store.sessions.activity(bob.orgId, bob.principalId, at);
+      expect(activity.map((row) => row.clientName)).toEqual(["Zed", "claude-code"]);
+    });
+
+    hostingCases({
+      store: () => store,
+      people: () => [alice, bob],
+      now: () => clock.now(),
+      fact,
+    });
+  });
+}

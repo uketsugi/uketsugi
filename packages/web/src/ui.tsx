@@ -1,0 +1,300 @@
+/**
+ * The dashboard's own parts: Base UI for behaviour, Tailwind classes over the tokens in
+ * `styles.css` for looks. A status is always drawn by `Mark`: a shape, a colour and a word.
+ */
+import { Button as BaseButton } from "@base-ui/react/button";
+import {
+  CITATION_WORD,
+  type CitationClass,
+  type FlagKind,
+  type Status,
+  type TaskState,
+  type Trust,
+} from "@uketsugi/contracts";
+import { cva, cx, type VariantProps } from "class-variance-authority";
+import { formatDistanceToNowStrict } from "date-fns";
+import {
+  Check,
+  Circle,
+  CircleCheck,
+  Copy,
+  CopyPlus,
+  CornerUpRight,
+  EyeOff,
+  FileDiff,
+  Flag,
+  Forward,
+  Hand,
+  LinkIcon,
+  Lock,
+  MessageSquareQuote,
+  Shield,
+  ShieldCheck,
+  TimerOff,
+  TriangleAlert,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { partsOf } from "./api.ts";
+
+export const buttonClass = cva(
+  "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border font-medium whitespace-nowrap select-none disabled:cursor-default disabled:opacity-60",
+  {
+    variants: {
+      tone: {
+        outline: "border-line-strong bg-surface text-ink hover:bg-sunken",
+        primary: "border-accent bg-accent text-on-accent hover:opacity-90",
+        danger: "border-danger bg-surface text-danger hover:bg-danger-soft",
+        destroy: "border-danger bg-danger text-on-danger hover:opacity-90",
+        code: "border-code-muted bg-code text-code-ink hover:bg-white/10",
+      },
+      size: { sm: "h-7 px-2.5 text-xs", md: "h-8 px-3 text-sm" },
+    },
+    defaultVariants: { tone: "outline", size: "md" },
+  },
+);
+
+type ButtonProps = Omit<BaseButton.Props, "className"> & VariantProps<typeof buttonClass>;
+
+export function Button({ tone, size, ...props }: ButtonProps) {
+  return <BaseButton {...props} className={buttonClass({ tone, size })} />;
+}
+
+type Tone = "ok" | "warn" | "neutral" | "info" | "danger";
+
+const TONE: Record<Tone, string> = {
+  ok: "bg-ok-soft text-ok-ink",
+  warn: "bg-warn-soft text-warn-ink",
+  neutral: "bg-neutral-soft text-neutral-ink",
+  info: "bg-info-soft text-info-ink",
+  danger: "bg-danger-soft text-danger-ink",
+};
+
+/** How one status is drawn: its colour and its shape. Its word is the contract's own, a citation's aside. */
+export interface Look {
+  readonly tone: Tone;
+  readonly icon: LucideIcon;
+}
+
+export function Mark({ look, children }: { look: Look; children: ReactNode }) {
+  const Icon = look.icon;
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+        TONE[look.tone],
+      )}
+    >
+      <Icon aria-hidden className="size-3 shrink-0" />
+      {children}
+    </span>
+  );
+}
+
+const STATUS: Record<Status, Look> = {
+  confirmed: { tone: "ok", icon: CircleCheck },
+  unconfirmed: { tone: "neutral", icon: Circle },
+  superseded: { tone: "info", icon: CornerUpRight },
+};
+
+const REDACTED: Look = { tone: "danger", icon: EyeOff };
+
+const FLAG: Record<FlagKind, Look> = {
+  marked_stale: { tone: "warn", icon: Flag },
+  possible_contradiction: { tone: "warn", icon: TriangleAlert },
+  possible_duplicate: { tone: "warn", icon: CopyPlus },
+  source_changed: { tone: "warn", icon: FileDiff },
+};
+
+const CITATION: Record<CitationClass, Look> = {
+  checkable: { tone: "info", icon: LinkIcon },
+  testimony: { tone: "neutral", icon: MessageSquareQuote },
+};
+
+const TRUST: Record<Trust, Look> = {
+  reviewed: { tone: "ok", icon: ShieldCheck },
+  unreviewed: { tone: "neutral", icon: Shield },
+};
+
+/** A fact's status in the contract's word, or "redacted" for a fact whose text is gone. */
+export function StatusMark({ fact }: { fact: { status: Status; redacted: boolean } }) {
+  if (fact.redacted) return <Mark look={REDACTED}>redacted</Mark>;
+  return <Mark look={STATUS[fact.status]}>{fact.status}</Mark>;
+}
+
+/** A code of the contract as a person reads it: `marked_stale` reads "marked stale". */
+export function inWords(code: string): string {
+  return code.replaceAll("_", " ");
+}
+
+/** A text as it starts a sentence: its first letter in upper case. */
+export function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A number of things, in words: "1 task", "3 tasks". */
+export function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+const TASK_STATE: Record<TaskState, Look> = {
+  open: { tone: "neutral", icon: Circle },
+  claimed: { tone: "info", icon: Hand },
+  handed_off: { tone: "neutral", icon: Forward },
+  done: { tone: "ok", icon: CircleCheck },
+};
+
+/** The states a task is shown in, in the order work moves through them. */
+export const TASK_STATES = Object.keys(TASK_STATE) as TaskState[];
+
+const LAPSED: Look = { tone: "warn", icon: TimerOff };
+
+/** A task's state in the contract's word. A claimed task whose lease ran out is open again, and says why. */
+export function TaskStateMark({ task }: { task: { state: TaskState; lapsed?: boolean } }) {
+  if (task.lapsed === true) return <Mark look={LAPSED}>open · lease lapsed</Mark>;
+  return <Mark look={TASK_STATE[task.state]}>{inWords(task.state)}</Mark>;
+}
+
+/** Who sees a record, as it is drawn: everyone on the server, or its person alone. */
+export const SEEN_BY: Record<"private" | "shared", Look> = {
+  shared: { tone: "info", icon: Users },
+  private: { tone: "neutral", icon: Lock },
+};
+
+/** A flag in the contract's word. */
+export function FlagMark({ kind }: { kind: FlagKind }) {
+  return <Mark look={FLAG[kind]}>{inWords(kind)}</Mark>;
+}
+
+export function TrustMark({ trust }: { trust: Trust }) {
+  return <Mark look={TRUST[trust]}>{trust}</Mark>;
+}
+
+/**
+ * A citation's class in the words a person reads (`CITATION_WORD`), with the reason when it is
+ * testimony, drawn in no colour a confirmation has: nothing checked it.
+ */
+export function CitationMark({ of, reason }: { of: CitationClass; reason?: string }) {
+  const word = CITATION_WORD[of];
+  return <Mark look={CITATION[of]}>{reason === undefined ? word : `${word} · ${reason}`}</Mark>;
+}
+
+/** A link that narrows a list, among its alternatives; the one in force is marked `aria-current`. */
+export const FILTER_LINK =
+  "inline-flex h-8 items-center rounded-md border border-line-strong bg-surface px-3 font-medium hover:bg-sunken aria-[current]:border-accent aria-[current]:bg-accent-soft aria-[current]:text-accent-ink";
+
+/** How a dialog that asks before a change is drawn: centred, over a dimmed page. */
+export const DIALOG = {
+  backdrop: "fixed inset-0 bg-black/40",
+  popup:
+    "fixed top-1/2 left-1/2 w-[28rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 space-y-4 rounded-lg border border-line bg-surface p-5 shadow-xl",
+} as const;
+
+export function Card({ children, label }: { children: ReactNode; label?: string }) {
+  return (
+    <section aria-label={label} className="rounded-lg border border-line bg-surface">
+      {children}
+    </section>
+  );
+}
+
+/** A time as "4 minutes ago", with the exact time for whoever asks. */
+export function Ago({ at }: { at: string }) {
+  const date = new Date(at);
+  return (
+    <time dateTime={at} title={date.toLocaleString()}>
+      {formatDistanceToNowStrict(date, { addSuffix: true })}
+    </time>
+  );
+}
+
+export function CopyButton({ text, label, tone }: { text: string; label: string; tone?: "code" }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = () => void navigator.clipboard.writeText(text).then(() => setCopied(true));
+  const Icon = copied ? Check : Copy;
+  return (
+    <>
+      <Button size="sm" tone={tone} aria-label={`Copy ${label}`} onClick={copy}>
+        <Icon aria-hidden className="size-3" />
+        {copied ? "Copied" : "Copy"}
+      </Button>
+      <span role="status" className="sr-only">
+        {copied ? `Copied ${label}` : ""}
+      </span>
+    </>
+  );
+}
+
+/** How a command or a name is drawn inside a sentence. */
+export const INLINE_CODE = "rounded-sm bg-neutral-soft px-1 py-0.5 font-mono text-[0.8125rem]";
+
+/** Text a person copies or types: a command, a URL, a configuration. It wraps and never scrolls. */
+export function CodeBlock({ text, label }: { text: string; label: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-md bg-code p-3 text-code-ink [--focus:var(--focus-on-code)]">
+      <pre className="min-w-0 flex-1 font-mono text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap">
+        <code>{text}</code>
+      </pre>
+      <CopyButton text={text} label={label} tone="code" />
+    </div>
+  );
+}
+
+/** A failure in its three parts: what happened, what it means, what to do next. */
+export function ErrorPanel({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  const parts = partsOf(error);
+  return (
+    <div
+      role="alert"
+      className="flex gap-3 rounded-lg border border-danger bg-danger-soft p-4 text-danger-ink"
+    >
+      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+      <div className="space-y-1">
+        <p className="font-semibold">{parts.what}</p>
+        <p>{parts.meaning}</p>
+        <p>{parts.next}</p>
+        {parts.retry && onRetry !== undefined ? (
+          <p className="pt-1">
+            <Button size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function Loading({ what }: { what: string }) {
+  return (
+    <p role="status" className="p-4 text-ink-muted">
+      Loading {what}…
+    </p>
+  );
+}
+
+/** An empty page: one sentence and at most one action. */
+export function Empty({ sentence, children }: { sentence: string; children?: ReactNode }) {
+  return (
+    <div className="space-y-3 p-6 text-center">
+      <p className="text-ink-muted">{sentence}</p>
+      {children}
+    </div>
+  );
+}
+
+/** An empty page's action when it is something to say to an agent: the words, and a button that copies them. */
+export function ToSay({ text, label }: { text: string; label: string }) {
+  return (
+    <p className="flex flex-wrap items-center justify-center gap-2">
+      <span>“{text}”</span>
+      <CopyButton text={text} label={label} />
+    </p>
+  );
+}

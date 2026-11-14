@@ -1,0 +1,32 @@
+{
+  "name": "@uketsugi/core",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "@uketsugi/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "generate": "node scripts/generate-token-rules.ts"
+  },
+  "dependencies": {
+    "@uketsugi/contracts": "workspace:*",
+    "ajv": "8.20.0",
+    "ansi-regex": "6.6.0",
+    "async-lock": "1.5.0",
+    "canonicalize": "5.1.0",
+    "card-validator": "10.0.4",
+    "libphonenumber-js": "1.13.16",
+    "re2js": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/async-lock": "1.4.2",
+    "smol-toml": "1.9.1"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@uketsugi/embed",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "@uketsugi/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@uketsugi/core": "workspace:*",
+    "ssri": "14.0.0",
+    "tar": "7.5.23"
+  },
+  "devDependencies": {
+    "@types/ssri": "7.1.5",
+    "@uketsugi/testkit": "workspace:*"
+  }
+}

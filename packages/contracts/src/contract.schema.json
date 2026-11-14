@@ -1,0 +1,2140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:uketsugi:contract",
+  "contractVersion": "0.1.0",
+  "limits": {
+    "citations_chars": 20000,
+    "closing_note_chars": 4000
+  },
+  "tools": [
+    {
+      "name": "search_facts",
+      "description": "Search the shared facts, seeded and published, for a query.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "id": {
+            "type": "string",
+            "description": "One fact by its id, in place of a query. A superseded id also names the live fact."
+          },
+          "explain": {
+            "type": "boolean",
+            "description": "Adds the ranking's reasoning for the facts returned."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "The most facts to return."
+          }
+        },
+        "required": ["project"]
+      }
+    },
+    {
+      "name": "publish_fact",
+      "description": "Store a fact with its detail, citations and the question it answers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "claim": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "citations": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Where the claim comes from, at least one. Each is a string (`path:lines`, `path:lines@commit`, a commit or a URL) or an object. A reference anyone can open (a repository item, a public web page) is checkable. One that needs sign-in is kept as testimony.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "file",
+                        "commit",
+                        "pull_request",
+                        "issue",
+                        "web",
+                        "fact",
+                        "observation",
+                        "document",
+                        "person"
+                      ]
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "lines": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "quote": {
+                      "type": "string"
+                    },
+                    "fact": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "who": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["kind"]
+                }
+              ]
+            }
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "supersedes": {
+            "type": "string",
+            "description": "The id of your own fact that this one corrects."
+          }
+        },
+        "required": ["project", "claim", "citations"]
+      }
+    },
+    {
+      "name": "update_fact",
+      "description": "Apply a correction or a mark to a stored fact.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "id": {
+            "type": "string"
+          },
+          "claim": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "citations": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Replaces the fact's citations. Each is a string (`path:lines`, `path:lines@commit`, a commit or a URL) or an object, as for publish_fact.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              ]
+            }
+          },
+          "confirm": {
+            "type": "object",
+            "description": "Records that you checked the fact against its source and it holds.",
+            "properties": {
+              "checked": {
+                "type": "string",
+                "description": "What you checked.",
+                "maxLength": 2000
+              },
+              "source_version": {
+                "type": "string",
+                "description": "The version of the source you checked against: a commit, for a repository item.",
+                "maxLength": 2000
+              }
+            },
+            "required": ["checked"]
+          },
+          "flag": {
+            "type": "string",
+            "enum": ["stale", "contradiction"],
+            "description": "Marks the fact as doubtful: out of date, or contradicted by what you found."
+          }
+        },
+        "required": ["project", "id"]
+      }
+    },
+    {
+      "name": "search_tasks",
+      "description": "List this project's tasks in the order you could pick them up, or one task by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "id": {
+            "type": "string",
+            "description": "One task by its id, with its notes, its holder and who published and held it."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "claimed", "handed_off", "done"],
+            "description": "Only tasks in this state. Without it, every task that is not done."
+          },
+          "mine": {
+            "type": "boolean",
+            "description": "Only tasks you published or hold."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 20,
+            "description": "The most tasks to return."
+          }
+        },
+        "required": ["project"]
+      }
+    },
+    {
+      "name": "publish_task",
+      "description": "Store a new task, optionally taking it in the same call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The work, in one line."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "What is to be done."
+          },
+          "claim": {
+            "type": "boolean",
+            "description": "Takes the task in the same call and returns its lease."
+          },
+          "tracked": {
+            "type": "boolean",
+            "description": "Marks a step of your own plan. A tracked task is private to the person."
+          }
+        },
+        "required": ["project", "title"]
+      }
+    },
+    {
+      "name": "claim_task",
+      "description": "Take a task. Returns the lease that every later change to it passes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "id": {
+            "type": "string"
+          },
+          "lease": {
+            "type": "string",
+            "description": "The lease you already hold on this task: the claim renews it and returns the same lease."
+          },
+          "take_over": {
+            "type": "boolean",
+            "description": "Takes the task from a lease one of your own sessions still holds; that lease then stops working. For when that session is gone or the person asks."
+          }
+        },
+        "required": ["project", "id"]
+      }
+    },
+    {
+      "name": "update_task",
+      "description": "Add a note to a task you hold, hand it over or finish it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "This repository's origin remote as host/owner/name, for example github.com/acme/api. Run `git remote get-url origin` once and reuse it."
+          },
+          "id": {
+            "type": "string"
+          },
+          "lease": {
+            "type": "string",
+            "description": "The lease claim_task returned. Every change needs it, and every call that passes it renews it."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "A note at a checkpoint. With state released it is the handoff note for whoever takes the task next."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["done", "released"],
+            "description": "done finishes the task. released frees the lease: with a note the task is handed off, without one it is open again."
+          },
+          "version": {
+            "type": "integer",
+            "description": "The version of the task this change was made against. A change already applied changes nothing; one against an older version is refused."
+          }
+        },
+        "required": ["project", "id"]
+      }
+    }
+  ],
+  "results": {
+    "search_facts": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "matched": {
+              "type": "integer",
+              "description": "How many facts matched."
+            },
+            "shown": {
+              "type": "integer",
+              "description": "How many of them this result shows."
+            },
+            "confidence": {
+              "$ref": "#/$defs/confidence"
+            },
+            "facts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/fact"
+              }
+            },
+            "message": {
+              "type": "string",
+              "description": "What the text leads with when no fact is shown, or when none shown is a confident match."
+            },
+            "explain": {
+              "type": "object",
+              "description": "The ranking's reasoning, on request.",
+              "additionalProperties": true
+            }
+          },
+          "required": ["matched", "shown", "confidence", "facts"]
+        }
+      ]
+    },
+    "publish_fact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/status"
+            },
+            "created": {
+              "type": "boolean",
+              "description": "False when the caller's same claim was already stored and is returned."
+            },
+            "citations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/citation"
+              }
+            },
+            "similar": {
+              "type": "array",
+              "description": "Near-identical facts already stored: confirm one of them in place of this.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "claim": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "claim"]
+              }
+            },
+            "supersedes": {
+              "type": "string"
+            },
+            "redacted": {
+              "$ref": "#/$defs/redacted"
+            },
+            "audience": {
+              "$ref": "#/$defs/audience",
+              "description": "Who can see the fact as it now stands. Only on a server with several people."
+            },
+            "private_because": {
+              "$ref": "#/$defs/privateBecause",
+              "description": "With `audience: private`, when the fact is the caller's own."
+            }
+          },
+          "required": ["id", "status", "created", "citations"]
+        }
+      ]
+    },
+    "update_fact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/status"
+            },
+            "flags": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/flagKind"
+              }
+            },
+            "citations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/citation"
+              }
+            },
+            "redacted": {
+              "$ref": "#/$defs/redacted"
+            },
+            "audience": {
+              "$ref": "#/$defs/audience",
+              "description": "Who can see the fact as it now stands. Only on a server with several people."
+            },
+            "private_because": {
+              "$ref": "#/$defs/privateBecause",
+              "description": "With `audience: private`, when the fact is the caller's own."
+            }
+          },
+          "required": ["id", "status", "flags"]
+        }
+      ]
+    },
+    "search_tasks": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "matched": {
+              "type": "integer",
+              "description": "How many tasks matched."
+            },
+            "shown": {
+              "type": "integer",
+              "description": "How many of them this result shows."
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/task"
+              }
+            },
+            "notes": {
+              "type": "array",
+              "description": "With id: the task's notes, oldest first.",
+              "items": {
+                "$ref": "#/$defs/taskNote"
+              }
+            },
+            "history": {
+              "type": "array",
+              "description": "With id: who published, claimed, released and finished the task, oldest first.",
+              "items": {
+                "$ref": "#/$defs/taskEvent"
+              }
+            },
+            "message": {
+              "type": "string",
+              "description": "The reply when no task is shown."
+            }
+          },
+          "required": ["matched", "shown", "tasks"]
+        }
+      ]
+    },
+    "publish_task": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/task"
+            },
+            "created": {
+              "type": "boolean",
+              "description": "False when your unfinished task of the same title already existed and is returned."
+            },
+            "lease": {
+              "type": "string",
+              "description": "With claim: the lease to pass to update_task."
+            }
+          },
+          "required": ["task", "created"]
+        }
+      ]
+    },
+    "claim_task": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/task"
+            },
+            "lease": {
+              "type": "string",
+              "description": "The lease to pass to update_task."
+            },
+            "renewed": {
+              "type": "boolean",
+              "description": "True when the call passed the lease it already held, and that lease was renewed."
+            },
+            "notes": {
+              "type": "array",
+              "description": "The task's latest notes, oldest first: where the work stands.",
+              "items": {
+                "$ref": "#/$defs/taskNote"
+              }
+            }
+          },
+          "required": ["task", "lease", "renewed", "notes"]
+        }
+      ]
+    },
+    "update_task": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/task"
+            },
+            "changed": {
+              "type": "boolean",
+              "description": "False when the change was already applied and nothing was done."
+            }
+          },
+          "required": ["task", "changed"]
+        }
+      ]
+    }
+  },
+  "api": {
+    "requests": {
+      "FactListParams": {
+        "type": "object",
+        "description": "`GET /api/facts` query.",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Only this project's facts, by its canonical key."
+          },
+          "q": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "A search: needs `project`. Without it the list is newest first."
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "`next` of the page before."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "The most facts on a page."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskListParams": {
+        "type": "object",
+        "description": "`GET /api/tasks` query.",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Only this project's tasks, by its canonical key."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "claimed", "handed_off", "done"],
+            "description": "Only tasks in this state, as `search_tasks` takes it. Without it, every task that is not done."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100,
+            "description": "The most tasks to return."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ActivityParams": {
+        "type": "object",
+        "description": "`GET /api/activity` query.",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "default": 7,
+            "description": "How far back to count, in days."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExportParams": {
+        "type": "object",
+        "description": "`GET /api/export` query. The answer is one Markdown document, sent as a download.",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Only this project; every project when left out."
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostProofParams": {
+        "type": "object",
+        "description": "`GET /api/host-proof` query.",
+        "properties": {
+          "challenge": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32,128}$",
+            "description": "Random bytes the asker made up for this one question, in hex."
+          }
+        },
+        "required": ["challenge"],
+        "additionalProperties": false
+      },
+      "NewProjectRequest": {
+        "type": "object",
+        "description": "`POST /api/projects`: a named project of the person's own, `me/<slug>`.",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "description": "Lower-case letters, digits and hyphens, starting with a letter or a digit. It never changes."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "The display name."
+          }
+        },
+        "required": ["slug"],
+        "additionalProperties": false
+      },
+      "SessionNoteRequest": {
+        "type": "object",
+        "description": "`POST /api/session-notes`: where a session stands, in the agent's own last words.",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "The project, as a tool call names it. Give this or `cwd`."
+          },
+          "cwd": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "The session's working directory, for a caller that cannot name the project."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The note: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept."
+          },
+          "final": {
+            "type": "boolean",
+            "default": false,
+            "description": "True for the session's last word: the note ends the session, and the next call opens a new one whose brief shows it. False for a note at a checkpoint, such as a hook sends after every turn: it replaces the session's note and the session goes on."
+          },
+          "client": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "The harness's name, when the request is not made by the harness itself."
+          }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "ProjectChoiceRequest": {
+        "type": "object",
+        "description": "`POST /api/projects/choice`: the person's choice for one project. Only a signed-in browser makes it.",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "The project, as a tool call names it."
+          },
+          "treatment": {
+            "type": "string",
+            "enum": ["private", "shared"],
+            "description": "`shared` shows what the person publishes there that others can check, and their tasks, to everyone on the server; `private` keeps all of it theirs and takes back what they shared."
+          }
+        },
+        "required": ["project", "treatment"],
+        "additionalProperties": false
+      },
+      "SignInRequest": {
+        "type": "object",
+        "description": "`POST /sign-in`: signs a browser in to the dashboard with the person's own key. A harness's token is refused here.",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": ["key"],
+        "additionalProperties": false
+      },
+      "InviteRequest": {
+        "type": "object",
+        "description": "`POST /api/people`: adds a person with a token for their harness and a key for themselves, or, with `another`, issues one more credential to a person who is there.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The person's name, as others see it beside what they share."
+          },
+          "another": {
+            "type": "string",
+            "enum": ["agent", "person"],
+            "description": "For a person who is already there: the one credential to issue, a harness token or a dashboard key. Without it a name that is taken is refused."
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "What the credential is for, for example the machine it goes on."
+          },
+          "operator_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The name of whoever runs the server, as others will see it: needed once, before the first person is added."
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "DashboardSession": {
+        "type": "object",
+        "description": "`GET /api/session`: who is signed in. A 401 means nobody: the person runs `ukt ui` again.",
+        "properties": {
+          "person": {
+            "type": "string",
+            "description": "The person's display name."
+          },
+          "csrf": {
+            "type": "string",
+            "description": "The value to send in the CSRF header."
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "When the cookie stops working. ISO 8601, UTC."
+          }
+        },
+        "required": ["person", "csrf", "expires_at"]
+      },
+      "HostProof": {
+        "type": "object",
+        "description": "`GET /api/host-proof`: proof that the server holds the secret of the host it runs on, without showing it.",
+        "properties": {
+          "proof": {
+            "type": "string",
+            "description": "HMAC-SHA-256 of the challenge under the host's secret, in hex."
+          }
+        },
+        "required": ["proof"]
+      },
+      "SignInCode": {
+        "type": "object",
+        "description": "`POST /api/sign-in-codes`: a code that signs a browser in once, within a few minutes.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "The link to open: the server's own URL, the sign-in path and the code."
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "ISO 8601, UTC."
+          }
+        },
+        "required": ["code", "url", "expires_at"]
+      },
+      "CapabilityDescriptor": {
+        "type": "object",
+        "description": "`GET /api/capabilities`: what this server is and what it can do.",
+        "properties": {
+          "edition": {
+            "type": "string",
+            "description": "`community` for the open server; an overlay names its own."
+          },
+          "contract_version": {
+            "type": "string"
+          },
+          "mcp_revisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The MCP protocol revisions `/mcp` answers, oldest first."
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "vector": {
+                "type": "boolean",
+                "description": "Whether an embedding model is installed, so search has its vector pass."
+              },
+              "tasks": {
+                "type": "boolean",
+                "description": "Whether tasks are served."
+              },
+              "brief": {
+                "type": "boolean",
+                "description": "Whether the first result of a session carries a brief."
+              },
+              "closing_note": {
+                "type": "boolean",
+                "description": "Whether `POST /api/session-notes` takes notes."
+              },
+              "jobs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The follow-up jobs this server runs."
+              }
+            },
+            "required": ["vector", "tasks", "brief", "closing_note", "jobs"]
+          },
+          "model_runners": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Who may run a job's model step; empty means rules only."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tools `tools/list` returns."
+          },
+          "prompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The commands `prompts/list` returns."
+          },
+          "degraded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What is incomplete, for example `no_model`."
+          }
+        },
+        "required": [
+          "edition",
+          "contract_version",
+          "mcp_revisions",
+          "features",
+          "model_runners",
+          "tools",
+          "prompts",
+          "degraded"
+        ]
+      },
+      "ConnectInfo": {
+        "type": "object",
+        "description": "`GET /api/connect`: everything the Connect page shows.",
+        "properties": {
+          "mcp_url": {
+            "type": "string",
+            "description": "The MCP endpoint, for example `http://127.0.0.1:7410/mcp`."
+          },
+          "server_name": {
+            "type": "string",
+            "description": "The name the server is added under: `uketsugi`."
+          },
+          "token_env": {
+            "type": "string",
+            "description": "The environment variable that holds the token. The token itself is never returned."
+          },
+          "token_command": {
+            "type": "string",
+            "description": "The line that puts the token in that variable, typed in a shell on the server's host: `export UKT_TOKEN=\"$(ukt token)\"`."
+          },
+          "commands": {
+            "type": "object",
+            "properties": {
+              "setup": {
+                "$ref": "#/$defs/connectCommand"
+              },
+              "activate": {
+                "$ref": "#/$defs/connectCommand"
+              }
+            },
+            "required": ["setup", "activate"]
+          },
+          "block": {
+            "type": "string",
+            "description": "The block as it stands in an instruction file, fence lines included: shown for reference."
+          },
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/connectHarness"
+            }
+          }
+        },
+        "required": [
+          "mcp_url",
+          "server_name",
+          "token_env",
+          "token_command",
+          "commands",
+          "block",
+          "harnesses"
+        ]
+      },
+      "FactPage": {
+        "type": "object",
+        "description": "`GET /api/facts`.",
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiFact"
+            }
+          },
+          "next": {
+            "type": ["string", "null"],
+            "description": "The cursor of the next page; null on the last one. A search has one page."
+          },
+          "matched": {
+            "type": "integer",
+            "description": "For a search: how many facts matched."
+          }
+        },
+        "required": ["facts", "next"]
+      },
+      "FactDetail": {
+        "type": "object",
+        "description": "`GET /api/facts/:id`.",
+        "properties": {
+          "fact": {
+            "$ref": "#/$defs/apiFact"
+          },
+          "confirmations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiConfirmation"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/factHistoryEntry"
+            },
+            "description": "Newest first."
+          },
+          "private_because": {
+            "$ref": "#/$defs/privateBecause",
+            "description": "Present for the reader's own fact that only they see, while nothing has replaced it and other people are on the server."
+          }
+        },
+        "required": ["fact", "confirmations", "history"]
+      },
+      "RedactResult": {
+        "type": "object",
+        "description": "`POST /api/facts/:id/redact`: the fact is now a stub and agents stop receiving it.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "redacted": {
+            "const": true
+          }
+        },
+        "required": ["id", "redacted"]
+      },
+      "TaskPage": {
+        "type": "object",
+        "description": "`GET /api/tasks`: the tasks the person can see, in the order `search_tasks` lists them to an agent.",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiTask"
+            }
+          },
+          "matched": {
+            "type": "integer",
+            "description": "How many tasks matched; `tasks` holds the first of them."
+          }
+        },
+        "required": ["tasks", "matched"]
+      },
+      "TaskDetail": {
+        "type": "object",
+        "description": "`GET /api/tasks/:id`: one task with its description, every note and its history.",
+        "properties": {
+          "task": {
+            "$ref": "#/$defs/apiTask"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/taskNote"
+            },
+            "description": "Oldest first."
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/taskEvent"
+            },
+            "description": "Who published, claimed, released and finished it, oldest first, as far as the logs the person may see hold it."
+          }
+        },
+        "required": ["task", "notes", "history"]
+      },
+      "RulingList": {
+        "type": "object",
+        "description": "`GET /api/rulings`: the newest rulings first, at most 50.",
+        "properties": {
+          "rulings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiRuling"
+            }
+          }
+        },
+        "required": ["rulings"]
+      },
+      "RevertResult": {
+        "type": "object",
+        "description": "`POST /api/rulings/:id/revert`. `reverted` is false when the ruling had been reverted already.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reverted": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "reverted"]
+      },
+      "ActivityReport": {
+        "type": "object",
+        "description": "`GET /api/activity`.",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "The start of the counted period. ISO 8601, UTC."
+          },
+          "clients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/activityClient"
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/activitySession"
+            },
+            "description": "The person's own sessions, newest first, at most 20."
+          }
+        },
+        "required": ["since", "clients", "recent"]
+      },
+      "ProjectList": {
+        "type": "object",
+        "description": "`GET /api/projects`.",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiProject"
+            }
+          },
+          "sharing": {
+            "type": "boolean",
+            "description": "Whether this server has other people, so that a project can be shared with them."
+          }
+        },
+        "required": ["projects", "sharing"]
+      },
+      "SessionNoteResult": {
+        "type": "object",
+        "description": "`POST /api/session-notes`.",
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "The display id of the session the note was put on."
+          },
+          "project": {
+            "type": "string"
+          },
+          "redactions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the scanner removed from the text, by rule name; empty when nothing."
+          }
+        },
+        "required": ["session", "project", "redactions"]
+      },
+      "ProjectChoice": {
+        "type": "object",
+        "description": "`POST /api/projects/choice`: the choice as it now stands, and what it moved.",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "treatment": {
+            "type": "string",
+            "enum": ["private", "shared"]
+          },
+          "moved": {
+            "type": "object",
+            "description": "How many of the person's facts and tasks changed hands: to everyone when shared, back to the person when private.",
+            "properties": {
+              "facts": {
+                "type": "integer"
+              },
+              "tasks": {
+                "type": "integer"
+              }
+            },
+            "required": ["facts", "tasks"]
+          }
+        },
+        "required": ["project", "treatment", "moved"]
+      },
+      "PeopleList": {
+        "type": "object",
+        "description": "`GET /api/people`: everyone on the server, each with their credentials.",
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiPerson"
+            }
+          }
+        },
+        "required": ["people"]
+      },
+      "Invitation": {
+        "type": "object",
+        "description": "`POST /api/people`: what to hand to the person. Each secret is shown once.",
+        "properties": {
+          "person": {
+            "type": "string",
+            "description": "The person's name."
+          },
+          "added": {
+            "type": "boolean",
+            "description": "False when the person was there already."
+          },
+          "issued": {
+            "type": "array",
+            "description": "The credentials made by this call.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["agent", "person"]
+                },
+                "id": {
+                  "type": "string",
+                  "description": "What `ukt revoke` takes."
+                },
+                "label": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string",
+                  "description": "The token or the key itself."
+                }
+              },
+              "required": ["kind", "id", "label", "secret"]
+            }
+          }
+        },
+        "required": ["person", "added", "issued"]
+      },
+      "TokenRevoked": {
+        "type": "object",
+        "description": "`POST /api/tokens/:id/revoke`.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "False when it was revoked already."
+          }
+        },
+        "required": ["id", "revoked"]
+      }
+    }
+  },
+  "error": {
+    "type": "object",
+    "properties": {
+      "error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/errorCode"
+          },
+          "what": {
+            "type": "string",
+            "description": "What happened."
+          },
+          "meaning": {
+            "type": "string",
+            "description": "What it means."
+          },
+          "next": {
+            "type": "string",
+            "description": "What to do next."
+          },
+          "retry": {
+            "type": "boolean",
+            "description": "Whether a retry can help."
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["code", "what", "meaning", "next", "retry"]
+      }
+    },
+    "required": ["error"]
+  },
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "description": "What every result carries.",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "The project, in its canonical spelling."
+        },
+        "treatment": {
+          "type": "string",
+          "description": "How the caller's person treats this project: `used here, private` keeps what they publish here theirs alone; `used here, shared` shows what they publish here that others can check to everyone on the server. Only the person chooses."
+        },
+        "session": {
+          "type": "string",
+          "description": "A display id for the inferred session."
+        },
+        "degraded": {
+          "type": "array",
+          "description": "What is incomplete in this result, for example `no_model`.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "brief": {
+          "$ref": "#/$defs/brief"
+        }
+      },
+      "required": ["project", "treatment", "session", "degraded"]
+    },
+    "brief": {
+      "type": "object",
+      "description": "What a session starts from: data from memory, never instructions. The server attaches it to the first result of each inferred session, and bounds its size.",
+      "properties": {
+        "notice": {
+          "type": "string",
+          "description": "What the person has not yet decided about this project, and where they decide it. Absent once they have, and on a server with one person."
+        },
+        "held": {
+          "type": "array",
+          "description": "Tasks whose lease the caller's person holds.",
+          "items": {
+            "$ref": "#/$defs/task"
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "description": "The project's open and handed-off tasks, each with its latest note.",
+          "items": {
+            "$ref": "#/$defs/task"
+          }
+        },
+        "lapsed": {
+          "type": "array",
+          "description": "Claimed tasks whose lease ran out: nobody is working on them.",
+          "items": {
+            "$ref": "#/$defs/task"
+          }
+        },
+        "last_session": {
+          "type": "object",
+          "description": "How the person's previous session in this project ended.",
+          "properties": {
+            "session": {
+              "type": "string"
+            },
+            "client": {
+              "type": "string"
+            },
+            "closed": {
+              "type": "boolean",
+              "description": "True when its final note was written at or after its last call."
+            },
+            "open": {
+              "type": "boolean",
+              "description": "True when it has not closed and called within the idle gap: it may still be running."
+            },
+            "calls": {
+              "type": "integer"
+            },
+            "last_call_at": {
+              "type": "string",
+              "description": "ISO 8601, UTC."
+            },
+            "note": {
+              "type": "string",
+              "description": "Its latest note: the final one when it closed, otherwise the last progress note it left."
+            },
+            "note_at": {
+              "type": "string",
+              "description": "ISO 8601, UTC."
+            },
+            "published": {
+              "type": "array",
+              "description": "Facts the person published while it ran.",
+              "items": {
+                "$ref": "#/$defs/briefFact"
+              }
+            }
+          },
+          "required": ["session", "client", "closed", "open", "calls", "last_call_at", "published"]
+        },
+        "facts": {
+          "type": "array",
+          "description": "The project's most relevant standing facts, one line each.",
+          "items": {
+            "$ref": "#/$defs/briefFact"
+          }
+        },
+        "fact_count": {
+          "type": "integer",
+          "description": "How many facts the project holds; `facts` shows some of them."
+        }
+      },
+      "required": ["held", "tasks", "lapsed", "facts", "fact_count"]
+    },
+    "briefFact": {
+      "type": "object",
+      "description": "A fact as a brief lists it. search_facts with its id returns the whole fact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "trust": {
+          "$ref": "#/$defs/trust"
+        }
+      },
+      "required": ["id", "claim", "trust"]
+    },
+    "taskState": {
+      "type": "string",
+      "enum": ["open", "claimed", "handed_off", "done"]
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/taskState"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "tracked": {
+          "type": "boolean",
+          "description": "A step of an agent's own plan, private to the person."
+        },
+        "holder": {
+          "type": "string",
+          "description": "Who holds the lease while the task is claimed, or held it when the lease lapsed."
+        },
+        "note": {
+          "type": "string",
+          "description": "The latest note: the handoff note of a handed-off task. A list shows its beginning."
+        },
+        "publisher": {
+          "type": "string",
+          "description": "Who published it."
+        },
+        "holder_client": {
+          "type": "string",
+          "description": "The client the lease was taken from, for example claude-code."
+        },
+        "held_by_this_session": {
+          "type": "boolean",
+          "description": "The lease was taken in this session."
+        },
+        "lease_expires_at": {
+          "type": "string",
+          "description": "When the lease ends unless its holder renews it. ISO 8601, UTC."
+        },
+        "lapsed": {
+          "type": "boolean",
+          "description": "The lease ran out without a release: the task is open and can be claimed."
+        },
+        "note_kind": {
+          "type": "string",
+          "enum": ["note", "handoff"]
+        },
+        "note_by": {
+          "type": "string",
+          "description": "Who wrote the latest note."
+        },
+        "note_client": {
+          "type": "string",
+          "description": "The client the latest note was written from."
+        },
+        "note_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        }
+      },
+      "required": ["id", "title", "state", "version", "updated_at"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["unconfirmed", "confirmed", "superseded"]
+    },
+    "trust": {
+      "type": "string",
+      "enum": ["reviewed", "unreviewed"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["strong", "low"]
+    },
+    "citationClass": {
+      "type": "string",
+      "enum": ["checkable", "testimony"]
+    },
+    "flagKind": {
+      "type": "string",
+      "enum": ["possible_duplicate", "possible_contradiction", "source_changed", "marked_stale"]
+    },
+    "errorCode": {
+      "type": "string",
+      "enum": [
+        "project_required",
+        "invalid_input",
+        "not_found",
+        "forbidden",
+        "unsupported",
+        "unavailable",
+        "internal",
+        "lease_held",
+        "conflict",
+        "unauthorized"
+      ]
+    },
+    "redacted": {
+      "type": "array",
+      "description": "What the scanner replaced before anything was stored: the field and the rule that matched, never the text.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          }
+        },
+        "required": ["field", "rule"]
+      }
+    },
+    "citation": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "The citation in one line."
+        },
+        "kind": {
+          "type": "string"
+        },
+        "class": {
+          "$ref": "#/$defs/citationClass"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why a citation is testimony."
+        }
+      },
+      "required": ["ref", "kind", "class"]
+    },
+    "audience": {
+      "type": "string",
+      "enum": ["private", "shared"],
+      "description": "Who can see a record on a server with several people: `shared`, everyone on it; `private`, only the person it belongs to."
+    },
+    "privateBecause": {
+      "type": "string",
+      "enum": ["project", "no_source", "cites_private", "merged_word"],
+      "description": "Why a fact is its author's alone on a server with several people. `project`: its project is private. In a project its person shares: `no_source`, none of its citations is checkable; `cites_private`, it cites a fact of its author's that others cannot see; `merged_word`, a duplicate merged into it has no checkable citation and would be shown with it."
+    },
+    "fact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flagKind"
+          }
+        },
+        "trust": {
+          "$ref": "#/$defs/trust"
+        },
+        "author": {
+          "type": "string",
+          "description": "Who wrote it: `you` for the caller's own person, otherwise the person's name."
+        },
+        "audience": {
+          "$ref": "#/$defs/audience",
+          "description": "Only on a server with several people."
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "confirmed_at": {
+          "type": "string",
+          "description": "The newest confirmation, ISO 8601."
+        },
+        "superseded_by": {
+          "type": "string",
+          "description": "The live fact at the head of the chain."
+        }
+      },
+      "required": ["id", "claim", "citations", "status", "flags", "trust", "author", "updated_at"]
+    },
+    "taskNote": {
+      "type": "object",
+      "description": "A note on a task. Notes are only ever added.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["note", "handoff"]
+        },
+        "text": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "client": {
+          "type": "string",
+          "description": "The client it was done from, for example claude-code."
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        }
+      },
+      "required": ["kind", "text", "author", "at"]
+    },
+    "taskEvent": {
+      "type": "object",
+      "description": "One step of a task's life, read back from the log.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": ["published", "claimed", "released", "handed_off", "done"]
+        },
+        "by": {
+          "type": "string"
+        },
+        "client": {
+          "type": "string",
+          "description": "The client it was done from, for example claude-code."
+        },
+        "session": {
+          "type": "string",
+          "description": "The display id of the session it happened in."
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "after": {
+          "type": "string",
+          "enum": ["lapsed", "take_over"],
+          "description": "On a claim: the lease before it had lapsed, or was taken over."
+        }
+      },
+      "required": ["event", "by", "at"]
+    },
+    "apiTask": {
+      "description": "A task as the dashboard shows it: what a tool result carries of it, with its project and who sees it.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/task"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "project": {
+              "type": "string"
+            },
+            "audience": {
+              "$ref": "#/$defs/audience"
+            },
+            "created_at": {
+              "type": "string",
+              "description": "When it was published. ISO 8601, UTC."
+            }
+          },
+          "required": ["project", "audience", "created_at"]
+        }
+      ]
+    },
+    "connectCommand": {
+      "type": "object",
+      "description": "One of the two commands the server offers as MCP prompts.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The prompt's name: `setup` or `activate`."
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "description"]
+    },
+    "connectHarness": {
+      "type": "object",
+      "description": "How one harness is connected, as text the person copies.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable key, for example `claude-code`."
+        },
+        "name": {
+          "type": "string",
+          "description": "The harness's name as the page shows it."
+        },
+        "add": {
+          "type": "string",
+          "description": "What adds the server to the harness: a shell command, configuration text, or the URL itself."
+        },
+        "add_kind": {
+          "type": "string",
+          "enum": ["command", "json", "url"],
+          "description": "What kind of text `add` is."
+        },
+        "add_file": {
+          "type": "string",
+          "description": "For `json`: the file the text goes in."
+        },
+        "remove": {
+          "type": "string",
+          "description": "For `command`: what takes the server out of the harness again. A harness keeps the token it was added with, so this comes before adding it with another."
+        },
+        "setup": {
+          "type": "string",
+          "description": "What the person types to run set-up; absent where the harness offers no server commands."
+        },
+        "activate": {
+          "type": "string",
+          "description": "What the person types to use memory in one session without set-up."
+        },
+        "instruction_file": {
+          "type": "string",
+          "description": "The user-level instruction file set-up writes the block to, as the place it usually is; absent where the server cannot know it."
+        },
+        "instruction_file_command": {
+          "type": "string",
+          "description": "A shell command that prints that file's path on the person's machine, for a harness whose file is not always in the usual place. The set-up command has the agent run it."
+        },
+        "note": {
+          "type": "string",
+          "description": "One line on anything this harness does differently."
+        }
+      },
+      "required": ["id", "name", "add", "add_kind"]
+    },
+    "apiFact": {
+      "type": "object",
+      "description": "A fact as the dashboard shows it. A redacted fact is a stub: its text is null.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "audience": {
+          "$ref": "#/$defs/audience"
+        },
+        "claim": {
+          "type": ["string", "null"]
+        },
+        "detail": {
+          "type": ["string", "null"]
+        },
+        "question": {
+          "type": ["string", "null"]
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flagKind"
+          }
+        },
+        "trust": {
+          "$ref": "#/$defs/trust"
+        },
+        "author": {
+          "type": "string",
+          "description": "Who wrote it: `you` for the reader's own, otherwise the person's name."
+        },
+        "own": {
+          "type": "boolean",
+          "description": "Whether the reader wrote it: only its author can redact a fact."
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "confirmed_at": {
+          "type": ["string", "null"],
+          "description": "The newest confirmation, if any."
+        },
+        "superseded_by": {
+          "type": ["string", "null"],
+          "description": "The live fact at the head of the chain, when this one is superseded."
+        }
+      },
+      "required": [
+        "id",
+        "project",
+        "audience",
+        "claim",
+        "detail",
+        "question",
+        "citations",
+        "status",
+        "flags",
+        "trust",
+        "author",
+        "own",
+        "redacted",
+        "created_at",
+        "updated_at",
+        "confirmed_at",
+        "superseded_by"
+      ]
+    },
+    "apiConfirmation": {
+      "type": "object",
+      "description": "One person's check of a fact.",
+      "properties": {
+        "person": {
+          "type": "string"
+        },
+        "by_author": {
+          "type": "boolean",
+          "description": "The check is the fact's author's own: it refreshes the fact and does not confirm it, which takes another person's."
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "checked": {
+          "type": ["string", "null"]
+        },
+        "source_version": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["person", "by_author", "at", "checked", "source_version"]
+    },
+    "factHistoryEntry": {
+      "type": "object",
+      "description": "One thing that happened to a fact, from the event log: kinds and ids, never text.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "For example `FactPublished`, `FactRewritten`, `FactConfirmed`, `FlagRaised`."
+        },
+        "actor": {
+          "type": "string",
+          "description": "Who did it: a person's display name, or a job's name."
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        }
+      },
+      "required": ["kind", "actor", "at"]
+    },
+    "apiRuling": {
+      "type": "object",
+      "description": "One decision a person or a job made about a fact: codes and ids, never text.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string",
+          "description": "For example `merge_duplicate`, or `revert` for the ruling that undid another."
+        },
+        "fact": {
+          "type": "string",
+          "description": "The fact the ruling is about."
+        },
+        "actor": {
+          "type": "string",
+          "description": "Who decided: a person's display name, or a job's name."
+        },
+        "runner": {
+          "type": "string",
+          "description": "Who ran the job's step, `rules` where no model did; absent for a person."
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Reason codes."
+        },
+        "at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "reverted_by": {
+          "type": ["string", "null"],
+          "description": "The ruling that undid this one, if one did."
+        },
+        "revertible": {
+          "type": "boolean",
+          "description": "Whether `POST /api/rulings/:id/revert` would undo it."
+        }
+      },
+      "required": ["id", "decision", "fact", "actor", "reasons", "at", "reverted_by", "revertible"]
+    },
+    "activityClient": {
+      "type": "object",
+      "description": "What the sessions of one client name and version did.",
+      "properties": {
+        "client": {
+          "type": "string"
+        },
+        "version": {
+          "type": ["string", "null"]
+        },
+        "sessions": {
+          "type": "integer"
+        },
+        "searched": {
+          "type": "integer",
+          "description": "Sessions that searched at least once."
+        },
+        "published": {
+          "type": "integer",
+          "description": "Sessions that published at least once."
+        },
+        "refused": {
+          "type": "integer",
+          "description": "Sessions that had a call refused for a missing or malformed project."
+        }
+      },
+      "required": ["client", "version", "sessions", "searched", "published", "refused"]
+    },
+    "activitySession": {
+      "type": "object",
+      "description": "One inferred session of the person, for \"recent sessions\".",
+      "properties": {
+        "session": {
+          "type": "string",
+          "description": "The display id results show, for example `s-7f2c`."
+        },
+        "client": {
+          "type": "string"
+        },
+        "version": {
+          "type": ["string", "null"]
+        },
+        "project": {
+          "type": ["string", "null"],
+          "description": "Null for a session of calls refused for a missing project."
+        },
+        "first_call_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "last_call_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "last_search_at": {
+          "type": ["string", "null"]
+        },
+        "last_publish_at": {
+          "type": ["string", "null"]
+        },
+        "refused_calls": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session",
+        "client",
+        "version",
+        "project",
+        "first_call_at",
+        "last_call_at",
+        "last_search_at",
+        "last_publish_at",
+        "refused_calls"
+      ]
+    },
+    "apiProject": {
+      "type": "object",
+      "description": "A project the person works in, as the dashboard lists it.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "`host/owner/name` for a repository; `<owner>/<slug>` for a named project."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["repository", "named"]
+        },
+        "name": {
+          "type": ["string", "null"],
+          "description": "A named project's display name."
+        },
+        "facts": {
+          "type": "integer",
+          "description": "How many live facts it holds that the person can see."
+        },
+        "treatment": {
+          "type": "string",
+          "enum": ["private", "shared"],
+          "description": "How the person treats it: `shared` shows what they publish there that others can check to everyone on the server."
+        },
+        "chosen": {
+          "type": "boolean",
+          "description": "False while the person has made no choice: the project is private until they do."
+        }
+      },
+      "required": ["key", "kind", "name", "facts", "treatment", "chosen"]
+    },
+    "apiToken": {
+      "type": "object",
+      "description": "A person's credential as whoever runs the server lists it. The secret itself is never returned.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "What `ukt revoke` takes."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["agent", "person"],
+          "description": "`agent`: a token a harness sends, for the tools and for reading. `person`: a key the person keeps to themselves, which signs them in to the dashboard and does nothing else."
+        },
+        "label": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO 8601, UTC."
+        },
+        "last_used_at": {
+          "type": ["string", "null"],
+          "description": "When a request last signed in with it, to the minute; null until one has."
+        },
+        "revoked_at": {
+          "type": ["string", "null"],
+          "description": "When it stopped working, if it has."
+        }
+      },
+      "required": ["id", "kind", "label", "created_at", "last_used_at", "revoked_at"]
+    },
+    "apiPerson": {
+      "type": "object",
+      "description": "A person of the server with their credentials.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name others see beside what the person shares."
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/apiToken"
+          }
+        }
+      },
+      "required": ["id", "name", "tokens"]
+    }
+  }
+}

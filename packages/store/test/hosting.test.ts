@@ -1,0 +1,204 @@
+import { mkdir, mkdtemp, readdir, rename, rm, utimes, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
+import { join } from "node:path";
+import { scopeOf, type Fact } from "@uketsugi/core";
+import { sql } from "kysely";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { keepUpgradeSnapshot, lockDataDir } from "../src/data-dir.ts";
+import { startEngine, upgrade, type Engine } from "../src/embedded.ts";
+import {
+  BACKUPS_DIR,
+  backupEmbeddedStore,
+  openEmbeddedStore,
+  restoreEmbeddedStore,
+  type EmbeddedStore,
+} from "../src/index.ts";
+import { migrate, migrationState, MIGRATIONS } from "../src/migrations.ts";
+import { publishSample, sampleOwner } from "./support/sample.ts";
+
+const root = await mkdtemp(join(tmpdir(), "uketsugi-hosting-"));
+afterAll(() => rm(root, { recursive: true, force: true }));
+
+describe("backup and restore", () => {
+  const [from, to, file] = [join(root, "from"), join(root, "to"), join(root, "out", "one.tgz")];
+  let source: EmbeddedStore;
+  let scope: ReturnType<typeof scopeOf>;
+  let kept: string;
+  let later: string;
+  let asWritten: Fact | null;
+
+  beforeAll(async () => {
+    source = await openEmbeddedStore({ dataDir: from });
+    const owner = await sampleOwner(source);
+    scope = scopeOf(owner);
+    kept = await publishSample(source, owner, 1);
+    const hash = (await source.facts.get(scope, kept))?.contentHash ?? "";
+    await source.facts.setVector(owner.orgId, kept, hash, new Float32Array(384).fill(0.05));
+    asWritten = await source.facts.get(scope, kept);
+    // The snapshot is taken while the unit that publishes `later` is open, before it commits.
+    later = await publishSample(source, owner, 2, async () => {
+      expect(await backupEmbeddedStore(source, file)).toBeGreaterThan(1000);
+    });
+  });
+
+  test("a copy in a fresh directory holds what was committed when the snapshot was taken, vectors included, and no more", async () => {
+    await restoreEmbeddedStore({ dataDir: to, file });
+    const copy = await openEmbeddedStore({ dataDir: to });
+    expect(asWritten?.embedded).toBe(true);
+    expect(await copy.facts.get(scope, kept)).toEqual(asWritten);
+    expect(await copy.facts.get(scope, later)).toBeNull();
+    await copy.close();
+  });
+
+  test("a restore is refused while a process owns the directory, and a file that is no snapshot replaces nothing", async () => {
+    await expect(restoreEmbeddedStore({ dataDir: from, file })).rejects.toThrow(
+      /in use by another uketsugi process .* Stop that process/,
+    );
+    await source.close();
+    const noise = join(root, "out", "noise.tgz");
+    await writeFile(noise, "not a snapshot");
+    await expect(restoreEmbeddedStore({ dataDir: from, file: noise })).rejects.toThrow(
+      /could not be restored\. The store is unchanged/,
+    );
+    source = await openEmbeddedStore({ dataDir: from });
+    expect((await source.facts.get(scope, later))?.id).toBe(later);
+    await source.close();
+  });
+
+  test("a restore replaces the store it is given", async () => {
+    await restoreEmbeddedStore({ dataDir: from, file });
+    const restored = await openEmbeddedStore({ dataDir: from });
+    expect((await restored.facts.get(scope, kept))?.id).toBe(kept);
+    expect(await restored.facts.get(scope, later)).toBeNull();
+    await restored.close();
+  });
+
+  test("a restore cut short between its two renames leaves the store that was there", async () => {
+    await rename(join(from, "pg"), join(from, "pg.replaced"));
+    await mkdir(join(from, "pg.restoring"));
+    const store = await openEmbeddedStore({ dataDir: from });
+    expect((await store.facts.get(scope, kept))?.id).toBe(kept);
+    expect((await readdir(from)).sort()).toEqual(["lock", "lock.owner", "pg"]);
+    await store.close();
+  });
+});
+
+describe("a lock left by a process that had this process's pid, as a restarted container finds", () => {
+  /** A held lock whose note names this pid and whose last refresh was `ageMs` ago. */
+  async function leave(dataDir: string, ageMs: number): Promise<string> {
+    const lock = join(dataDir, "lock");
+    await mkdir(lock, { recursive: true });
+    const note = JSON.stringify({ pid: process.pid, host: hostname() });
+    await writeFile(join(dataDir, "lock.owner"), note);
+    const refreshed = new Date(Date.now() - ageMs);
+    await utimes(lock, refreshed, refreshed);
+    return lock;
+  }
+
+  test("is taken over once its holder has missed its refreshes, long before the stale time", async () => {
+    const dataDir = join(root, "restarted");
+    await leave(dataDir, 2500);
+    const release = await lockDataDir(dataDir);
+    await release();
+  });
+
+  test("is taken over though its time is ahead of the clock, as a holder killed in its first second leaves it", async () => {
+    const dataDir = join(root, "killed-early");
+    await leave(dataDir, -1000);
+    const release = await lockDataDir(dataDir, 2000);
+    await release();
+  });
+
+  test("is refused while a holder keeps refreshing it", async () => {
+    const dataDir = join(root, "shared");
+    const lock = await leave(dataDir, 0);
+    const refresh = setInterval(() => void utimes(lock, new Date(), new Date()), 200);
+    await expect(lockDataDir(dataDir, 2000)).rejects.toThrow(/in use by another uketsugi process/);
+    clearInterval(refresh);
+  });
+});
+
+describe("a store that a newer version opens", () => {
+  const dataDir = join(root, "old");
+  /** What a later version adds to today's migrations: one that makes a table. */
+  const newer = {
+    ...MIGRATIONS,
+    "0002_next": {
+      async up(db: Parameters<typeof migrate>[0]) {
+        await sql`create table next_thing (id int)`.execute(db);
+      },
+    },
+  };
+  let kept: string;
+
+  // The store as today's version made and left it, with one fact.
+  beforeAll(async () => {
+    const store = await openEmbeddedStore({ dataDir });
+    kept = await publishSample(store, await sampleOwner(store), 1);
+    await store.close();
+  });
+
+  test("takes the new migration with its data, and keeps a snapshot of how it was", async () => {
+    const engine = await startEngine(join(dataDir, "pg"));
+    await upgrade(engine, dataDir, newer);
+    await upgrade(engine, dataDir, newer);
+    expect(await migrationState(engine.db, newer)).toMatchObject({ pending: [] });
+    expect(await engine.db.selectFrom("facts").select("id").execute()).toEqual([{ id: kept }]);
+    await engine.close();
+    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0002_next.tgz"]);
+  });
+
+  test("keeps the snapshots of its three newest upgrades, and every file that is not one", async () => {
+    const backups = join(dataDir, BACKUPS_DIR);
+    await writeFile(join(backups, "uketsugi-20260101T000000Z.tgz"), "a person's own backup");
+    for (const name of ["0003_more", "0004_again", "0005_last"])
+      await keepUpgradeSnapshot(dataDir, name, new Blob(["as it was"]));
+    expect((await readdir(backups)).sort()).toEqual([
+      "before-0003_more.tgz",
+      "before-0004_again.tgz",
+      "before-0005_last.tgz",
+      "uketsugi-20260101T000000Z.tgz",
+    ]);
+  });
+});
+
+describe("on an engine of its own, in memory", () => {
+  let engine: Engine;
+  beforeEach(async () => {
+    engine = await startEngine();
+  });
+  afterEach(() => engine.close());
+
+  test("a migration that fails changes nothing, and a store a newer version migrated is refused", async () => {
+    await migrate(engine.db);
+    const broken = {
+      ...MIGRATIONS,
+      "9999_broken": {
+        async up(db: typeof engine.db) {
+          await sql`alter table facts add column half_done text`.execute(db);
+          await sql`select no_such_function()`.execute(db);
+        },
+      },
+    };
+    await expect(migrate(engine.db, broken)).rejects.toThrow(/Nothing was changed/);
+    expect((await migrationState(engine.db, broken)).pending).toEqual(["9999_broken"]);
+    const added = await sql`select 1 from information_schema.columns
+      where table_name = 'facts' and column_name = 'half_done'`.execute(engine.db);
+    expect(added.rows).toEqual([]);
+
+    const newer = { ...MIGRATIONS, "9998_newer": { up: () => Promise.resolve() } };
+    await migrate(engine.db, newer);
+    const another =
+      /^This store was made by another build of uketsugi, with a schema this build cannot read .+ Nothing was changed: the build that made it still opens it\./;
+    await expect(migrate(engine.db)).rejects.toThrow(another);
+  });
+
+  test("a store made by an earlier edit of the unreleased schema is refused by name, in words", async () => {
+    // The one migration is edited in place until the first release, under a new name each time: a
+    // store an earlier edit made is refused, not opened to fail later on a column it lacks.
+    await migrate(engine.db, { "0001_init": { up: () => Promise.resolve() } });
+    await expect(migrate(engine.db)).rejects.toThrow(
+      /^This store was made by another build of uketsugi, with a schema this build cannot read .+0001_init is missing.+ Nothing was changed/,
+    );
+  });
+});

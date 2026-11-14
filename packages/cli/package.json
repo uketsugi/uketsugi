@@ -1,0 +1,36 @@
+{
+  "name": "@uketsugi/cli",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "@uketsugi/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.9.0",
+    "@uketsugi/contracts": "workspace:*",
+    "@uketsugi/core": "workspace:*",
+    "@uketsugi/embed": "workspace:*",
+    "@uketsugi/server": "workspace:*",
+    "@uketsugi/store": "workspace:*",
+    "commander": "15.1.0",
+    "open": "11.0.4",
+    "write-file-atomic": "8.0.0",
+    "xdg-basedir": "5.1.0"
+  },
+  "devDependencies": {
+    "@types/write-file-atomic": "4.0.3",
+    "@uketsugi/testkit": "workspace:*"
+  },
+  "bin": {
+    "ukt": "./dist/index.js"
+  }
+}
