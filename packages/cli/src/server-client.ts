@@ -6,6 +6,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   isApiError,
   type CapabilityDescriptor,
+  type ConnectInfo,
+  MCP_REVISIONS,
   type HostProof,
   type Invitation,
   type InviteRequest,
@@ -98,36 +100,34 @@ export async function servingNow(home: Home): Promise<ServerRecord | null> {
 }
 
 /**
- * Refuses a verb that needs the store to itself while a server holds it, saying how to go on. The
- * store's own lock would refuse it too; this says so before the verb asks anything.
+ * What listens at an address, as far as a data directory can tell: its own server, something
+ * else, or nothing. Its own server proves itself with a keyed digest of bytes made up here, which
+ * only a holder of the host's secret can give, and which shows the secret to no one. A server
+ * that died leaves its record behind, and a port is anyone's to listen on.
  */
-export async function requireStopped(home: Home, verb: string): Promise<void> {
-  const running = await servingNow(home);
-  if (running === null) return;
-  throw new CliFailure({
-    what: `The server is running on this data directory (at ${running.url}).`,
-    meaning: `Only one process may hold the store, so \`ukt ${verb}\` did nothing.`,
-    next: `Stop \`ukt serve\`, run \`ukt ${verb}\` again, then start the server.`,
-  });
-}
-
-/**
- * Makes whatever answers at a recorded address prove it is this host's own server, before
- * anything secret is sent there. A server that died leaves its record behind, and the port it
- * names is then anyone's to listen on. The proof is a keyed digest of bytes made up here, which
- * only a holder of the host's secret can give, and it shows the secret to no one.
- */
-async function requireOwnServer(home: Home, record: ServerRecord, key: string): Promise<void> {
+export async function whoAnswers(home: Home, url: string): Promise<"own" | "other" | "nobody"> {
+  const key = await readHostKey(home);
   const challenge = randomBytes(32).toString("hex");
   const path = `/api/host-proof?${new URLSearchParams({ challenge }).toString()}`;
-  const expected = Buffer.from(hostProof(key, challenge));
-  const given = await fetch(new URL(path, record.url), {
-    signal: AbortSignal.timeout(PROBE_WITHIN_MS),
-  })
-    .then(async (response) => ((await response.json()) as Partial<HostProof>).proof)
-    .catch(() => undefined);
-  const proof = Buffer.from(typeof given === "string" ? given : "");
-  if (proof.length === expected.length && timingSafeEqual(proof, expected)) return;
+  let response: Response;
+  try {
+    response = await fetch(new URL(path, url), { signal: AbortSignal.timeout(PROBE_WITHIN_MS) });
+  } catch (error) {
+    // Something that takes the connection and says nothing is there all the same.
+    return error instanceof Error && error.name === "TimeoutError" ? "other" : "nobody";
+  }
+  const given = await response.json().then(
+    (body: unknown) => (body as Partial<HostProof> | null)?.proof,
+    () => undefined,
+  );
+  if (key === null || typeof given !== "string") return "other";
+  const [proof, expected] = [Buffer.from(given), Buffer.from(hostProof(key, challenge))];
+  return proof.length === expected.length && timingSafeEqual(proof, expected) ? "own" : "other";
+}
+
+/** Makes whatever answers at a recorded address prove it is this host's own server, before anything secret is sent there. */
+async function requireOwnServer(home: Home, record: ServerRecord): Promise<void> {
+  if ((await whoAnswers(home, record.url)) === "own") return;
   throw new CliFailure({
     what: `What answers at ${record.url} is not the server of the data directory ${home.dataDir}.`,
     meaning:
@@ -156,7 +156,7 @@ async function running(home: Home): Promise<{ record: ServerRecord; key: string 
         "The server on this data directory was not started by this `ukt`, so it cannot be asked from here.",
       next: "Stop the server and start it again with `ukt serve`: it makes the secret when it starts.",
     });
-  await requireOwnServer(home, record, key);
+  await requireOwnServer(home, record);
   return { record, key };
 }
 
@@ -180,6 +180,37 @@ export async function connect(home: Home): Promise<Running> {
       next: "Stop `ukt serve`, run `ukt setup`, then start the server and run this again.",
     });
   return { ...record, token };
+}
+
+/** What the Connect page shows this machine's shell: the address, whether a harness here sends a token, and each harness's lines. */
+export async function connectInfo(server: Running): Promise<ConnectInfo> {
+  return (await (await request(server, "/api/connect", signed(server))).json()) as ConnectInfo;
+}
+
+/**
+ * Asks `/mcp` for its tools as a harness added by the address does: sent with the token only
+ * where the server says a harness here must send one. A refusal is the server's own words. It
+ * leaves no record, which a tool call would (every tool names a project). Sent as the 2025-11-25
+ * revision, which a server serves with no handshake first.
+ */
+export async function toolsListed(server: Running, info: ConnectInfo): Promise<void> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-protocol-version": MCP_REVISIONS[0],
+    ...(info.needs_token ? { authorization: `Bearer ${server.token}` } : {}),
+  };
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+  const response = await request(server, "/mcp", { method: "POST", headers, body });
+  const text = await response.text();
+  const answered = /^data: (.*)$/m.exec(text)?.[1] ?? text;
+  const tools = (JSON.parse(answered) as { result?: { tools?: unknown[] } }).result?.tools;
+  if (!Array.isArray(tools) || tools.length === 0)
+    throw new CliFailure({
+      what: `The server did not list its tools: ${answered.slice(0, 300)}`,
+      meaning: "It runs, but a harness added by its address would find no tools.",
+      next: "`ukt doctor` shows what else is wrong.",
+    });
 }
 
 /** The person's projects: an answer proves the token is accepted and the store answers. */

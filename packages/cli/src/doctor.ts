@@ -1,11 +1,13 @@
 /**
  * `ukt doctor`: what stands between an agent and its memory on this machine. It looks at the data
- * directory, the token, the running server, the store behind it and the embedding model, and
- * gives each finding with its fix. It changes nothing.
+ * directory, the token, the service that keeps the server running, the running server, the store
+ * behind it and the embedding model, and gives each finding with its fix. It changes nothing.
  */
 import { access } from "node:fs/promises";
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { CATALOG, openLocalEmbedder } from "@uketsugi/embed";
+import { localUrl } from "@uketsugi/server";
+import { connectLines } from "./harness-lines.ts";
 import {
   looseModes,
   readRecord,
@@ -15,16 +17,36 @@ import {
   type Home,
 } from "./home.ts";
 import { hostStore, storePlace, type HostStore } from "./host-store.ts";
-import { onStore, type OnStore, type Program } from "./program.ts";
-import { CliFailure, describe, type Report } from "./report.ts";
-import { capabilities, connect, projects, servingNow } from "./server-client.ts";
+import { dirFlag, onStore, servingOf, type OnStore, type Program } from "./program.ts";
+import { CliFailure, describe, type Io, type Report } from "./report.ts";
+import {
+  capabilities,
+  connect,
+  connectInfo,
+  projects,
+  servingNow,
+  whoAnswers,
+} from "./server-client.ts";
+import {
+  lastWords,
+  lingers,
+  SERVICE_COMMANDS,
+  serves,
+  serviceState,
+  startCommand,
+  UNIT,
+  type ServiceState,
+} from "./service.ts";
 
 /** One thing looked at. `warn` works but is less than it could be; `fail` needs its fix. */
 export interface Finding {
-  readonly check: "data directory" | "token" | "server" | "store" | "model";
+  readonly check:
+    "data directory" | "token" | "service" | "server" | "store" | "model" | "harnesses";
   readonly state: "ok" | "warn" | "fail";
   readonly detail: string;
   readonly fix?: string;
+  /** What else a person may want of it, a line each: the commands that run the service. */
+  readonly notes?: readonly string[];
 }
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -62,8 +84,76 @@ async function checkToken(home: Home): Promise<Finding> {
   return { check, state: "fail", detail: `there is none in ${home.tokenFile}`, fix: "ukt setup" };
 }
 
+/**
+ * Whether the server runs as its person's service: installed, enabled and running, with the
+ * commands that stop it, start it and show what it printed. For one that is not running, the
+ * cause: another program on its port, else the last lines it printed, and a fix that addresses it.
+ */
+async function checkService(
+  io: Io,
+  env: NodeJS.ProcessEnv,
+  service: ServiceState,
+  home: Home,
+  lingering: boolean | null,
+): Promise<Finding> {
+  const check = "service";
+  const byHand = "the server runs while `ukt serve` does";
+  if (!service.manager) return { check, state: "ok", detail: `none: ${service.why}, so ${byHand}` };
+  if (service.text === null)
+    return { check, state: "warn", detail: `not installed, so ${byHand}`, fix: "ukt setup" };
+  if (!serves(service, home))
+    return {
+      check,
+      state: "warn",
+      detail: `${UNIT} serves another data directory, so here ${byHand}`,
+      fix: "ukt setup",
+    };
+  const notes = [
+    ...Object.entries(SERVICE_COMMANDS).map(([what, typed]) => `${what}: ${typed}`),
+    ...(lingering === false
+      ? ["it stops when you log out of this machine; to keep it running: loginctl enable-linger"]
+      : []),
+  ];
+  if (!service.running) {
+    const detail = `${UNIT} is installed and not running: ${service.standing}`;
+    const runs = await servingOf(home, {});
+    const origin = localUrl(runs.host, Number(runs.port));
+    if ((await whoAnswers(home, origin)) === "other")
+      return {
+        check,
+        state: "fail",
+        detail: `${detail}. Something that is not this data directory's server answers at ${origin}, which is the service's port`,
+        fix: "ukt setup --port <a free port>",
+        notes,
+      };
+    const start = startCommand(service, home);
+    const why = (await lastWords(io, env, home)).trim().split("\n");
+    return {
+      check,
+      state: "fail",
+      detail,
+      fix: start.includes("reset-failed")
+        ? `${start}, once what the lines below say is put right`
+        : start,
+      notes: [...notes, ...why],
+    };
+  }
+  return service.enabled
+    ? { check, state: "ok", detail: `${UNIT} is enabled and running`, notes }
+    : {
+        check,
+        state: "warn",
+        detail: `${UNIT} is running, but not enabled: it will not start at your next login`,
+        fix: "ukt setup",
+        notes,
+      };
+}
+
 /** What the running server says of itself, or null with the finding that says why it cannot be asked. */
-async function checkServer(home: Home): Promise<{ findings: Finding[]; vector: boolean | null }> {
+async function checkServer(
+  home: Home,
+  start: string,
+): Promise<{ findings: Finding[]; vector: boolean | null }> {
   const check = "server";
   const record = await servingNow(home);
   if (record === null) {
@@ -77,7 +167,7 @@ async function checkServer(home: Home): Promise<{ findings: Finding[]; vector: b
       state: "ok",
       detail: "not checked: the store is checked through the running server",
     };
-    return { findings: [{ check, state: "fail", detail, fix: "ukt serve" }, store], vector: null };
+    return { findings: [{ check, state: "fail", detail, fix: start }, store], vector: null };
   }
   try {
     const described = await capabilities(record);
@@ -114,7 +204,11 @@ async function checkStore(home: Home): Promise<Finding> {
 }
 
 /** The model: its files against their pins, read once, then one text through it. */
-async function checkModel(home: Home, servedWithVectors: boolean | null): Promise<Finding> {
+async function checkModel(
+  home: Home,
+  servedWithVectors: boolean | null,
+  start: string,
+): Promise<Finding> {
   const check = "model";
   const embedder = openLocalEmbedder(home.modelDir);
   try {
@@ -144,11 +238,29 @@ async function checkModel(home: Home, servedWithVectors: boolean | null): Promis
         check,
         state: "warn",
         detail: `${verified.model} is installed, but the running server started without it`,
-        fix: "restart `ukt serve`",
+        fix: start === "ukt serve" ? "restart `ukt serve`" : start.replace(" start ", " restart "),
       };
     return { check, state: "ok", detail: `${verified.model}, intact and running` };
   } finally {
     await embedder.close();
+  }
+}
+
+/**
+ * What a harness must send to this server and what to type to connect each one, as the running
+ * server says it. A harness added without a token that the server then asks one of is silent
+ * about it in use, so here is where a person learns which it is.
+ */
+async function checkHarnesses(home: Home, dir: string): Promise<Finding[]> {
+  const check = "harnesses";
+  try {
+    const info = await connectInfo(await connect(home));
+    const token = `export ${TOKEN_ENV}="$(ukt token${dir})"`;
+    const [need, ...rest] = connectLines(info, token);
+    return [{ check, state: "ok", detail: need ?? "", notes: rest }];
+  } catch {
+    // Why the server cannot be asked is the server's or the token's finding.
+    return [];
   }
 }
 
@@ -158,6 +270,7 @@ function linesOf(findings: readonly Finding[]): string[] {
   return findings.flatMap((finding) => [
     `${MARK[finding.state]}  ${finding.check.padEnd(15)} ${finding.detail}`,
     ...(finding.fix === undefined ? [] : [`      fix: ${finding.fix}`]),
+    ...(finding.notes ?? []).map((note) => `      ${note}`),
   ]);
 }
 
@@ -181,19 +294,34 @@ export interface DoctorOptions extends OnStore {
   readonly json?: boolean;
 }
 
-export async function doctor(options: DoctorOptions, env: NodeJS.ProcessEnv): Promise<Report> {
+export async function doctor(
+  io: Io,
+  options: DoctorOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<Report> {
   const home = resolveHome(options.dataDir, env);
   const store = await hostStore(home, options.databaseUrl).catch((error: unknown) =>
     failed("store", error),
   );
-  const server = await checkServer(home);
+  const service = await serviceState(io, env);
+  // A server that is down is started by its service where it has one.
+  const start = startCommand(service, home);
+  const server = await checkServer(home, start);
   const isStore = (finding: Finding): boolean => finding.check === "store";
   const findings = [
     ...(await checkDataDir(home)),
     await checkToken(home),
+    await checkService(
+      io,
+      env,
+      service,
+      home,
+      serves(service, home) ? await lingers(io, env) : null,
+    ),
     ...server.findings.filter((finding) => !isStore(finding)),
     ...storeFindings(home, store, server.findings.find(isStore)),
-    await checkModel(home, server.vector),
+    await checkModel(home, server.vector, start),
+    ...(server.vector === null ? [] : await checkHarnesses(home, dirFlag(options))),
   ];
   const count = (state: Finding["state"]): number =>
     findings.filter((finding) => finding.state === state).length;
@@ -225,8 +353,11 @@ export async function doctor(options: DoctorOptions, env: NodeJS.ProcessEnv): Pr
 }
 
 /** Adds `doctor` to the program. */
-export function doctorVerb({ env, verb, run }: Program): void {
+export function doctorVerb({ io, env, verb, run }: Program): void {
   onStore(
-    verb("doctor", "check the data directory, the token, the server, the store and the model"),
-  ).action((options: DoctorOptions) => run("doctor", options, () => doctor(options, env)));
+    verb(
+      "doctor",
+      "check the data directory, the token, the service, the server, the store and the model, and say what each harness must send",
+    ),
+  ).action((options: DoctorOptions) => run("doctor", options, () => doctor(io, options, env)));
 }

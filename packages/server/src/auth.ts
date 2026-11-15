@@ -115,6 +115,21 @@ export function tokenAuth(
   };
 }
 
+/** Whether the identity takes a request with no token as its person, for a request that `alone` says came from this machine only. */
+export async function takesNoToken(
+  app: Pick<App, "authenticate">,
+  alone: boolean,
+): Promise<boolean> {
+  if (!alone) return false;
+  return app.authenticate(undefined).then(
+    () => true,
+    (error: unknown) => {
+      if (error instanceof AuthError) return false;
+      throw error;
+    },
+  );
+}
+
 /** A signed-in browser: who it acts as, and the value its changing requests must send back. */
 export interface DashboardLogin {
   readonly caller: Caller;

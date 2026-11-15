@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { CATALOG } from "@uketsugi/embed";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { doctor, type Finding } from "../src/doctor.ts";
-import { nextCommands, setup, token } from "../src/host-verbs.ts";
+import { token } from "../src/host-verbs.ts";
 import { main } from "../src/index.ts";
 import { exportFacts, ui } from "../src/remote-verbs.ts";
 import { CliFailure, confirmPlan, progressLine, runVerb, type Report } from "../src/report.ts";
+import { nextCommands, setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { fakeIo, tempDir } from "./support.ts";
 
@@ -186,35 +187,24 @@ describe("ukt setup and ukt token", () => {
     expect(await readFile(join(dataDir, "token"), "utf8")).toBe(held);
     expect(await modeOf(dataDir)).toBe(0o700);
     expect(await modeOf(join(dataDir, "token"))).toBe(0o600);
-    // Every step is a line a person can type as it stands, the one that sets the token included:
-    // a harness added while that variable is empty stores an empty token.
-    expect(first.lines.slice(first.lines.indexOf("Next:"))).toEqual([
-      "Next:",
-      `  1. Start the server:  ukt serve --data-dir ${dataDir}`,
-      "  2. In another terminal, put your token where a harness's command reads it:",
-      `       export UKT_TOKEN="$(ukt token --data-dir ${dataDir})"`,
-      "  3. From that terminal, connect your harness.",
-      `     \`ukt ui --data-dir ${dataDir}\` opens the page that shows the lines to run for each harness.`,
+    // Nothing runs the server, so the next step is to start it; what to type for a harness comes once it runs.
+    expect(
+      first.lines.slice(first.lines.indexOf(`Start the server:  ukt serve --data-dir ${dataDir}`)),
+    ).toEqual([
+      `Start the server:  ukt serve --data-dir ${dataDir}`,
+      "",
+      `Once it runs, \`ukt doctor --data-dir ${dataDir}\` prints what to type for each harness.`,
       "",
       "An agent names its project by the repository's origin remote. For work in a directory",
       "without one, make a project name on the dashboard's Projects page.",
     ]);
   });
 
-  test("setup's next steps repeat what it was told that the next commands must be told again", () => {
+  test("setup's next steps repeat the one thing the next commands must be told again: the data directory", () => {
     const typed = 'export UKT_TOKEN="$(ukt token)"';
-    expect(nextCommands({ ...LISTEN, model: true })).toEqual({
-      serve: "ukt serve",
-      token: typed,
-      ui: "ukt ui",
-    });
-    expect(nextCommands({ host: "0.0.0.0", port: "8000", model: true })).toEqual({
-      serve: "ukt serve --host 0.0.0.0 --port 8000",
-      token: typed,
-      ui: "ukt ui",
-    });
+    expect(nextCommands({})).toEqual({ serve: "ukt serve", token: typed, ui: "ukt ui" });
     // A word a shell would split is quoted, so the line can be typed as it stands.
-    expect(nextCommands({ ...LISTEN, model: true, dataDir: "/srv/my data" })).toEqual({
+    expect(nextCommands({ dataDir: "/srv/my data" })).toEqual({
       serve: "ukt serve --data-dir '/srv/my data'",
       token: `export UKT_TOKEN="$(ukt token --data-dir '/srv/my data')"`,
       ui: "ukt ui --data-dir '/srv/my data'",
@@ -235,16 +225,13 @@ describe("ukt setup and ukt token", () => {
   test("setup refuses a UKT_MODEL_DIR that holds no model, and says the rest is ready", async () => {
     const env = { UKT_MODEL_DIR: join(dataDir, "no-model-here") };
 
-    const refused = setup(fakeIo(), { dataDir, ...LISTEN, model: true }, env);
+    const refused = await setup(fakeIo(), { dataDir, ...LISTEN, model: true }, env);
 
-    await expect(refused).rejects.toMatchObject({
-      failure: {
-        what: expect.stringContaining(
-          `UKT_MODEL_DIR=${env.UKT_MODEL_DIR} cannot be used`,
-        ) as string,
-        meaning: expect.stringContaining("`ukt serve` will run") as string,
-      },
+    expect(refused.failure).toMatchObject({
+      what: expect.stringContaining(`UKT_MODEL_DIR=${env.UKT_MODEL_DIR} cannot be used`) as string,
+      meaning: expect.stringContaining("`ukt serve` will run") as string,
     });
+    expect(refused.data).toMatchObject({ model: { state: "failed" } });
   });
 
   test("token prints the data directory's token alone, else UKT_TOKEN, else how to get one", async () => {
@@ -315,7 +302,7 @@ describe("ukt doctor with no server running", () => {
   test("gives each fault its fix and fails", async () => {
     const dataDir = join(await tempDir(), "absent");
 
-    const report = await doctor({ dataDir }, {});
+    const report = await doctor(fakeIo(), { dataDir }, {});
 
     expect(findingsOf(report.data)).toEqual([
       {
@@ -325,12 +312,19 @@ describe("ukt doctor with no server running", () => {
         fix: "ukt setup",
       },
       { check: "token", state: "fail", detail: expect.any(String) as string, fix: "ukt setup" },
+      {
+        check: "service",
+        state: "ok",
+        // The verb was handed an environment with no home in it, as this test's is.
+        detail:
+          "none: this account has no home directory, so the server runs while `ukt serve` does",
+      },
       { check: "server", state: "fail", detail: "not running", fix: "ukt serve" },
       { check: "store", state: "ok", detail: expect.stringContaining("not checked") as string },
       { check: "model", state: "warn", detail: expect.any(String) as string, fix: "ukt setup" },
     ]);
     expect(report.failure).toMatchObject({
-      what: "3 of 5 checks failed.",
+      what: "3 of 6 checks failed.",
       meaning: "Until they are fixed, an agent may not reach its memory on this machine.",
     });
     expect(report.lines).toContain("FAIL  server          not running");
@@ -342,7 +336,7 @@ describe("ukt doctor with no server running", () => {
     await mkdir(dataDir, { mode: 0o755 });
     await writeFile(join(dataDir, "token"), "ukt_held\n", { mode: 0o644 });
 
-    const findings = findingsOf((await doctor({ dataDir }, {})).data);
+    const findings = findingsOf((await doctor(fakeIo(), { dataDir }, {})).data);
 
     expect(findings.filter((finding) => finding.check === "data directory")).toEqual([
       expect.objectContaining({ state: "fail", fix: `chmod 700 ${dataDir}` }),
@@ -355,7 +349,7 @@ describe("ukt doctor with no server running", () => {
     const dataDir = await tempDir();
     await writeFile(join(dataDir, "server.json"), JSON.stringify({ url: "http://127.0.0.1:1" }));
 
-    const findings = findingsOf((await doctor({ dataDir }, {})).data);
+    const findings = findingsOf((await doctor(fakeIo(), { dataDir }, {})).data);
 
     expect(findings.find((finding) => finding.check === "server")).toEqual({
       check: "server",

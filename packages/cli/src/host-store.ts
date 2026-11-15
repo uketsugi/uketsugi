@@ -1,7 +1,7 @@
 /**
  * Where a host keeps its store. A data directory names one store, for good: its own engine's, or
- * a database on a PostgreSQL server, whose address is recorded in the directory the first time a
- * verb opens it. Every verb that reaches the store asks here first. So a verb that is not told the
+ * a database on a PostgreSQL server, whose address is kept with the host's settings the first
+ * time a verb opens it. Every verb that reaches the store asks here first. So a verb that is not told the
  * database again still uses it, and a verb told of another store is refused before it can make a
  * second, empty one beside the first.
  */
@@ -12,7 +12,7 @@ import {
   StoreInUseError,
   StoreUnavailableError,
 } from "@uketsugi/store";
-import { readStoreRecord, writeStoreRecord, type Home } from "./home.ts";
+import { keepSettings, readSettings, type Home } from "./home.ts";
 import { CliFailure, describe } from "./report.ts";
 
 /** A host's store: where it is, and whether the data directory holds or names it yet. */
@@ -47,16 +47,16 @@ function nameOf(given: string): string {
  */
 export async function hostStore(home: Home, given: string | undefined): Promise<HostStore> {
   const asked = given === undefined || given.trim() === "" ? null : nameOf(given.trim());
-  const recorded = await readStoreRecord(home);
-  if (recorded !== null) {
-    const name = serverStoreName(recorded.databaseUrl);
+  const recorded = (await readSettings(home)).databaseUrl;
+  if (recorded !== undefined) {
+    const name = serverStoreName(recorded);
     if (asked !== null && asked !== name)
       throw new CliFailure({
-        what: `This host's store is the PostgreSQL database ${name} (recorded in ${home.storeFile}), and the address given names another: ${asked}.`,
+        what: `This host's store is the PostgreSQL database ${name} (recorded in ${home.dataDir}), and the address given names another: ${asked}.`,
         meaning: `A host has one store. ${NOTHING_DONE}`,
         next: `${LEAVE_OUT} to use ${name}. A host on ${asked} ${OWN_DIRECTORY}`,
       });
-    const databaseUrl = asked === null ? recorded.databaseUrl : (given ?? "").trim();
+    const databaseUrl = asked === null ? recorded : (given ?? "").trim();
     return { kind: "postgres", made: true, databaseUrl, name };
   }
   const made = holdsEmbeddedStore(home.dataDir);
@@ -80,10 +80,7 @@ export function storeOptions(home: Home, store: HostStore) {
 
 /** Records where the host's store is, once a verb has opened it: a database's address, as last given. */
 export async function rememberStore(home: Home, store: HostStore): Promise<void> {
-  if (store.kind !== "postgres") return;
-  const recorded = await readStoreRecord(home);
-  if (recorded?.databaseUrl === store.databaseUrl) return;
-  await writeStoreRecord(home, { databaseUrl: store.databaseUrl });
+  if (store.kind === "postgres") await keepSettings(home, { databaseUrl: store.databaseUrl });
 }
 
 /** Where the store is, in words that never show a database's password. */

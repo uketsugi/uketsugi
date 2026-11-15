@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
+import { UNIT } from "../src/service.ts";
 import { tempDir } from "./support.ts";
 
 const run = promisify(execFile);
@@ -129,5 +130,40 @@ describe.runIf(here)("deploy/install.sh, as a person's first command", () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  test("over an earlier release, starts a server that runs as the person's service again on the new one", async () => {
+    const dir = await tempDir();
+    const { file, sha256 } = await fakeRelease(dir);
+    const [home, tools] = [join(dir, "home"), join(dir, "tools")];
+    await mkdir(join(home, ".config", "systemd", "user"), { recursive: true });
+    await mkdir(tools);
+    // A service manager of the test's own: it says the unit is running and records what it is asked.
+    const calls = join(dir, "calls");
+    await writeFile(join(tools, "systemctl"), `#!/bin/sh\necho "$*" >> ${calls}\n`);
+    await chmod(join(tools, "systemctl"), 0o755);
+    const install = () =>
+      run("sh", [INSTALLER, "--tarball", file, "--sha256", sha256], {
+        env: { HOME: home, PATH: `${tools}:/usr/bin:/bin` },
+      });
+
+    const fresh = await install();
+    const byHand = await install();
+    await writeFile(join(home, ".config", "systemd", "user", UNIT), "[Service]\n");
+    const upgraded = await install();
+
+    expect(fresh.stdout).not.toContain("replaced");
+    expect(byHand.stdout).toContain(
+      "If `ukt serve` is running, stop it and start it again: it still runs the release this one replaced.",
+    );
+    // The script and `ukt setup` name the unit alike: the script restarts the one set-up wrote.
+    expect(upgraded.stdout).toContain(
+      `Restarted your service (${UNIT}) on this release. \`ukt doctor\` checks that it answers.`,
+    );
+    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
+      `--user show ${UNIT}`,
+      `--user is-active --quiet ${UNIT}`,
+      `--user restart ${UNIT}`,
+    ]);
   });
 });

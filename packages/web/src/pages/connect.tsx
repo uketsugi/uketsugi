@@ -1,8 +1,8 @@
 /**
- * Connect: for each harness the server describes, what the person runs to connect it. A harness
- * with a plugin is connected by installing it: nobody types set-up or places the block, and the
- * route without the plugin is kept behind a disclosure. Where there is none, the server is added
- * by its URL, and the block goes in by the set-up command or by hand.
+ * Connect: for each harness the server describes, what the person runs to connect it: the
+ * address added to the harness, then the command typed in a session. The lines are those this
+ * server needs, with a token or without. A harness's plugin is an extra, behind a disclosure.
+ * Where the harness offers no command, the block goes in its instruction file by hand.
  */
 import { Collapsible } from "@base-ui/react/collapsible";
 import { Tabs } from "@base-ui/react/tabs";
@@ -41,8 +41,8 @@ function Step({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** Where the server is and where its token comes from: what every way of connecting starts from. */
-function ServerAndToken({ info, typed }: { info: ConnectInfo; typed: boolean }) {
+/** Where the server is and what it asks of a harness: what every way of connecting starts from. */
+function ServerAndToken({ info }: { info: ConnectInfo }) {
   return (
     <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5">
       <dt className="text-ink-muted">Server URL</dt>
@@ -52,24 +52,27 @@ function ServerAndToken({ info, typed }: { info: ConnectInfo; typed: boolean }) 
       </dd>
       <dt className="text-ink-muted">Token</dt>
       <dd>
-        {typed ? (
+        {info.needs_token ? (
           <>
             read from the environment variable <code className={INLINE_CODE}>{info.token_env}</code>
-            ;{" "}
+            ; this page never shows the token itself. On the server&apos;s host,{" "}
+            <code className={INLINE_CODE}>ukt token</code> prints yours.
           </>
-        ) : null}
-        this page never shows the token itself. On the server&apos;s host,{" "}
-        <code className={INLINE_CODE}>ukt token</code> prints yours.
+        ) : (
+          "none: this server takes a harness on this machine by its address alone, while you are its only person."
+        )}
       </dd>
     </dl>
   );
 }
 
 /**
- * Lines a person runs in a shell, which read the token from a variable of that shell. The line
- * that sets it comes first: with it unset the harness is given no token and the server refuses it.
+ * Lines a person runs in a shell, which read the token from a variable of that shell where this
+ * server needs one: the line that sets it comes first, since with it unset the harness is given
+ * no token and the server refuses it. Where it needs none the lines are shown as they are.
  */
-function TokenLines({ lines, label, info }: { lines: string; label: string; info: ConnectInfo }) {
+function ShellLines({ lines, label, info }: { lines: string; label: string; info: ConnectInfo }) {
+  if (!info.needs_token) return <CodeBlock text={lines} label={label} />;
   const variable = <code className={INLINE_CODE}>{info.token_env}</code>;
   return (
     <>
@@ -90,15 +93,15 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
   const typed = harness.add_kind === "command";
   return (
     <Step title={`Add the server to ${harness.name}`}>
-      <ServerAndToken info={info} typed={typed} />
+      <ServerAndToken info={info} />
       {typed ? (
         <>
-          <TokenLines
+          <ShellLines
             lines={harness.add}
             label={`what adds the server to ${harness.name}`}
             info={info}
           />
-          {harness.remove === undefined ? null : (
+          {harness.remove === undefined || !info.needs_token ? null : (
             <p className="text-ink-muted">
               {harness.name} keeps the token it was added with. To give it another, after{" "}
               <code className={INLINE_CODE}>ukt token --rotate</code> for one, first remove the
@@ -117,54 +120,27 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
   );
 }
 
-type Plugin = NonNullable<ConnectHarness["plugin"]>;
-
 /**
- * The step that installs a harness's plugin. Where the plugin adds the server too it is the only
- * step, and its lines read the token; where it does not, the server was added in the step before.
+ * The next step: the command that uses memory in one session and writes nothing, where the
+ * harness offers it. Where it does not, the block goes in its instruction file by hand.
  */
-function InstallPlugin({
-  harness,
-  plugin,
-  info,
-}: {
-  harness: ConnectHarness;
-  plugin: Plugin;
-  info: ConnectInfo;
-}) {
-  const label = `what installs the plugin for ${harness.name}`;
-  const taken = (
-    <>
-      To take it out again: <code className={INLINE_CODE}>{plugin.remove}</code>.
-    </>
-  );
-  if (!plugin.adds_server)
-    return (
-      <Step title="Install the plugin">
-        <CodeBlock text={plugin.install} label={label} />
-        <p className="text-ink-muted">
-          The plugin gives every session the block as a standing rule, so nobody places it in a
-          file. {taken}
-        </p>
-      </Step>
-    );
+function UseIt({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
+  if (harness.activate === undefined) return <WriteBlock harness={harness} info={info} />;
   return (
-    <Step title={`Install the plugin for ${harness.name}`}>
-      <ServerAndToken info={info} typed />
-      <TokenLines lines={plugin.install} label={label} info={info} />
+    <Step title="Type the activate command in a session">
+      <CodeBlock text={harness.activate} label="the activate command" />
       <p className="text-ink-muted">
-        The plugin adds the server. Every later session starts with its project&apos;s brief in
-        front of the agent and uses memory with nothing typed, and where a session stopped is kept
-        as a note for the next one. To give it another token, run the last line again. {taken}
+        {info.commands.activate.description} It writes nothing: type it again in the next session.
       </p>
     </Step>
   );
 }
 
 /**
- * The step that puts the block in the instruction file. Where the harness offers the server's
- * commands the person types one and the agent writes the block. Where it does not, the person
- * pastes the block, so it is given here to copy, with the file it goes in where the server knows it.
+ * The step that puts the block in the instruction file, for every session. Where the harness
+ * offers the server's commands the person types one and the agent writes the block. Where it
+ * does not, the person pastes the block, so it is given here to copy, with the file it goes in
+ * where the server knows it.
  */
 function WriteBlock({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
   const file =
@@ -175,7 +151,7 @@ function WriteBlock({ harness, info }: { harness: ConnectHarness; info: ConnectI
     );
   if (harness.setup !== undefined)
     return (
-      <Step title="Type the set-up command">
+      <Step title="Or have every session use it: type the set-up command">
         <CodeBlock text={harness.setup} label="the set-up command" />
         {harness.instruction_file_command === undefined ? (
           <p className="text-ink-muted">
@@ -212,65 +188,62 @@ function WriteBlock({ harness, info }: { harness: ConnectHarness; info: ConnectI
   );
 }
 
-/** The command that uses memory in one session and writes nothing, where the harness offers it. */
-function OneSession({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
-  if (harness.activate === undefined) return null;
-  return (
-    <div className="space-y-2 border-t border-line pt-4">
-      <h2 className="font-semibold">Or, for one session only</h2>
-      <CodeBlock text={harness.activate} label="the command for one session" />
-      <p className="text-ink-muted">
-        {info.commands.activate.description} It writes nothing: type it again in the next session.
-      </p>
-    </div>
-  );
-}
-
-/** What a person does who goes without the plugin: what the plugin would have done, by hand. */
-function WithoutPlugin({
-  harness,
-  plugin,
-  info,
-}: {
-  harness: ConnectHarness;
-  plugin: Plugin;
-  info: ConnectInfo;
-}) {
+/**
+ * An extra, never needed: the harness's plugin. Where it also adds the server it is instead of
+ * the steps above; where it does not, it comes after them.
+ */
+function WithPlugin({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
+  const { plugin } = harness;
+  if (plugin === undefined) return null;
+  const label = `what installs the plugin for ${harness.name}`;
   return (
     <Collapsible.Root className="border-t border-line pt-3">
       <Collapsible.Trigger className="group flex cursor-pointer items-center gap-1 rounded-sm font-medium">
         <ChevronRight aria-hidden className="size-4 group-data-panel-open:rotate-90" />
-        Without the plugin
+        With the plugin as well
       </Collapsible.Trigger>
-      <Collapsible.Panel className="space-y-5 pt-3">
-        <ol className="list-decimal space-y-5 pl-5 marker:font-semibold">
-          {plugin.adds_server ? <AddServer harness={harness} info={info} /> : null}
-          <WriteBlock harness={harness} info={info} />
-        </ol>
-        <OneSession harness={harness} info={info} />
+      <Collapsible.Panel className="space-y-3 pt-3">
+        {plugin.adds_server ? (
+          <>
+            <p>
+              The plugin adds the server itself: install it instead of adding the server above.
+              Every session then starts with its project&apos;s brief in front of the agent and uses
+              memory with nothing typed, and where a session stopped is kept as a note for the next
+              one. It tells the server the repository&apos;s origin remote and the last message of
+              each turn.
+            </p>
+            <ShellLines lines={plugin.install} label={label} info={info} />
+          </>
+        ) : (
+          <>
+            <p>
+              The plugin gives every session the block as a standing rule, so nobody places it in a
+              file. Install it after adding the server.
+            </p>
+            <CodeBlock text={plugin.install} label={label} />
+          </>
+        )}
+        <p className="text-ink-muted">
+          To take it out again: <code className={INLINE_CODE}>{plugin.remove}</code>.
+        </p>
       </Collapsible.Panel>
     </Collapsible.Root>
   );
 }
 
 function Steps({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
-  const { plugin } = harness;
   return (
     <div className="space-y-5 p-5">
       <ol className="list-decimal space-y-5 pl-5 marker:font-semibold">
-        {plugin?.adds_server === true ? null : <AddServer harness={harness} info={info} />}
-        {plugin === undefined ? (
+        <AddServer harness={harness} info={info} />
+        <UseIt harness={harness} info={info} />
+        {harness.activate !== undefined && harness.setup !== undefined ? (
           <WriteBlock harness={harness} info={info} />
-        ) : (
-          <InstallPlugin harness={harness} plugin={plugin} info={info} />
-        )}
+        ) : null}
       </ol>
-      {plugin === undefined ? (
-        <OneSession harness={harness} info={info} />
-      ) : (
-        <WithoutPlugin harness={harness} plugin={plugin} info={info} />
-      )}
+      <WithPlugin harness={harness} info={info} />
       {harness.note === undefined ? null : <p className="text-ink-muted">{harness.note}</p>}
+      <p className="text-ink-muted">How this is known: {harness.known}.</p>
       <p className="border-t border-line pt-4 text-ink-muted">
         An agent names its project by the repository&apos;s origin remote. For a directory that is
         not a repository, or a repository with no origin remote, make a project name of your own on{" "}

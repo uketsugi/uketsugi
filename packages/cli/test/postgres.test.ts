@@ -14,8 +14,9 @@ import {
 } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { doctor } from "../src/doctor.ts";
-import { setup, token } from "../src/host-verbs.ts";
+import { token } from "../src/host-verbs.ts";
 import { serve } from "../src/serve.ts";
+import { setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { fakeIo, tempDir } from "./support.ts";
 
@@ -52,7 +53,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("a host set up on a PostgreSQL server",
     const projects = (bearer: string) =>
       fetch(`${url}/api/projects`, { headers: { authorization: `Bearer ${bearer}` } });
     const [withOld, withNew] = [await projects(first), await projects(fresh)];
-    const checked = await doctor({ dataDir }, {});
+    const checked = await doctor(fakeIo(), { dataDir }, {});
     await serving.close();
 
     expect(rotated.data).toEqual({ token: fresh, revoked: 1 });
@@ -92,7 +93,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("a host set up on a PostgreSQL server",
     await expect(
       token(fakeIo(), { ...elsewhere, rotate: true, yes: true }, {}),
     ).rejects.toMatchObject(refusal);
-    const checked = await doctor(elsewhere, {});
+    const checked = await doctor(fakeIo(), elsewhere, {});
     expect(checked.data["findings"]).toContainEqual(
       expect.objectContaining({ check: "store", state: "fail", fix: refusal.failure.next }),
     );

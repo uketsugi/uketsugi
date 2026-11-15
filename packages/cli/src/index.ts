@@ -9,11 +9,13 @@ import { Command, CommanderError, Option } from "commander";
 import open from "open";
 import { doctorVerb } from "./doctor.ts";
 import { hostVerbs } from "./host-verbs.ts";
+import { runProgram } from "./machine.ts";
 import { peopleVerbs } from "./people-verbs.ts";
 import type { Program } from "./program.ts";
 import { remoteVerbs } from "./remote-verbs.ts";
 import { progressLine, runVerb, type Io } from "./report.ts";
 import { serveVerb } from "./serve.ts";
+import { setupVerbs } from "./setup.ts";
 import { storeVerbs } from "./store-verbs.ts";
 
 /** The terminal a person runs `ukt` in. Prompts and the spinner are drawn only when one is there. */
@@ -41,6 +43,7 @@ export function terminal(): Io {
         () => true,
         () => false,
       ),
+    run: runProgram,
   };
 }
 
@@ -79,7 +82,15 @@ export async function main(
       code = await runVerb(io, command, options.json === true, work);
     },
   };
-  for (const add of [serveVerb, hostVerbs, peopleVerbs, doctorVerb, remoteVerbs, storeVerbs])
+  for (const add of [
+    setupVerbs,
+    serveVerb,
+    hostVerbs,
+    peopleVerbs,
+    doctorVerb,
+    remoteVerbs,
+    storeVerbs,
+  ])
     add(program);
   try {
     await ukt.parseAsync([...argv], { from: "user" });

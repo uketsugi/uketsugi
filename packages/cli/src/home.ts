@@ -1,8 +1,8 @@
 /**
  * The host's own files in the data directory, beside the store: the token a harness sends, the
- * host's own secret, which no harness is given, the record of the running server, the record of a
- * store kept elsewhere, the embedding model and the backups. The directory is the person's alone (0700), and so is every file here that holds a
- * secret (0600).
+ * host's own secret, which no harness is given, the record of the running server, how the server
+ * is set to run, the embedding model and the backups. The directory is the person's alone (0700),
+ * and so is every file here that holds a secret (0600).
  */
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rm, stat } from "node:fs/promises";
@@ -23,8 +23,8 @@ export interface Home {
   readonly hostKeyFile: string;
   /** Written by `ukt serve` while it runs: where it listens. */
   readonly recordFile: string;
-  /** Written once for a host whose store is on a PostgreSQL server: the database's address. */
-  readonly storeFile: string;
+  /** How the server is set to run: what `ukt setup` was told, and where the store is when it is elsewhere. */
+  readonly settingsFile: string;
   /** The runtime and model: `UKT_MODEL_DIR` when set, which is never written to, else `model/`. */
   readonly modelDir: string;
   readonly modelIsOurs: boolean;
@@ -41,11 +41,33 @@ export interface ServerRecord {
   readonly url: string;
 }
 
-/** Where the store of this data directory's host is, when it is not in the directory itself. */
-export interface StoreRecord {
-  /** `postgres://user:password@host:port/database`: it holds a password, so the file is the person's alone. */
-  readonly databaseUrl: string;
+/**
+ * How this host's server runs, as far as its person has said: what `ukt setup` was told, kept so
+ * that every later start is the same server whoever starts it. A service manager starts it with
+ * no flags and no shell, so nothing a person chose may live only in a command they typed. A key
+ * is here once it was given; one that is not falls back to what is built in.
+ */
+export interface Settings {
+  /**
+   * Where the store is when it is not in the data directory itself:
+   * `postgres://user:password@host:port/database`. It holds a password, so the file is the
+   * person's alone. A host's store is named once, for good (`host-store.ts`).
+   */
+  readonly databaseUrl?: string;
+  /** The address to listen on: `--host`. */
+  readonly host?: string;
+  /** The port to listen on, as it was typed: `--port`. */
+  readonly port?: string;
+  /** The names the server is reached by besides the loopback ones: `--allowed-host`. */
+  readonly allowedHost?: readonly string[];
+  /** How long a claimed task is held, in minutes, as it was typed: `--task-lease-minutes`. */
+  readonly taskLeaseMinutes?: string;
+  /** Every caller sends a token, this machine's own harnesses included: `--require-token`. */
+  readonly requireToken?: boolean;
 }
+
+/** Where 0.1.0 recorded the address of a store on a PostgreSQL server: read still, never written. */
+const STORE_FILE_OF_0_1_0 = "store.json";
 
 /** The data directory: `--data-dir`, else `UKT_DATA_DIR` (commander reads it), else `$XDG_DATA_HOME/uketsugi`. */
 export function resolveHome(dataDir: string | undefined, env: NodeJS.ProcessEnv): Home {
@@ -64,7 +86,7 @@ export function resolveHome(dataDir: string | undefined, env: NodeJS.ProcessEnv)
     tokenFile: join(dir, "token"),
     hostKeyFile: join(dir, "host.key"),
     recordFile: join(dir, "server.json"),
-    storeFile: join(dir, "store.json"),
+    settingsFile: join(dir, "settings.json"),
     modelDir: external ? resolve(given) : join(dir, "model"),
     modelIsOurs: !external,
     backupsDir: join(dir, BACKUPS_DIR),
@@ -99,6 +121,83 @@ async function readJson(path: string): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/** The value a file of settings holds, or null when it is not an object of JSON. */
+function settingsOf(text: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(text) as unknown;
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The settings one file holds; none where the file is missing. A file that is there and cannot be
+ * read as settings is refused: taken for "nothing was said", a host whose store is on a PostgreSQL
+ * server would be started on a new, empty store in its data directory.
+ */
+async function settingsIn(path: string): Promise<Settings> {
+  const text = await readOrNull(path);
+  if (text === null) return {};
+  const kept = settingsOf(text);
+  if (kept === null)
+    throw new CliFailure({
+      what: `${path} cannot be read: it does not hold the settings \`ukt setup\` wrote.`,
+      meaning: "It says how this host's server runs and where its store is, so nothing was done.",
+      next: "Put the file back from a copy, or move it away and run `ukt setup` again with the options this host was set up with.",
+    });
+  const typed = (key: keyof Settings): string | undefined =>
+    typeof kept[key] === "string" ? kept[key] : undefined;
+  const listed = (key: keyof Settings): unknown[] | undefined =>
+    Array.isArray(kept[key]) ? (kept[key] as unknown[]) : undefined;
+  return {
+    databaseUrl: typed("databaseUrl"),
+    host: typed("host"),
+    port: typed("port"),
+    allowedHost: listed("allowedHost")?.filter((name): name is string => typeof name === "string"),
+    taskLeaseMinutes: typed("taskLeaseMinutes"),
+    requireToken: kept.requireToken === true ? true : undefined,
+  };
+}
+
+/** How the server on this data directory is set to run: every key that was ever given. */
+export async function readSettings(home: Home): Promise<Settings> {
+  const kept = await settingsIn(home.settingsFile);
+  if (kept.databaseUrl !== undefined) return kept;
+  const { databaseUrl } = await settingsIn(join(home.dataDir, STORE_FILE_OF_0_1_0));
+  return { ...kept, databaseUrl };
+}
+
+/** Settings as one line of JSON, their keys in one order: how they are written and compared. */
+function written(settings: Settings): string {
+  const { databaseUrl, host, port, allowedHost, taskLeaseMinutes, requireToken } = settings;
+  return JSON.stringify({ databaseUrl, host, port, allowedHost, taskLeaseMinutes, requireToken });
+}
+
+/** What would be kept with `given` added, a key left out staying as it was, and whether that changes how the server is set to run. */
+export async function settingsWith(
+  home: Home,
+  given: Settings,
+): Promise<{ readonly next: Settings; readonly changed: boolean }> {
+  const kept = await readSettings(home);
+  const told = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== undefined));
+  const next: Settings = { ...kept, ...told };
+  return { next, changed: written(next) !== written(kept) };
+}
+
+/** Keeps what it is given beside what is kept already. Returns whether that changed how the server is set to run. */
+export async function keepSettings(home: Home, given: Settings): Promise<boolean> {
+  const { next, changed } = await settingsWith(home, given);
+  // What 0.1.0 recorded in a file of its own moves here with the first thing kept.
+  if (written(next) !== written(await settingsIn(home.settingsFile))) {
+    await writePrivate(home.settingsFile, `${written(next)}\n`);
+    await rm(join(home.dataDir, STORE_FILE_OF_0_1_0), { force: true });
+  }
+  return changed;
 }
 
 /** Makes the data directory if it is not there. Returns whether it made it. */
@@ -152,16 +251,6 @@ export async function readRecord(home: Home): Promise<ServerRecord | null> {
   return typeof record?.url === "string" ? { url: record.url } : null;
 }
 
-export async function writeStoreRecord(home: Home, record: StoreRecord): Promise<void> {
-  await writePrivate(home.storeFile, `${JSON.stringify(record)}\n`);
-}
-
-/** The record of a store kept on a PostgreSQL server, or null for a host that has none. */
-export async function readStoreRecord(home: Home): Promise<StoreRecord | null> {
-  const record = (await readJson(home.storeFile)) as Partial<StoreRecord> | null;
-  return typeof record?.databaseUrl === "string" ? { databaseUrl: record.databaseUrl } : null;
-}
-
 /** A path that others on this machine can reach, with the mode it must be tightened to. */
 export interface LooseMode {
   readonly path: string;
@@ -176,7 +265,7 @@ export async function looseModes(home: Home): Promise<LooseMode[]> {
     [home.dataDir, 0o700],
     [home.tokenFile, 0o600],
     [home.hostKeyFile, 0o600],
-    [home.storeFile, 0o600],
+    [home.settingsFile, 0o600],
   ] as const) {
     const mode = await stat(path).then(
       (stats) => stats.mode & 0o777,

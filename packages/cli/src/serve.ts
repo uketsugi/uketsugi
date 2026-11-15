@@ -3,7 +3,6 @@ import { TOKEN_ENV } from "@uketsugi/contracts";
 import { RevokedTokenError } from "@uketsugi/core";
 import { CATALOG, openLocalEmbedder, type LocalEmbedder } from "@uketsugi/embed";
 import { loopbackOfEvery, startLocalServer } from "@uketsugi/server";
-import { Option } from "commander";
 import {
   ensureDataDir,
   ensureHostKey,
@@ -22,18 +21,21 @@ import {
   storePlace,
   type HostStore,
 } from "./host-store.ts";
-import { listening, onStore, type Listen, type OnStore, type Program } from "./program.ts";
+import {
+  onStore,
+  serving,
+  servingOf,
+  type OnStore,
+  type Program,
+  type Serving as Told,
+} from "./program.ts";
 import { CliFailure, describe, type Io, type Report } from "./report.ts";
 import { servingNow } from "./server-client.ts";
+import { SERVICE_COMMANDS, serves, serviceState, UNIT } from "./service.ts";
 
-export interface ServeOptions extends Listen, OnStore {
+/** What `ukt serve` is told. How the server runs is what it is told here, else what `ukt setup` kept. */
+export interface ServeOptions extends Told, OnStore {
   readonly dataDir?: string;
-  /** Names the server is reached by besides the loopback ones: `--allowed-host`, or `UKT_ALLOWED_HOSTS` with commas. */
-  readonly allowedHost?: readonly string[];
-  /** How long a task's lease lasts, in minutes: `--task-lease-minutes` or `UKT_TASK_LEASE_MINUTES`. */
-  readonly taskLeaseMinutes?: string;
-  /** Every caller sends a token, this machine's own harnesses included: `--require-token` or `UKT_REQUIRE_TOKEN`. */
-  readonly requireToken?: boolean;
   readonly json?: boolean;
 }
 
@@ -82,7 +84,37 @@ export function numberOf(text: string, option: string, least: number, most: numb
   });
 }
 
+/** How long a task's lease lasts, from the minutes a person typed; undefined where they said nothing. */
+export function leaseMs(minutes: string | undefined): number | undefined {
+  return minutes === undefined
+    ? undefined
+    : numberOf(minutes, "--task-lease-minutes", 1, 1440) * 60_000;
+}
+
 const DID_NOT_START = "The server did not start.";
+
+/**
+ * The refusal of a second server on a data directory. Someone whose server runs as their service
+ * and who starts one by hand is told that is what answers, and how to stop it.
+ */
+async function alreadyServed(
+  io: Io,
+  env: NodeJS.ProcessEnv,
+  home: Home,
+  url: string,
+): Promise<CliFailure> {
+  const state = await serviceState(io, env);
+  const service = state.manager && serves(state, home) && state.running;
+  return new CliFailure({
+    what: `A server is already running on ${home.dataDir} (at ${url}).`,
+    meaning: service
+      ? `It runs as your service (${UNIT}), which \`ukt setup\` installed: it starts when you log in and is started again if it stops. Two servers on one store would lose writes, so this one did not start.`
+      : "Two servers on one store would lose writes, so this one did not start.",
+    next: service
+      ? `Use the running server. To run one by hand instead, stop the service first: ${SERVICE_COMMANDS.stop}`
+      : "Use the running server, or stop it first.",
+  });
+}
 
 /** A start that failed for a reason the person can act on, in the three parts; anything else as it came. */
 function startFailure(error: unknown, home: Home, listen: string): unknown {
@@ -117,10 +149,10 @@ function storeLine(home: Home, store: HostStore): string {
  * it is reached by, since it refuses a request under any other. One that listens on every address
  * and was told no name answers this machine alone, which the line says.
  */
-function sharedLines(options: ServeOptions, port: number): string[] {
-  const names = options.allowedHost ?? [];
+function sharedLines(told: Told & { readonly host: string }, port: number): string[] {
+  const names = told.allowedHost ?? [];
   if (names.length === 0)
-    return loopbackOfEvery(options.host) === null
+    return loopbackOfEvery(told.host) === null
       ? []
       : [
           "other machines: none can reach it yet, because it answers only to names it is told.",
@@ -137,8 +169,8 @@ function sharedLines(options: ServeOptions, port: number): string[] {
  * by its address alone; the line says what ends that, since a harness added that way is refused
  * from then on.
  */
-function tokenNeedLine(options: ServeOptions, beyond: boolean): string {
-  if (options.requireToken === true) return "harnesses: each sends a token (--require-token).";
+function tokenNeedLine(told: Told, beyond: boolean): string {
+  if (told.requireToken === true) return "harnesses: each sends a token (--require-token).";
   return beyond
     ? "harnesses: each sends a token, because this server listens beyond this machine."
     : "harnesses: on this machine they need no token while you are this server's only person. Behind a proxy or a tunnel, start it with --require-token.";
@@ -158,18 +190,12 @@ export async function serve(
   env: NodeJS.ProcessEnv,
 ): Promise<Serving> {
   const home = resolveHome(options.dataDir, env);
-  const port = numberOf(options.port, "--port", 0, 65535);
-  const { taskLeaseMinutes: minutes } = options;
-  const taskLeaseMs =
-    minutes === undefined ? undefined : numberOf(minutes, "--task-lease-minutes", 1, 1440) * 60_000;
+  const told = await servingOf(home, options);
+  const port = numberOf(told.port, "--port", 0, 65535);
+  const taskLeaseMs = leaseMs(told.taskLeaseMinutes);
   const store = await hostStore(home, options.databaseUrl);
   const other = await servingNow(home);
-  if (other !== null)
-    throw new CliFailure({
-      what: `A server is already running on ${home.dataDir} (at ${other.url}).`,
-      meaning: "Two servers on one store would lose writes, so this one did not start.",
-      next: "Use the running server, or stop it first.",
-    });
+  if (other !== null) throw await alreadyServed(io, env, home, other.url);
   await ensureDataDir(home);
   const onFile = await readTokenFile(home);
   // A token in the environment is the one to accept; else the data directory's own.
@@ -178,18 +204,18 @@ export async function serve(
   const { embedder } = model;
   const server = await startLocalServer({
     ...storeOptions(home, store),
-    host: options.host,
+    host: told.host,
     port,
     embedder,
-    allowedHosts: options.allowedHost,
+    allowedHosts: told.allowedHost,
     // With no token on file the first start issues one, and it is kept for the other verbs.
     token: held ?? undefined,
     hostKey: await ensureHostKey(home),
     taskLeaseMs,
-    requireToken: options.requireToken,
+    requireToken: told.requireToken,
   }).catch(async (error: unknown) => {
     await embedder?.close();
-    throw startFailure(error, home, `Port ${port} on ${options.host}`);
+    throw startFailure(error, home, `Port ${port} on ${told.host}`);
   });
   await rememberStore(home, store);
   if (server.issuedToken !== null) await writeToken(home, server.issuedToken);
@@ -205,9 +231,9 @@ export async function serve(
       },
       lines: [
         `uketsugi is serving ${server.url}/mcp`,
-        ...sharedLines(options, server.port),
+        ...sharedLines(told, server.port),
         storeLine(home, store),
-        tokenNeedLine(options, server.beyond),
+        tokenNeedLine(told, server.beyond),
         tokenLine(home, onFile !== null || server.issuedToken !== null),
         model.line,
         "Stop it with Ctrl-C.",
@@ -230,33 +256,14 @@ function closeOnSignal(serving: Serving): void {
 
 /** Adds `serve` to the program. */
 export function serveVerb({ io, env, verb, run }: Program): void {
-  const hosts = new Option(
-    "--allowed-host <name...>",
-    "a name the server is reached by, besides localhost",
-  )
-    .env("UKT_ALLOWED_HOSTS")
-    .argParser((value: string, earlier: string[] = []) => [
-      ...earlier,
-      ...value.split(",").filter((name) => name.trim() !== ""),
-    ]);
-  const lease = new Option("--task-lease-minutes <minutes>", "how long a claimed task is held").env(
-    "UKT_TASK_LEASE_MINUTES",
-  );
-  onStore(listening(verb("serve", "run the server until it is stopped")))
-    .addOption(hosts)
-    .addOption(lease)
-    .addOption(
-      new Option(
-        "--require-token",
-        "take no harness without a token, this machine's own included",
-      ).env("UKT_REQUIRE_TOKEN"),
-    )
-    .action(async (options: ServeOptions) => {
-      let serving: Serving | undefined;
+  onStore(serving(verb("serve", "run the server until it is stopped"))).action(
+    async (options: ServeOptions) => {
+      let started: Serving | undefined;
       await run("serve", options, async () => {
-        serving = await serve(io, options, env);
-        return serving.report;
+        started = await serve(io, options, env);
+        return started.report;
       });
-      if (serving !== undefined) closeOnSignal(serving);
-    });
+      if (started !== undefined) closeOnSignal(started);
+    },
+  );
 }

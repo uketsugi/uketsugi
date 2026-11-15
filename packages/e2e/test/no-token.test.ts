@@ -4,9 +4,9 @@
  * or a tunnel passes on, and nobody once a second person is on it, it listens beyond the machine
  * or whoever runs it asked for tokens.
  */
-import type { FactPage } from "@uketsugi/contracts";
+import type { ConnectInfo, FactPage } from "@uketsugi/contracts";
 import { acceptToken, ensureOwner, invitePerson } from "@uketsugi/core";
-import { composeServer, openLocalPorts, type UketsugiServer } from "@uketsugi/server";
+import { composeServer, openLocalPorts, SERVER_NAME, type UketsugiServer } from "@uketsugi/server";
 import { connectMcp } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { HOST_KEY } from "./local-hosts.ts";
@@ -107,6 +107,16 @@ describe("one person on their own machine, with no token", () => {
     });
     expect(start.status).toBe(200);
     expect(await start.json()).toHaveProperty("hookSpecificOutput.additionalContext");
+  });
+
+  test("the Connect page says no token is needed, and its lines carry none", async () => {
+    const info = (await (await fetch(`${one.url}/api/connect`)).json()) as ConnectInfo;
+    expect(info.needs_token).toBe(false);
+    const claude = info.harnesses.find((harness) => harness.id === "claude-code");
+    expect(claude?.add).toBe(
+      `claude mcp add --transport http --scope user ${SERVER_NAME} ${one.url}/mcp`,
+    );
+    expect(JSON.stringify(info)).not.toContain("Authorization");
   });
 
   test("a header that holds no token is none, a token the server knows still works, and one it does not is refused", async () => {
@@ -239,6 +249,14 @@ describe("a server that takes no caller without a token", () => {
     expect(answer.headers.get("www-authenticate")).toBe("Bearer");
     return { status: answer.status, what: whatOf(await answer.text()) };
   };
+  /** What the Connect page tells a harness added from this machine: the truth about whether it sends a token. */
+  const needsToken = async (served: Host): Promise<boolean> =>
+    (
+      (await (
+        await fetch(`${served.url}/api/connect`, { headers: bearer() })
+      ).json()) as ConnectInfo
+    ).needs_token;
+  const bearer = (token = TOKEN): Record<string, string> => ({ authorization: `Bearer ${token}` });
   const signed = async (served: Host, token = TOKEN): Promise<number> =>
     (await fetch(`${served.url}/api/facts`, { headers: { authorization: `Bearer ${token}` } }))
       .status;
@@ -252,6 +270,7 @@ describe("a server that takes no caller without a token", () => {
         operator_name: "ann",
       });
       expect(await none(shared)).toEqual({ status: 401, what: ASKS });
+      expect(await needsToken(shared)).toBe(true);
       expect((await fetch(`${shared.url}/api/facts`)).status).toBe(401);
       expect(await signed(shared)).toBe(200);
       expect(await signed(shared, invited.issued[0]?.secret)).toBe(200);
@@ -265,6 +284,7 @@ describe("a server that takes no caller without a token", () => {
     try {
       expect(await none(strict)).toEqual({ status: 401, what: ASKS });
       expect(await signed(strict)).toBe(200);
+      expect(await needsToken(strict)).toBe(true);
     } finally {
       await strict.close();
     }
@@ -276,6 +296,7 @@ describe("a server that takes no caller without a token", () => {
       try {
         expect(await none(open), JSON.stringify(beyond)).toEqual({ status: 401, what: REACHED });
         expect(await signed(open)).toBe(200);
+        expect(await needsToken(open), JSON.stringify(beyond)).toBe(true);
       } finally {
         await open.close();
       }

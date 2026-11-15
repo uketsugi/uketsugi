@@ -46,6 +46,7 @@ import { validator } from "hono/validator";
 import {
   hostAuth,
   hostProof,
+  takesNoToken,
   tokenAuth,
   type AuthEnv,
   type Operator,
@@ -176,7 +177,11 @@ function operatorRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
  */
 function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   const { ports } = deps;
-  api.get("/connect", (c) => c.json(connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins))));
+  api.get("/connect", async (c) => {
+    // The lines depend on whether a harness added from where this request came needs a token.
+    const tokenless = await takesNoToken(deps.app, deps.alone(c));
+    return c.json(connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins), !tokenless));
+  });
   api.get("/facts", query("FactListParams"), async (c) =>
     c.json(await listFacts(ports, c.get("caller"), c.req.valid("query"))),
   );

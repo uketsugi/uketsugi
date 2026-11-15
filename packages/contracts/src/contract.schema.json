@@ -941,6 +941,10 @@
             "type": "string",
             "description": "The name the server is added under: `uketsugi`."
           },
+          "needs_token": {
+            "type": "boolean",
+            "description": "Whether a harness added by someone asking from where this request came must send a token. False for a server that only its own machine reaches and that has one person, asked from that machine; the harness lines are then those without a token."
+          },
           "token_env": {
             "type": "string",
             "description": "The environment variable that holds the token. The token itself is never returned."
@@ -975,6 +979,7 @@
         "required": [
           "mcp_url",
           "server_name",
+          "needs_token",
           "token_env",
           "token_command",
           "commands",
@@ -1760,7 +1765,7 @@
           "properties": {
             "install": {
               "type": "string",
-              "description": "The shell lines that install it, the token read from the variable `token_env` names."
+              "description": "The shell lines that install it, the token read from the variable `token_env` names where `needs_token` says one is sent."
             },
             "remove": {
               "type": "string",
@@ -1775,7 +1780,7 @@
         },
         "add": {
           "type": "string",
-          "description": "What adds the server to the harness: a shell command, or the URL itself."
+          "description": "What adds the server to the harness: a shell command, or the URL itself. It carries the token where `needs_token` is true."
         },
         "add_kind": {
           "type": "string",
@@ -1788,11 +1793,11 @@
         },
         "setup": {
           "type": "string",
-          "description": "What the person types to run set-up; absent where the harness offers no server commands."
+          "description": "What the person types to run set-up, as the harness names a server's prompts when the server is added by its address alone; absent where the harness offers no server commands."
         },
         "activate": {
           "type": "string",
-          "description": "What the person types to use memory in one session without set-up."
+          "description": "What the person types to use memory in one session without set-up, as `setup` is typed; absent where the harness offers no server commands."
         },
         "instruction_file": {
           "type": "string",
@@ -1805,9 +1810,13 @@
         "note": {
           "type": "string",
           "description": "One line on anything this harness does differently."
+        },
+        "known": {
+          "type": "string",
+          "description": "How this row is known: run on a named version of the harness, a dated documentation page, or not established."
         }
       },
-      "required": ["id", "name", "add", "add_kind"]
+      "required": ["id", "name", "add", "add_kind", "known"]
     },
     "apiFact": {
       "type": "object",

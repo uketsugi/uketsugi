@@ -24,7 +24,7 @@ by several people.
 > **Pre-release (0.1.0).** Uketsugi runs on Linux x86-64 today. It has been run end to end with
 > two harnesses, Claude Code and Antigravity: each found what the other had recorded, and each
 > finished a task the other had left. It is built for any harness that can add an MCP server by
-> its URL, and [connecting one](#another-mcp-client) takes a URL and a token. Commands, and what
+> its URL, and [connecting one](#another-mcp-client) takes its URL. Commands, and what
 > is stored, may still change between versions.
 
 ## How it works
@@ -70,7 +70,9 @@ curl -fsSL https://github.com/uketsugi/uketsugi/releases/download/v0.1.0/install
 The script downloads one archive of 56 MB from the same release, checks it against the SHA-256 it
 carries, unpacks it to `~/.local/lib/uketsugi` (about 170 MB) and puts the `ukt` command in
 `~/.local/bin`. Nothing else is written. If it says `~/.local/bin` is not on your `PATH`, run the
-two lines it prints: one for this shell, one for new ones.
+two lines it prints: one for this shell, one for new ones. Run over an earlier release, it replaces
+it and, without asking, restarts your service (if you have one) on the new one: your harnesses
+lose their connection for a moment.
 
 **2. Set up**
 
@@ -78,102 +80,143 @@ two lines it prints: one for this shell, one for new ones.
 ukt setup
 ```
 
-This makes the data directory, `~/.local/share/uketsugi`, and a token for your harness. It also
-installs the embedding model that lets search match meaning: a download of about 170 MB from the
-npm registry and Hugging Face, each file checked against a pinned hash. `ukt setup --no-model`
-leaves the model out, and search then matches words only.
+This makes the data directory, `~/.local/share/uketsugi`, and your token. It then shows what else
+it would do, and where, and asks once:
 
-**3. Start the server**
+- **The embedding model**, which lets search match meaning: a download of about 170 MB from the
+  npm registry and Hugging Face, each file checked against a pinned hash. Without it search
+  matches words only. It goes into the data directory. The service does not see a
+  `UKT_MODEL_DIR` of your shell: set-up says so, and the model must then be in the data directory.
+- **A service**: one unit of your own systemd user manager,
+  `~/.config/systemd/user/uketsugi.service`, which runs the server at `http://127.0.0.1:7410`,
+  starts it when you log in and starts it again if it stops. Set-up writes that file and
+  the link the manager makes to it in `~/.config/systemd/user/default.target.wants`: nothing else
+  outside the data directory. No root, and no secret in it. A server that fails five times in
+  five minutes is not started again until `systemctl --user reset-failed uketsugi`.
+
+When it has started the server it checks that it is yours, asks it for its tools as a harness
+would and reads its store (this leaves nothing behind), then ends
+with the address and what to type for each harness. Set-up runs no harness command and writes no
+harness file.
+
+`ukt setup --plan` prints the plan, the unit in full, and changes nothing; `--yes` does all of it
+without asking; `--no-model` and `--no-service` leave a part out. Run again, set-up changes
+nothing that is in place and repairs what is not. Where nobody can be asked, as in a script, it
+makes the data directory and installs the model, and leaves the service to a run with `--yes`.
+
+The service is yours to run:
+
+```sh
+systemctl --user stop uketsugi      # and start, restart, status
+journalctl --user -u uketsugi       # what the server printed
+```
+
+It runs while you are logged in to the machine. `loginctl enable-linger` keeps it running after
+you log out; set-up tells you when that is off, and does not change it. `ukt doctor` checks the
+data directory, the token, the service, the server, the store and the model, says what to do
+about anything that is wrong, and prints again what to type for each harness.
+
+**Without systemd**
+
+In a container, or in a shell that cannot reach your service manager (one entered with `su`),
+set-up says so and installs no service. Start the server yourself and give it a terminal of its
+own:
 
 ```sh
 ukt serve
 ```
 
-It serves `http://127.0.0.1:7410` in the foreground until you press Ctrl-C, so give it a terminal
-of its own. From another terminal, `ukt doctor` checks the data directory, the token, the server,
-the store and the model, and says what to do about anything that is wrong.
+It serves `http://127.0.0.1:7410` in the foreground until you press Ctrl-C.
 
 <!-- first-run:start -->
 
 <p align="center">
   <img src="assets/first-run.gif" width="880" alt="A terminal in a fresh container: the install line, ukt setup downloading the model, and ukt serve starting.">
 </p>
-<p align="center"><sub>Steps 1 to 3 in a fresh Debian 13 container. Pauses are shortened and the two downloads are shown faster than they ran.</sub></p>
+<p align="center"><sub>The install line, <code>ukt setup</code> and <code>ukt serve</code> in a fresh Debian 13 container, which has no systemd, recorded with 0.1.0: set-up prints more now, and a machine with systemd has no separate serve step. Pauses are shortened and the two downloads are shown faster than they ran.</sub></p>
 
 <!-- first-run:end -->
 
-**4. Connect Claude Code**
+**3. Add the server to a harness**
 
-In another terminal:
+Each harness takes the server by its address, and one command is typed in a session. On a server
+that only your machine reaches and that has you as its one person, no token is involved.
+
+Claude Code:
+
+```sh
+claude mcp add --transport http --scope user uketsugi http://127.0.0.1:7410/mcp
+```
+
+Then start a session in a repository and type `/uketsugi:activate`. It writes nothing: it
+tells the agent in that session to search Uketsugi before investigating and to publish what it
+establishes, and you type it again in the next session. `/uketsugi:setup` asks the agent to
+put a short block at the top of your user-level instruction file, `~/.claude/CLAUDE.md` (or
+`CLAUDE.md` in the folder `CLAUDE_CONFIG_DIR` names), so that every later session does without
+the command. Claude Code may ask you to approve the edit. It is the agent that writes the file, so
+look afterwards and see that the block is there. In print mode (`claude -p`) the commands are
+`/mcp__uketsugi__activate` and `/mcp__uketsugi__setup`, and the server's tools must be allowed
+with `--allowedTools mcp__uketsugi`.
+
+Antigravity:
+
+```sh
+agy mcp add uketsugi http://127.0.0.1:7410/mcp
+```
+
+Antigravity offers no server commands, so put the block that the dashboard's Connect page shows at
+the top of `~/.gemini/GEMINI.md`.
+
+`ukt setup` and `ukt doctor` print these lines for the server as it runs, and the Connect page
+shows the same, with the lines that carry a token where the server asks for one. A session gets
+its brief with the first answer it gets from Uketsugi.
+
+### The plugin, as an extra
+
+A harness can also take a plugin that the release ships. Nothing needs it, and set-up never
+installs it. For Claude Code it adds the server too, so use it instead of the `claude mcp add`
+line:
 
 ```sh
 claude plugin install uketsugi --marketplace ~/.local/lib/uketsugi/plugins \
   --config url=http://127.0.0.1:7410
-printf '{"token":"%s"}' "$(ukt token)" | claude plugin configure uketsugi@uketsugi --values-stdin
 ```
 
-The first command installs the plugin that came with the release. The second gives it your token
-on standard input, so the token is never on a command line; Claude Code keeps it with its own
-sign-in. That is all, and you work as you always do. The plugin adds the server to Claude Code,
-and from the next session on:
+From the next session on, in every repository:
 
 - **The agent starts with the session's brief**, before your first prompt, and is told to search
   Uketsugi before investigating how or why something works, and to publish what it establishes,
-  with a citation.
+  with a citation. Nothing is typed.
 - **Where each turn ended is kept**: the agent's last message, scanned like everything else and
   private to you. A session you quit, or one that is killed, still tells the next one where it
-  stopped.
+  stopped. The plugin also tells the server the repository's origin remote, which names the
+  project.
 
 The plugin talks to the server from Claude Code's hooks, which need `sh`, `curl` and `git`. A
-hook that cannot reach the server does nothing, and the session goes on without it.
-
-The plugin is installed for your user, so this holds for every Claude Code session under that
-configuration, in every repository. When a session starts, the server is sent the repository's
-origin remote. When a turn ends, it is sent the agent's last message, and keeps the first 4,000
-characters the scan leaves. On your own machine that goes no further than your own server.
-
-<details>
-<summary>Without the plugin</summary>
-
-Add the server by its URL:
+hook that cannot reach the server does nothing, and the session goes on without it. Of the agent's
+last message the server keeps the first 4,000 characters the scan leaves. On your own machine none
+of this goes further than your own server. Where a token is needed, a second line gives it to the
+plugin on standard input, so that it is never on a command line:
 
 ```sh
-export UKT_TOKEN="$(ukt token)"
-claude mcp add --transport http --scope user uketsugi http://127.0.0.1:7410/mcp \
-  --header "Authorization: Bearer $UKT_TOKEN"
+printf '{"token":"%s"}' "$(ukt token)" | claude plugin configure uketsugi@uketsugi --values-stdin
 ```
 
-Then start Claude Code in a repository and type `/uketsugi:setup`. This asks the agent to put a
-short block at the top of your user-level instruction file: `~/.claude/CLAUDE.md`, or `CLAUDE.md`
-in the folder `CLAUDE_CONFIG_DIR` names if you have set one. Claude Code may ask you to approve
-the edit. It is the agent that writes the file, so look afterwards and see that the block is
-there; the dashboard's Connect page shows it. A session then gets its brief with its first answer
-from Uketsugi, and leaves no note of where it stopped.
-
-If you connected this way before and now install the plugin, take the old set-up out first:
-`claude mcp remove uketsugi -s user`, and delete the block from the instruction file.
-
-</details>
-
-### Antigravity
+For Antigravity the plugin is one rule, always on: the same instruction. Add the server first,
+then:
 
 ```sh
-agy mcp add --header "Authorization: Bearer $(ukt token)" uketsugi http://127.0.0.1:7410/mcp
 agy plugin install ~/.local/lib/uketsugi/plugins/antigravity
 ```
-
-The first command adds the server; Antigravity keeps the token in
-`~/.gemini/config/mcp_config.json`. The second installs a plugin that is one rule, always on: the
-same instruction to search before investigating and to publish what is established. A session
-gets its brief with its first answer from Uketsugi.
 
 ### Another MCP client
 
 Any client that takes a remote MCP server by its URL can use the same server:
 
 - **URL:** `http://127.0.0.1:7410/mcp`, over Streamable HTTP.
-- **Header:** `Authorization: Bearer <token>`. `ukt token` prints the token. On the server's own
-  machine, while you are its only person, the header can be left out.
+- **Header:** `Authorization: Bearer <token>`, where the server asks for one (see
+  [Sharing a server](#sharing-a-server)). `ukt token` prints it. On the server's own machine,
+  while you are its only person, the header is left out.
 - **Tools it will find:** `search_facts`, `publish_fact`, `update_fact`, `search_tasks`,
   `publish_task`, `claim_task` and `update_task`.
 
@@ -220,38 +263,45 @@ link instead; it works once.)
 
 ## Your data
 
-Everything is on your machine, in three places:
+Everything is on your machine:
 
-| Path                      | What it holds                                                                                      |
-| ------------------------- | -------------------------------------------------------------------------------------------------- |
-| `~/.local/share/uketsugi` | The store, the token, the embedding model and `backups/`. `--data-dir` or `UKT_DATA_DIR` moves it. |
-| `~/.local/lib/uketsugi`   | The installed release.                                                                             |
-| `~/.local/bin/ukt`        | The command.                                                                                       |
+| Path                                      | What it holds                                                                                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/.local/share/uketsugi`                 | The store, the token, how the server is set to run (`settings.json`), the embedding model and `backups/`. `--data-dir` or `UKT_DATA_DIR` moves it. |
+| `~/.local/lib/uketsugi`                   | The installed release.                                                                                                                             |
+| `~/.local/bin/ukt`                        | The command.                                                                                                                                       |
+| `~/.config/systemd/user/uketsugi.service` | The service's unit, where set-up installed one. It names the release's launcher and the data directory, and nothing else.                          |
 
-The server listens on `127.0.0.1` only, unless you start it with `--host`.
+A harness keeps what you add to it in its own configuration: `~/.claude` for Claude Code and
+`~/.gemini/config` for Antigravity. Set-up writes nothing there.
+
+The server listens on `127.0.0.1` only, unless you set it up with `--host`.
 
 - `ukt backup` writes the whole store to one file, while the server runs. `ukt restore <file>`
-  puts it back, with the server stopped.
+  puts it back. A server that runs as the service is stopped for it and started again; one you
+  started yourself you stop first.
 - `ukt export --markdown <folder>` writes every project's facts as Markdown, one file a project.
 - Redacting a fact on the dashboard takes its text out of the dashboard, out of search and out of
   later exports. It does not reach the store's own files or a backup, even one made afterwards.
   If the text was a secret, change the secret as well.
-- `ukt token --rotate` replaces your token, with the server stopped. A harness keeps the token it
-  was given, so give it the new one: for Claude Code, the second command of step 4 again; for
-  Antigravity, `agy mcp remove uketsugi`, then its first command again.
+- `ukt token --rotate` replaces your token. A server that runs as the service is stopped for it
+  and started again. A harness that sends a token keeps the one it was given until you give it
+  the new one: remove the server from it and add it again with the lines on the Connect page.
+  One that sends none is not affected.
 
-To remove Uketsugi, take it out of your harnesses, stop the server and delete those three paths:
+To remove Uketsugi:
 
 ```sh
-claude plugin marketplace remove uketsugi
-agy plugin uninstall uketsugi && agy mcp remove uketsugi
+ukt uninstall
 rm -rf ~/.local/share/uketsugi ~/.local/lib/uketsugi ~/.local/bin/ukt
 ```
 
-The first command uninstalls the Claude Code plugin with the token it was given. If you connected
-Claude Code without the plugin, it is `claude mcp remove uketsugi -s user` instead, and the block
-between `<!-- uketsugi:start -->` and `<!-- uketsugi:end -->` in your instruction file is yours to
-delete.
+The first command undoes what set-up did outside the data directory: it stops and removes the
+service. It shows what it will do and asks first, and it leaves your data and the program, which
+the second line deletes. It does not touch a harness, since set-up did not: it prints the
+command that takes the server out of each, such as `claude mcp remove uketsugi -s user`. If you
+used `/uketsugi:setup` or the plugin, the block between `<!-- uketsugi:start -->` and
+`<!-- uketsugi:end -->` in your instruction file is yours to delete.
 
 ## Sharing a server
 
@@ -268,15 +318,16 @@ that can be looked up, and their tasks, under their name. `ukt people` lists who
 `ukt revoke <id>` ends one token or key.
 
 A server that listens only on its own machine takes its one person's harnesses there by its
-address alone. From the first person you add, every harness sends a token, yours included, and
+address alone, and `ukt setup`, `ukt doctor` and the Connect page say whether it does. From the first person you add, every harness sends a token, yours included, and
 the same holds for a server that listens beyond its machine. A proxy or a tunnel on the same
 machine can look like a local program to the server: it recognises the ones that say a request
 was forwarded, and not every one does. Before you put one in front of a server that you alone
-use, start it with `ukt serve --require-token`.
+use, set it up with `ukt setup --require-token`.
 
-To reach it from other machines, start it with `ukt serve --host 0.0.0.0 --allowed-host <name>`.
-It answers only to the names it is given, and it speaks plain HTTP, so put it behind a proxy that
-terminates TLS.
+To reach it from other machines, set it up with `ukt setup --host 0.0.0.0 --allowed-host <name>`.
+Set-up keeps how the server runs in the data directory, so the service and a `ukt serve` you type
+start the same server. It answers only to the names it is given, and it speaks plain HTTP, so put
+it behind a proxy that terminates TLS.
 
 A person you invited installs nothing of Uketsugi's but a plugin for their harness, which the
 server hands out. With the server at `https://memory.example.com` and their token in `UKT_TOKEN`, Claude

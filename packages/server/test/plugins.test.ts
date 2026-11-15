@@ -16,7 +16,7 @@ import { acceptToken } from "@uketsugi/core";
 import { strFromU8, unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { generatedRule } from "../scripts/generate-plugins.ts";
-import { PLUGIN_NAME, SERVER_NAME } from "../src/connect.ts";
+import { connectInfo, PLUGIN_NAME, SERVER_NAME } from "../src/connect.ts";
 import { composeServer, openLocalPorts, type UketsugiServer } from "../src/index.ts";
 
 const PLUGINS = fileURLToPath(new URL("../plugins", import.meta.url));
@@ -162,7 +162,8 @@ describe("how a person gets the plugins", () => {
       adds_server: true,
     });
     expect(here["antigravity"]).toMatchObject({
-      add: 'agy mcp add --header "Authorization: Bearer $UKT_TOKEN" uketsugi http://127.0.0.1:7410/mcp',
+      // Antigravity writes the file that holds the token for other accounts to read: the line after closes it.
+      add: 'agy mcp add --header "Authorization: Bearer $UKT_TOKEN" uketsugi http://127.0.0.1:7410/mcp\nchmod 600 ~/.gemini/config/mcp_config.json',
       plugin: { install: `agy plugin install ${folder}/antigravity`, adds_server: false },
     });
     expect(here["other"]?.plugin).toBeUndefined();
@@ -181,6 +182,28 @@ describe("how a person gets the plugins", () => {
     expect(plain["antigravity"]?.plugin?.install).toContain(
       "http://memory.example.com/plugins/antigravity.zip",
     );
+  });
+
+  test("the lines carry a token only where the server needs one", async () => {
+    const folder = await realpath(PLUGINS);
+    const ORIGIN = "http://127.0.0.1:7410";
+    const without = connectInfo(ORIGIN, { folder }, false);
+    const withToken = connectInfo(ORIGIN, { folder }, true);
+
+    expect(without.needs_token).toBe(false);
+    expect(JSON.stringify(without.harnesses)).not.toMatch(/Authorization|UKT_TOKEN|configure/);
+    expect(without.harnesses.map(({ id, add }) => [id, add])).toEqual([
+      ["claude-code", `claude mcp add --transport http --scope user ${SERVER_NAME} ${ORIGIN}/mcp`],
+      ["antigravity", `agy mcp add ${SERVER_NAME} ${ORIGIN}/mcp`],
+      ["other", `${ORIGIN}/mcp`],
+    ]);
+    expect(withToken.needs_token).toBe(true);
+    expect(withToken.harnesses[0]?.add).toContain('--header "Authorization: Bearer $UKT_TOKEN"');
+    expect(withToken.harnesses[0]?.plugin?.install).toContain("claude plugin configure");
+    // The name a harness adds the server under, and so the commands it types, come from one constant.
+    expect(without.harnesses[0]?.activate).toBe(`/${SERVER_NAME}:activate`);
+    // Every row says how it is known.
+    expect(without.harnesses.every((harness) => harness.known !== "")).toBe(true);
   });
 
   test("a folder whose path a shell would split is quoted in the lines the Connect page gives", async () => {

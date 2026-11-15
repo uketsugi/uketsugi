@@ -12,13 +12,24 @@ export interface FakeIo extends Io {
   readonly opened: string[];
 }
 
-export function fakeIo(options: { interactive?: boolean; answer?: boolean } = {}): FakeIo {
+export interface FakeIoOptions {
+  interactive?: boolean;
+  answer?: boolean;
+  /**
+   * The programs of the machine a verb runs on. Left out, there are none: no service manager and
+   * no harness, so no test reaches the ones of whoever runs it.
+   */
+  run?: Io["run"];
+}
+
+export function fakeIo(options: FakeIoOptions = {}): FakeIo {
   const io: FakeIo = {
     interactive: options.interactive ?? false,
     outLines: [],
     errLines: [],
     questions: [],
     opened: [],
+    run: options.run ?? (() => Promise.resolve(null)),
     out: (line) => void io.outLines.push(line),
     err: (line) => void io.errLines.push(line),
     confirm: (question) => {

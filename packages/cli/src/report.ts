@@ -45,6 +45,13 @@ export interface Progress {
   stop(message: string): void;
 }
 
+/** How a program of this machine's ended, and what it printed. */
+export interface Ran {
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
 /** Everything a verb reaches outside the server and the data directory. */
 export interface Io {
   /** Whether a person is at the terminal, so a question can be asked and a browser opened. */
@@ -55,6 +62,22 @@ export interface Io {
   progress(title: string): Progress;
   /** Opens a URL in the person's browser; false when none could be opened. */
   open(url: string): Promise<boolean>;
+  /**
+   * Runs a program of this machine's and waits for it to end: the service manager. `env` is the
+   * whole environment it gets, and its PATH is where the program is looked for. Null when there
+   * is no such program.
+   */
+  run(
+    program: string,
+    args: readonly string[],
+    options: { readonly env: NodeJS.ProcessEnv },
+  ): Promise<Ran | null>;
+}
+
+/** The last line a program printed that says anything: what a person is shown of a command that failed. */
+export function lastLine(ran: Ran): string {
+  const lines = `${ran.stdout}\n${ran.stderr}`.split("\n").filter((line) => line.trim() !== "");
+  return lines.at(-1)?.trim() ?? `it ended with code ${ran.code}`;
 }
 
 /** An error in a sentence a person can be shown: its message, or whatever was thrown. */

@@ -2,7 +2,7 @@
 import { BLOCK_START } from "@uketsugi/contracts";
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activity, connect } from "./fixtures.ts";
+import { activity, connect, connectWithToken } from "./fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
 
 describe("Connect", () => {
@@ -13,50 +13,56 @@ describe("Connect", () => {
   const codeOf = (text: string) => (_: string, shown: Element | null) =>
     shown?.tagName === "CODE" && shown.textContent === text;
 
-  it("connects the first harness by installing its plugin: the lines to run, the token read from a variable", async () => {
+  it("connects a harness on a server that needs no token by its address alone, then the activate command", async () => {
     open("/connect");
     expect(await screen.findByRole("tab", { name: "Claude Code", selected: true })).toBeTruthy();
     const panel = within(screen.getByRole("tabpanel"));
     const [claude] = connect.harnesses;
-    expect(panel.getByRole("heading", { name: "Install the plugin for Claude Code" })).toBeTruthy();
+    expect(panel.getByRole("heading", { name: "Add the server to Claude Code" })).toBeTruthy();
     expect(panel.getByText(connect.mcp_url)).toBeTruthy();
-    // The lines read the token from a variable, so the line that sets it is given with them.
+    // No token is asked for, so the line is given as it is: nothing sets a variable first.
+    expect(panel.getByText(codeOf(claude?.add ?? "missing"))).toBeTruthy();
+    expect(panel.getByText(/none: this server takes a harness on this machine/)).toBeTruthy();
+    expect(panel.queryByText(connect.token_command, { exact: false })).toBeNull();
     expect(
-      panel.getByText(codeOf(`${connect.token_command}\n${claude?.plugin?.install}`)),
+      panel.getByRole("heading", { name: "Type the activate command in a session" }),
     ).toBeTruthy();
-    expect(panel.getAllByText(connect.token_env).length).toBeGreaterThan(0);
-    expect(panel.getByText("ukt token")).toBeTruthy();
-    expect(panel.getByText(/starts with its project's brief/)).toBeTruthy();
-    expect(panel.getByText(claude?.plugin?.remove ?? "missing")).toBeTruthy();
-    // With the plugin nobody adds the server by hand or types set-up: both are behind a disclosure.
-    expect(panel.queryByRole("heading", { name: "Type the set-up command" })).toBeNull();
-    expect(panel.queryByText(codeOf(`${connect.token_command}\n${claude?.add}`))).toBeNull();
+    expect(panel.getByText(codeOf("/uketsugi:activate"))).toBeTruthy();
+    expect(panel.getByText(/How this is known: run here: Claude Code 2\.1\.325/)).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
-  it("keeps the way without the plugin: the server added by its URL, then the set-up command", async () => {
-    const user = open("/connect");
-    const disclosure = await screen.findByRole("button", { name: "Without the plugin" });
-    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
-    await user.click(disclosure);
-    const panel = within(screen.getByRole("tabpanel"));
-    const [claude] = connect.harnesses;
+  it("gives the lines that read a token from a variable where the server needs one", async () => {
+    api.use(answer("/api/connect", connectWithToken));
+    open("/connect");
+    const panel = within(await screen.findByRole("tabpanel"));
+    const [claude] = connectWithToken.harnesses;
     expect(panel.getByText(codeOf(`${connect.token_command}\n${claude?.add}`))).toBeTruthy();
+    expect(panel.getAllByText(connect.token_env).length).toBeGreaterThan(0);
+    expect(panel.getByText("ukt token")).toBeTruthy();
     expect(panel.getByText(claude?.remove ?? "missing")).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("offers the plugin as an extra, behind a disclosure, with the way to type set-up for every session", async () => {
+    const user = open("/connect");
+    const [claude] = connect.harnesses;
+    const panel = within(await screen.findByRole("tabpanel"));
     // The file is not in one place on every machine: the page gives the usual place and the
     // command the agent finds it with, and promises no path the agent may not write to.
+    expect(panel.getByRole("heading", { name: /type the set-up command/ })).toBeTruthy();
+    expect(panel.getByText(codeOf("/uketsugi:setup"))).toBeTruthy();
     expect(panel.getByText("~/.claude/CLAUDE.md")).toBeTruthy();
     expect(panel.getByText(claude?.instruction_file_command ?? "missing")).toBeTruthy();
     expect(
       panel.getByText(/unless your harness keeps its configuration somewhere else/),
     ).toBeTruthy();
-    expect(
-      panel.getByText(/Your harness may ask you to approve that command and the edit\./),
-    ).toBeTruthy();
-    expect(panel.getByRole("heading", { name: "Type the set-up command" })).toBeTruthy();
-    expect(panel.getByText("/uketsugi:setup")).toBeTruthy();
-    expect(panel.getByRole("heading", { name: "Or, for one session only" })).toBeTruthy();
-    expect(panel.getByText("/uketsugi:activate")).toBeTruthy();
+    const disclosure = panel.getByRole("button", { name: "With the plugin as well" });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    await user.click(disclosure);
+    expect(panel.getByText(codeOf(claude?.plugin?.install ?? "missing"))).toBeTruthy();
+    expect(panel.getByText(claude?.plugin?.remove ?? "missing")).toBeTruthy();
+    expect(panel.getByText(/starts with its project's brief/)).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
@@ -67,37 +73,24 @@ describe("Connect", () => {
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
     expect(tabs).toEqual(connect.harnesses.map((harness) => harness.name));
     expect(screen.getByRole("tab", { name: "Antigravity", selected: true })).toBeTruthy();
-    // A harness whose plugin does not bring the server: the server is added first, then the plugin.
     const antigravity = within(screen.getByRole("tabpanel"));
     const added = connect.harnesses[1];
+    expect(antigravity.getByText(codeOf(added?.add ?? "missing"))).toBeTruthy();
+    // It offers no command, so the block is put in its file by hand; the plugin is an extra.
+    expect(antigravity.queryByRole("heading", { name: /activate command/ })).toBeNull();
     expect(
-      antigravity
-        .getAllByRole("heading", { level: 2 })
-        .slice(0, 2)
-        .map((heading) => heading.textContent),
-    ).toEqual(["Add the server to Antigravity", "Install the plugin"]);
-    expect(antigravity.getByText(codeOf(`${connect.token_command}\n${added?.add}`))).toBeTruthy();
-    expect(antigravity.getByText(codeOf(added?.plugin?.install ?? "missing"))).toBeTruthy();
-    expect(antigravity.getByText(/nobody places it in a file/)).toBeTruthy();
-    expect(antigravity.queryByRole("heading", { name: "Type the set-up command" })).toBeNull();
-    expect(await violations()).toEqual([]);
-  });
-
-  it("gives a harness with no set-up command the block to copy and the file it goes in, for someone without its plugin", async () => {
-    const user = open("/connect?harness=antigravity");
-    const panel = within(await screen.findByRole("tabpanel"));
-    await user.click(panel.getByRole("button", { name: "Without the plugin" }));
-    expect(
-      panel.getByRole("heading", { name: "Put the block in the instruction file" }),
+      antigravity.getByRole("heading", { name: "Put the block in the instruction file" }),
     ).toBeTruthy();
-    // Nothing writes the block for this harness, so the step names the file and holds the block.
-    expect(panel.getByText(/Antigravity does not offer a server's commands/)).toBeTruthy();
-    expect(panel.getByText("~/.gemini/GEMINI.md")).toBeTruthy();
-    expect(panel.getByText(codeOf(connect.block))).toBeTruthy();
-    await user.click(panel.getByRole("button", { name: "Copy the block" }));
+    expect(antigravity.getByText(/Antigravity does not offer a server's commands/)).toBeTruthy();
+    expect(antigravity.getByText("~/.gemini/GEMINI.md")).toBeTruthy();
+    expect(antigravity.getByText(codeOf(connect.block))).toBeTruthy();
+    await user.click(antigravity.getByRole("button", { name: "Copy the block" }));
     expect(await navigator.clipboard.readText()).toBe(connect.block);
     // The block is not shown a second time for reference.
-    expect(panel.queryByRole("button", { name: "The block set-up writes" })).toBeNull();
+    expect(antigravity.queryByRole("button", { name: "The block set-up writes" })).toBeNull();
+    await user.click(antigravity.getByRole("button", { name: "With the plugin as well" }));
+    expect(antigravity.getByText(codeOf(added?.plugin?.install ?? "missing"))).toBeTruthy();
+    expect(antigravity.getByText(/nobody places it in a file/)).toBeTruthy();
     expect(await violations()).toEqual([]);
   });
 
@@ -107,7 +100,7 @@ describe("Connect", () => {
     expect(panel.getByText("Give the client this URL:")).toBeTruthy();
     // The URL is said once and given once to copy.
     expect(panel.getAllByText(codeOf(connect.mcp_url))).toHaveLength(2);
-    expect(panel.queryByRole("button", { name: "Without the plugin" })).toBeNull();
+    expect(panel.queryByRole("button", { name: "With the plugin as well" })).toBeNull();
     expect(
       panel.getByRole("heading", { name: "Put the block in the instruction file" }),
     ).toBeTruthy();
@@ -132,12 +125,11 @@ describe("Connect", () => {
     expect(await violations()).toEqual([]);
   });
 
-  it("copies the set-up command and says so", async () => {
+  it("copies the activate command and says so", async () => {
     const user = open("/connect");
-    await user.click(await screen.findByRole("button", { name: "Without the plugin" }));
-    await user.click(await screen.findByRole("button", { name: "Copy the set-up command" }));
-    expect(await navigator.clipboard.readText()).toBe("/uketsugi:setup");
-    expect(await screen.findByText("Copied the set-up command")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Copy the activate command" }));
+    expect(await navigator.clipboard.readText()).toBe("/uketsugi:activate");
+    expect(await screen.findByText("Copied the activate command")).toBeTruthy();
   });
 
   it("waits for the first session and shows it when it arrives, with what it did", async () => {

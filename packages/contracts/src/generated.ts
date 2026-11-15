@@ -956,6 +956,10 @@ export interface ConnectInfo {
    */
   server_name: string;
   /**
+   * Whether a harness added by someone asking from where this request came must send a token. False for a server that only its own machine reaches and that has one person, asked from that machine; the harness lines are then those without a token.
+   */
+  needs_token: boolean;
+  /**
    * The environment variable that holds the token. The token itself is never returned.
    */
   token_env: string;
@@ -1006,7 +1010,7 @@ export interface ConnectHarness {
    */
   plugin?: {
     /**
-     * The shell lines that install it, the token read from the variable `token_env` names.
+     * The shell lines that install it, the token read from the variable `token_env` names where `needs_token` says one is sent.
      */
     install: string;
     /**
@@ -1019,7 +1023,7 @@ export interface ConnectHarness {
     adds_server: boolean;
   };
   /**
-   * What adds the server to the harness: a shell command, or the URL itself.
+   * What adds the server to the harness: a shell command, or the URL itself. It carries the token where `needs_token` is true.
    */
   add: string;
   /**
@@ -1031,11 +1035,11 @@ export interface ConnectHarness {
    */
   remove?: string;
   /**
-   * What the person types to run set-up; absent where the harness offers no server commands.
+   * What the person types to run set-up, as the harness names a server's prompts when the server is added by its address alone; absent where the harness offers no server commands.
    */
   setup?: string;
   /**
-   * What the person types to use memory in one session without set-up.
+   * What the person types to use memory in one session without set-up, as `setup` is typed; absent where the harness offers no server commands.
    */
   activate?: string;
   /**
@@ -1050,6 +1054,10 @@ export interface ConnectHarness {
    * One line on anything this harness does differently.
    */
   note?: string;
+  /**
+   * How this row is known: run on a named version of the harness, a dated documentation page, or not established.
+   */
+  known: string;
 }
 /**
  * `GET /api/facts`.

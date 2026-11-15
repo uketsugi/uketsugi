@@ -2,4 +2,6 @@
 # The uketsugi command line, on the Node runtime shipped beside it. A Node on the PATH is never
 # used, and none needs to be installed.
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
-exec "$here/../node/bin/node" "$here/../app/dist/index.js" "$@"
+# The program is told where its launcher is: `ukt setup` names it in the service it installs, since
+# this path stays the same from one release to the next.
+UKT_LAUNCHER="$here/ukt" exec "$here/../node/bin/node" "$here/../app/dist/index.js" "$@"

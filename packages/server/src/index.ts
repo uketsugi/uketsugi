@@ -3,6 +3,7 @@ export { composeServer, localUrl } from "./compose.ts";
 export type { ComposeOptions, Listening, UketsugiServer } from "./compose.ts";
 export { hostProof } from "./auth.ts";
 export { DEFAULT_HOST, loopbackOfEvery } from "./guard.ts";
+export { connectInfo, SERVER_NAME, word } from "./connect.ts";
 export { openLocalPorts, startLocalServer } from "./local.ts";
 export type { LocalPorts, LocalPortsOptions, LocalServer, LocalServerOptions } from "./local.ts";
 

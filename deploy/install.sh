@@ -7,7 +7,9 @@
 # The release is unpacked into ~/.local/lib/uketsugi and a `ukt` command is put in ~/.local/bin;
 # nothing else is written. UKT_LIB_DIR and UKT_BIN_DIR move the two. The tarball's SHA-256 is
 # checked before anything is unpacked: against --sha256 or UKT_SHA256, else the value this copy
-# of the script was built with, else the `.sha256` file beside the tarball.
+# of the script was built with, else the `.sha256` file beside the tarball. Run over an earlier
+# release it replaces it, and a server that runs as the person's service (`ukt setup` installs
+# one) is started again on the new release.
 set -eu
 
 # Set by deploy/build.sh in the copy that ships with a release.
@@ -22,13 +24,36 @@ fail() {
   exit 1
 }
 
+# After an upgrade a server that was running still runs the release just replaced, whose files are
+# gone. One that runs as the person's service (the unit `ukt setup` writes, by that name) is
+# started again here; one in a terminal is its person's to start again.
+SERVICE=uketsugi.service
+restart_server() {
+  unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$SERVICE"
+  if [ ! -f "$unit" ]; then
+    printf 'If `ukt serve` is running, stop it and start it again: it still runs the release this one replaced.\n'
+  elif ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show "$SERVICE" >/dev/null 2>&1; then
+    printf 'Your service (%s) could not be reached from this shell, so it still runs the release this one replaced.\n' "$SERVICE"
+    printf 'From a shell of your own login: systemctl --user restart %s\n' "${SERVICE%.service}"
+  elif ! systemctl --user is-active --quiet "$SERVICE"; then
+    printf 'Your service (%s) is not running. Start it with: systemctl --user reset-failed %s; systemctl --user start %s\n' "$SERVICE" "${SERVICE%.service}" "${SERVICE%.service}"
+  elif systemctl --user restart "$SERVICE"; then
+    printf 'Restarted your service (%s) on this release. `ukt doctor` checks that it answers.\n' "$SERVICE"
+  else
+    printf 'Your service (%s) did not restart: journalctl --user -u %s shows why.\n' "$SERVICE" "${SERVICE%.service}"
+  fi
+}
+
+# Everything below runs from one function, called on the script's last line: a download of this
+# script that was cut short defines half a function and runs nothing.
+main() {
 tarball=${UKT_TARBALL:-}
 expected=${UKT_SHA256:-}
 while [ $# -gt 0 ]; do
   case "$1" in
     --tarball) tarball=${2:?--tarball needs a file or a URL}; shift 2 ;;
     --sha256) expected=${2:?--sha256 needs a value}; shift 2 ;;
-    -h | --help) sed -n '2,11s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) fail "unknown argument: $1" "Run it as: sh install.sh [--tarball <file or URL>] [--sha256 <hex>]" ;;
   esac
 done
@@ -116,7 +141,8 @@ release=$1
 version=$("$release/bin/ukt" --version 2>&1) || fail "the runtime in the release does not run on this machine: $version" \
   "It needs Linux on x86-64 with glibc 2.28 or newer."
 
-if [ -e "$lib" ]; then mv -- "$lib" "$work/previous"; fi
+upgrade=no
+if [ -e "$lib" ]; then upgrade=yes; mv -- "$lib" "$work/previous"; fi
 if ! mv -- "$release" "$lib"; then
   if [ -e "$work/previous" ]; then mv -- "$work/previous" "$lib"; fi
   fail "the release could not be moved to $lib." "Check that the directory can be written."
@@ -129,6 +155,7 @@ mv -f -- "$bin/ukt.$$" "$bin/ukt"
 
 printf 'Installed uketsugi %s in %s\n' "$version" "$lib"
 printf 'The command is %s\n' "$bin/ukt"
+if [ "$upgrade" = yes ]; then restart_server; fi
 case ":${PATH:-}:" in
   *":$bin:"*) printf '\nNext: ukt setup\n' ;;
   *)
@@ -146,3 +173,6 @@ case ":${PATH:-}:" in
     printf '\nNext: ukt setup   (or now: %s setup)\n' "$bin/ukt"
     ;;
 esac
+}
+
+main "$@"

@@ -68,12 +68,13 @@ describe("ukt serve on a temporary data directory", () => {
   });
 
   test("passes ukt doctor, which warns only that the model is missing", async () => {
-    const report = await doctor({ dataDir }, {});
+    const report = await doctor(fakeIo(), { dataDir }, {});
 
     expect(report.failure).toBeUndefined();
     expect(report.data["findings"]).toEqual([
       { check: "data directory", state: "ok", detail: dataDir },
       { check: "token", state: "ok", detail: join(dataDir, "token") },
+      expect.objectContaining({ check: "service", state: "ok" }),
       expect.objectContaining({ check: "server", state: "ok" }),
       {
         check: "store",
@@ -81,16 +82,17 @@ describe("ukt serve on a temporary data directory", () => {
         detail: "answers and accepts the token: 1 project, 1 fact",
       },
       expect.objectContaining({ check: "model", state: "warn", fix: "ukt setup" }),
+      expect.objectContaining({ check: "harnesses", state: "ok" }),
     ]);
   });
 
   test("ukt doctor fails a data directory others can read, without saying agents are cut off", async () => {
     // What a container's data folder looks like when its image made it with the usual mode.
     await chmod(dataDir, 0o755);
-    const report = await doctor({ dataDir }, {}).finally(() => chmod(dataDir, 0o700));
+    const report = await doctor(fakeIo(), { dataDir }, {}).finally(() => chmod(dataDir, 0o700));
 
     expect(report.failure).toEqual({
-      what: "1 of 5 checks failed.",
+      what: "1 of 7 checks failed.",
       meaning:
         "Agents reach their memory all the same: what failed is how it is kept on this machine.",
       next: "Apply each fix above, then run `ukt doctor` again.",
@@ -202,7 +204,9 @@ describe("with the server stopped", () => {
     const kept = restored.data["kept"] as string;
     expect(kept).toMatch(/backups\/before-restore-\d{8}T\d{6}Z\.tgz$/);
     expect((await stat(kept)).size).toBeGreaterThan(1000);
-    expect(restored.lines).toContain("Start the server again with: ukt serve");
+    expect(restored.lines).toContain(
+      `Start the server again with: ukt serve --data-dir ${dataDir}`,
+    );
   });
 
   test("a server shared with other machines says the address they use, or that none can reach it yet", async () => {
@@ -261,7 +265,7 @@ describe("with the server stopped", () => {
   test("a server bound to every address says, and records, the loopback URL it answers on", async () => {
     const serving = await serve(fakeIo(), { dataDir, host: "0.0.0.0", port: "0" }, {});
     const url = serving.report.data["url"] as string;
-    const checked = await doctor({ dataDir }, {});
+    const checked = await doctor(fakeIo(), { dataDir }, {});
     await serving.close();
 
     expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
@@ -292,7 +296,7 @@ describe("with the server stopped", () => {
       "Every earlier token of yours has stopped working.",
       "Next:",
       `  1. Start the server again:  ukt serve --data-dir ${dataDir}`,
-      "  2. Give each harness the new token. A harness keeps the token it was given, so setting",
+      "  2. Give each harness that sends a token the new token. A harness keeps the token it was given, so setting",
       `     UKT_TOKEN is not enough. \`ukt ui --data-dir ${dataDir}\` opens the Connect page, which shows what to run`,
       "     again for each harness.",
       'This shell\'s UKT_TOKEN still holds an old token: export UKT_TOKEN="$(ukt token)"',

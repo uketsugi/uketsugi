@@ -13,9 +13,10 @@ import {
 } from "@uketsugi/store";
 import { resolveHome, type Home } from "./home.ts";
 import { hostStore, requireEmbedded, requireStore, storeFailure } from "./host-store.ts";
-import { onStore, type OnStore, type Program } from "./program.ts";
+import { dirFlag, onStore, type OnStore, type Program } from "./program.ts";
 import { CliFailure, confirmPlan, describe, size, type Io, type Report } from "./report.ts";
-import { connectAsHost, requireStopped, servingNow, snapshot } from "./server-client.ts";
+import { connectAsHost, servingNow, snapshot } from "./server-client.ts";
+import { pauseFor } from "./service.ts";
 
 /** The UTC time to the second, as a file name carries it: `20261113T152233Z`. */
 function stamp(now: Date): string {
@@ -84,7 +85,7 @@ export async function restore(
       meaning: "Nothing was changed.",
       next: `Name a file \`ukt backup\` wrote; they are kept in ${home.backupsDir} unless you chose elsewhere.`,
     });
-  await requireStopped(home, "restore");
+  const pause = await pauseFor(io, env, home, "restore");
   // A data directory with no store yet has nothing to keep a copy of.
   const keep = store.made && options.discardCurrent !== true;
   const kept = join(home.backupsDir, `before-restore-${stamp(new Date())}.tgz`);
@@ -98,25 +99,31 @@ export async function restore(
       keep
         ? `The store as it is now is first saved to ${kept}.`
         : "No copy of the store as it is now is kept.",
+      ...(pause === null ? [] : [pause.line]),
     ],
     options,
   );
-  if (keep) {
-    await snapshotTo(home, kept).catch((error: unknown) => {
-      throw new CliFailure({
-        what: `The store as it is now could not be saved first: ${describe(error)}`,
-        meaning: "Nothing was replaced.",
-        next: "To replace it without keeping a copy, run the command again with --discard-current.",
+  const replace = async (): Promise<void> => {
+    if (keep) {
+      await snapshotTo(home, kept).catch((error: unknown) => {
+        throw new CliFailure({
+          what: `The store as it is now could not be saved first: ${describe(error)}`,
+          meaning: "Nothing was replaced.",
+          next: "To replace it without keeping a copy, run the command again with --discard-current.",
+        });
       });
-    });
-  }
-  await restoreEmbeddedStore({ dataDir: home.dataDir, file });
+    }
+    await restoreEmbeddedStore({ dataDir: home.dataDir, file });
+  };
+  await (pause === null ? replace() : pause.around(replace));
   return {
     data: { restored: file, data_dir: home.dataDir, kept: keep ? kept : null },
     lines: [
       `Restored ${file} into ${home.dataDir}.`,
       ...(keep ? [`The store as it was is kept at ${kept}.`] : []),
-      "Start the server again with: ukt serve",
+      pause === null
+        ? `Start the server again with: ukt serve${dirFlag(options)}`
+        : "The service is running again, on the restored store.",
     ],
   };
 }

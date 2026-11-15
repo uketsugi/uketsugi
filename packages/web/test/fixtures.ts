@@ -39,9 +39,11 @@ export const capabilities: CapabilityDescriptor = {
   degraded: ["no_model"],
 };
 
+/** What a server that needs no token from a harness on its own machine describes: the harness lines carry none. */
 export const connect: ConnectInfo = {
   mcp_url: MCP_URL,
   server_name: "uketsugi",
+  needs_token: false,
   token_env: TOKEN_ENV,
   token_command: `export ${TOKEN_ENV}="$(ukt token)"`,
   commands: {
@@ -54,15 +56,16 @@ export const connect: ConnectInfo = {
       id: "claude-code",
       name: "Claude Code",
       plugin: {
-        install: `claude plugin install uketsugi --marketplace /opt/uketsugi/plugins --config url=${ORIGIN}\nprintf '{"token":"%s"}' "$UKT_TOKEN" | claude plugin configure uketsugi@uketsugi --values-stdin`,
+        install: `claude plugin install uketsugi --marketplace /opt/uketsugi/plugins --config url=${ORIGIN}`,
         remove: "claude plugin marketplace remove uketsugi",
         adds_server: true,
       },
-      add: `claude mcp add --transport http uketsugi ${MCP_URL} --header "Authorization: Bearer $UKT_TOKEN"`,
+      add: `claude mcp add --transport http --scope user uketsugi ${MCP_URL}`,
       add_kind: "command",
       remove: "claude mcp remove uketsugi -s user",
       setup: "/uketsugi:setup",
       activate: "/uketsugi:activate",
+      known: "run here: Claude Code 2.1.325",
       instruction_file: "~/.claude/CLAUDE.md",
       instruction_file_command: 'echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"',
     },
@@ -74,9 +77,10 @@ export const connect: ConnectInfo = {
         remove: "agy plugin uninstall uketsugi",
         adds_server: false,
       },
-      add: `agy mcp add --header "Authorization: Bearer $UKT_TOKEN" uketsugi ${MCP_URL}`,
+      add: `agy mcp add uketsugi ${MCP_URL}`,
       add_kind: "command",
       remove: "agy mcp remove uketsugi",
+      known: "run here: Antigravity 1.5.9",
       instruction_file: "~/.gemini/GEMINI.md",
     },
     {
@@ -85,8 +89,22 @@ export const connect: ConnectInfo = {
       add: MCP_URL,
       add_kind: "url",
       note: "Any client that takes a remote MCP server by its URL.",
+      known: "not established",
     },
   ],
+};
+
+/** What the same server describes to someone who must send a token: the lines read it from a variable. */
+export const connectWithToken: ConnectInfo = {
+  ...connect,
+  needs_token: true,
+  harnesses: connect.harnesses.map((harness) => ({
+    ...harness,
+    add:
+      harness.id === "claude-code"
+        ? `${harness.add} --header "Authorization: Bearer $${TOKEN_ENV}"`
+        : harness.add,
+  })),
 };
 
 export const projects: ProjectList = {
