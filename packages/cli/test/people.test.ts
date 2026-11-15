@@ -81,7 +81,7 @@ describe("the verbs of whoever runs a server several people use", () => {
     );
     expect(invited.lines[0]).toBe("Added bob.");
     expect(invited.lines).toContain(
-      "From now on every harness sends a token, yours included. One you added by the server's address",
+      "Every harness now sends a token, yours included. If you added one by the server's address",
     );
     expect((await fetch(`${url}/api/facts`)).status).toBe(401);
     const [harness, key] = [
@@ -126,7 +126,7 @@ describe("the verbs of whoever runs a server several people use", () => {
       "Nobody called carol is on this server.",
     );
     const again = await invitePerson("bob", { dataDir, token: true, label: "desktop" }, {});
-    expect(again.lines.join("\n")).not.toContain("From now on every harness sends a token");
+    expect(again.lines.join("\n")).not.toContain("Every harness now sends a token");
     expect(again.lines[0]).toBe("Issued to bob, who was here already.");
     expect(secretAfter(again.lines, "Harness token:")).toMatch(/^ukt_/);
     expect(again.lines.join("\n")).not.toContain("Dashboard key");

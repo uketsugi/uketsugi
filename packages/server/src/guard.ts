@@ -33,12 +33,13 @@ const LOCAL = [
 export const LOOPBACK_ADDRESSES: readonly string[] = LOCAL.map((family) => family.loopback);
 
 /**
- * What a proxy or a tunnel adds to a request it passes on. One that runs on this machine connects
+ * What a proxy or a tunnel adds to a request it passes on: the standard headers, and the ones the
+ * common proxies and networks name the first sender in. One that runs on this machine connects
  * from a loopback address whoever it speaks for, so a request that carries any of these is taken
- * to come from elsewhere. A proxy that adds none cannot be told from a local program: whoever
- * puts one in front of a server asks every caller for a token.
+ * to come from elsewhere. No list holds them all, and a proxy that adds none cannot be told from
+ * a local program: whoever puts one in front of a server asks every caller for a token.
  */
-const PASSED_ON = /^(forwarded|via|x-real-ip|x-forwarded-.*)$/;
+const PASSED_ON = /^via$|forwarded|(client|connecting|real)-ip|external-address/;
 
 /**
  * Whether a request came straight from a program on this machine: its connection is from a

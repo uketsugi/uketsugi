@@ -270,8 +270,9 @@ that can be looked up, and their tasks, under their name. `ukt people` lists who
 A server that listens only on its own machine takes its one person's harnesses there by its
 address alone. From the first person you add, every harness sends a token, yours included, and
 the same holds for a server that listens beyond its machine. A proxy or a tunnel on the same
-machine looks like a local program to the server, so before you put one in front of a server
-that you alone use, start it with `ukt serve --require-token`.
+machine can look like a local program to the server: it recognises the ones that say a request
+was forwarded, and not every one does. Before you put one in front of a server that you alone
+use, start it with `ukt serve --require-token`.
 
 To reach it from other machines, start it with `ukt serve --host 0.0.0.0 --allowed-host <name>`.
 It answers only to the names it is given, and it speaks plain HTTP, so put it behind a proxy that

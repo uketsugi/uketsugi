@@ -218,7 +218,7 @@ export function apiRoutes(deps: ApiDeps): Hono<AuthEnv> {
   signInRoutes(api, deps);
   inPersonRoutes(api, deps);
   operatorRoutes(api, deps);
-  api.use("*", some(tokenAuth(deps.app, undefined, deps.alone), deps.signIn.cookieAuth));
+  api.use("*", some(tokenAuth(deps.app, deps.alone), deps.signIn.cookieAuth));
   personRoutes(api, deps);
   api.all("*", (c) => failed(c, noRoute(c.req.method, c.req.path)));
   return api;

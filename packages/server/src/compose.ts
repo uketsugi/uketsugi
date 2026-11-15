@@ -206,7 +206,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   let reachable = (options.allowedHosts ?? []).length > 0;
   const alone = (c: Context): boolean => !reachable && fromThisMachine(c);
 
-  http.use("/mcp", tokenAuth(app, HARNESS_REFUSALS, alone));
+  http.use("/mcp", tokenAuth(app, alone, HARNESS_REFUSALS));
   http.all("/mcp", (c) => mcp.fetch(c.req.raw, c.get("caller")));
   // A harness with no token asks here to sign in with OAuth: it is told what the server takes.
   http.all("/register", (c) => failed(c, noOAuth()));

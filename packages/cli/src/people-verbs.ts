@@ -95,12 +95,12 @@ export async function invitePerson(
     ...(options.operatorName === undefined ? {} : { operator_name: options.operatorName }),
   });
   const { person } = invited;
-  // The first person added ends the time a harness on this machine needed no token.
+  // The first person added ends the time a harness on the server's own machine needed no token.
   const first = invited.added && (await people(server)).people.length === 2;
   const nowTokens = [
     "",
-    "From now on every harness sends a token, yours included. One you added by the server's address",
-    "alone is refused until you add it again with your token: `ukt token` prints it.",
+    "Every harness now sends a token, yours included. If you added one by the server's address",
+    "alone, it is refused until you add it again with your token: `ukt token` prints it.",
   ];
   const howTo = [
     "",

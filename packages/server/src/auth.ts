@@ -86,8 +86,8 @@ function sentNoToken(c: Context): boolean {
  */
 export function tokenAuth(
   app: Pick<App, "authenticate" | "challenge">,
+  alone: (c: Context) => boolean,
   refusals: TokenRefusals = NOT_SIGNED_IN,
-  alone: (c: Context) => boolean = () => false,
 ): MiddlewareHandler<AuthEnv> {
   const refused = (failure: (c: Context) => ToolFailure) => ({
     wwwAuthenticateHeader: app.challenge,

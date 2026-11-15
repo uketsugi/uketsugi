@@ -182,9 +182,9 @@ describe("one person on their own machine, with no token", () => {
     const form = { "content-type": "application/x-www-form-urlencoded" };
     for (const headers of [text, form, {}]) {
       const call = await exchange(`${one.url}/mcp`, { method: "POST", headers, body: PUBLISH });
-      expect(call.status, JSON.stringify(headers)).toBeGreaterThanOrEqual(400);
+      expect(call.status, JSON.stringify(headers)).toBe(415);
       const hook = await exchange(`${one.url}${HOOKS}`, { method: "POST", headers, body: STOP });
-      expect(hook.status, JSON.stringify(headers)).toBeGreaterThanOrEqual(400);
+      expect(hook.status, JSON.stringify(headers)).toBe(422);
     }
     // A GET such a browser sends is answered as a local program's is: it can change nothing, and
     // the page cannot read the answer, which names no origin that may.
@@ -209,6 +209,12 @@ describe("one person on their own machine, with no token", () => {
       forwarded: "for=203.0.113.9",
       via: "1.1 proxy",
       "x-real-ip": "203.0.113.9",
+      "x-original-forwarded-for": "203.0.113.9",
+      "cf-connecting-ip": "203.0.113.9",
+      "true-client-ip": "203.0.113.9",
+      "x-client-ip": "203.0.113.9",
+      "fastly-client-ip": "203.0.113.9",
+      "x-envoy-external-address": "203.0.113.9",
     };
     for (const [name, value] of Object.entries(passed)) {
       const answer = await exchange(`${one.url}/mcp`, {
