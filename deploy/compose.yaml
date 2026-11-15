@@ -37,12 +37,18 @@ services:
     environment:
       # Names the server is reached by besides localhost, comma-separated; empty for none.
       UKT_ALLOWED_HOSTS: ${UKT_PUBLIC_HOST:-}
+      # A language model to read sessions once they are over, as provider/model, with its key and,
+      # for one served at a URL of its own, that URL. Empty for none: nothing is then sent anywhere.
+      UKT_LLM: ${UKT_LLM:-}
+      UKT_LLM_KEY: ${UKT_LLM_KEY:-}
+      UKT_LLM_URL: ${UKT_LLM_URL:-}
     ports:
       - "${UKT_PUBLISH:-127.0.0.1:7410}:7410"
     volumes:
       - uketsugi-data:/data
     healthcheck:
-      test: ["CMD", "ukt", "doctor"]
+      # The language model is not asked: that costs tokens, and its provider's outage is not this server's.
+      test: ["CMD", "ukt", "doctor", "--no-llm"]
       interval: 5m
       timeout: 30s
       # The first start fetches the embedding model, a download of about 170 MB.

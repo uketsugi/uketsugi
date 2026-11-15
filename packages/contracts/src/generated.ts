@@ -92,7 +92,7 @@ export type PublishFactResult = Envelope & {
   /**
    * With `audience: private`, when the fact is the caller's own.
    */
-  private_because?: "project" | "no_source" | "cites_private" | "merged_word";
+  private_because?: "project" | "model_unchecked" | "no_source" | "cites_private" | "merged_word";
 };
 /**
  * What the scanner replaced before anything was stored: the field and the rule that matched, never the text.
@@ -117,7 +117,7 @@ export type UpdateFactResult = Envelope & {
   /**
    * With `audience: private`, when the fact is the caller's own.
    */
-  private_because?: "project" | "no_source" | "cites_private" | "merged_word";
+  private_because?: "project" | "model_unchecked" | "no_source" | "cites_private" | "merged_word";
 };
 export type SearchTasksResult = Envelope & {
   /**
@@ -197,12 +197,13 @@ export type ApiTask = Task & {
   created_at: string;
 };
 /**
- * Why a fact is its author's alone on a server with several people. `project`: its project is private. In a project its person shares: `no_source`, none of its citations is checkable; `cites_private`, it cites a fact of its author's that others cannot see; `merged_word`, a duplicate merged into it has no checkable citation and would be shown with it.
+ * Why a fact is its author's alone on a server with several people. `project`: its project is private. In a project its person shares: `model_unchecked`, a model wrote it and nobody has checked it; `no_source`, none of its citations is checkable; `cites_private`, it cites a fact of its author's that others cannot see; `merged_word`, a duplicate merged into it has no checkable citation and would be shown with it.
  *
  * This interface was referenced by `ContractTypes`'s JSON-Schema
  * via the `definition` "privateBecause".
  */
-export type PrivateBecause = "project" | "no_source" | "cites_private" | "merged_word";
+export type PrivateBecause =
+  "project" | "model_unchecked" | "no_source" | "cites_private" | "merged_word";
 
 export interface ContractTypes {
   ToolError?: ToolError;
@@ -249,6 +250,7 @@ export interface ContractTypes {
   PeopleList?: PeopleList;
   Invitation?: Invitation;
   TokenRevoked?: TokenRevoked;
+  ModelCheck?: ModelCheck;
 }
 export interface ToolError {
   error: {
@@ -536,6 +538,10 @@ export interface Brief {
      * Facts the person published while it ran.
      */
     published: BriefFact[];
+    /**
+     * Facts a model wrote from what the session left, once it was over. Absent when there are none.
+     */
+    digested?: BriefFact[];
   };
   /**
    * The project's most relevant standing facts, one line each.
@@ -616,6 +622,10 @@ export interface BriefFact {
   id: string;
   claim: string;
   trust: Trust;
+  /**
+   * Present when a model wrote the fact from what a session left: that session's display id. The brief's line says so, since nobody checked the fact when it was written.
+   */
+  from_session?: string;
 }
 /**
  * This interface was referenced by `ContractTypes`'s JSON-Schema
@@ -650,6 +660,10 @@ export interface Fact {
    * The live fact at the head of the chain.
    */
   superseded_by?: string;
+  /**
+   * Present when a model wrote the fact from what a session left, and its author's agent never did: that session's display id, for example `s-7f2c`.
+   */
+  from_session?: string;
 }
 /**
  * This interface was referenced by `ContractTypes`'s JSON-Schema
@@ -795,7 +809,7 @@ export interface NewProjectRequest {
  */
 export interface ClaudeCodeHook {
   /**
-   * The event. The server acts on `SessionStart`, `PreToolUse`, `Stop` and `SessionEnd`, and answers any other with nothing.
+   * The event. The server acts on `SessionStart`, `PreToolUse`, `UserPromptSubmit`, `Stop` and `SessionEnd`, and answers any other with nothing.
    */
   hook_event_name: string;
   /**
@@ -810,6 +824,10 @@ export interface ClaudeCodeHook {
    * `Stop`: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept.
    */
   last_assistant_message?: string;
+  /**
+   * `UserPromptSubmit`: what the person asked. The plugin sends this event only where the person turned on sending each turn; the server keeps the text, scanned and cut, only for a language model that reads the person's sessions, and deletes it once read.
+   */
+  prompt?: string;
 }
 /**
  * `POST /api/projects/choice`: the person's choice for one project. Only a signed-in browser makes it.
@@ -1115,6 +1133,10 @@ export interface ApiFact {
    * The live fact at the head of the chain, when this one is superseded.
    */
   superseded_by: string | null;
+  /**
+   * The display id of the session a model wrote the fact from; null for a fact an agent published.
+   */
+  from_session: string | null;
 }
 /**
  * `GET /api/facts/:id`.
@@ -1129,7 +1151,7 @@ export interface FactDetail {
   /**
    * Present for the reader's own fact that only they see, while nothing has replaced it and other people are on the server.
    */
-  private_because?: "project" | "no_source" | "cites_private" | "merged_word";
+  private_because?: "project" | "model_unchecked" | "no_source" | "cites_private" | "merged_word";
 }
 /**
  * One person's check of a fact.
@@ -1320,6 +1342,20 @@ export interface ActivitySession {
   last_search_at: string | null;
   last_publish_at: string | null;
   refused_calls: number;
+  /**
+   * What the model step did with the session; null when it never had anything of the session to read.
+   */
+  digest: {
+    /**
+     * When a model last finished reading the session; null while it has not. ISO 8601, UTC.
+     */
+    at: string | null;
+    /**
+     * The tokens every model call about the session took in, added up.
+     */
+    input_tokens: number;
+    output_tokens: number;
+  } | null;
 }
 /**
  * `GET /api/projects`.
@@ -1472,6 +1508,33 @@ export interface TokenRevoked {
    * False when it was revoked already.
    */
   revoked: boolean;
+}
+/**
+ * `POST /api/model-check`: whether the language model this server was given answers, asked now with one small question.
+ */
+export interface ModelCheck {
+  /**
+   * The provider and model the server was started with; null when it was given none, and then nothing is asked.
+   */
+  model: string | null;
+  answers: boolean;
+  /**
+   * Why it does not answer, in the provider's words. Absent when it does, or none is configured.
+   */
+  detail?: string;
+  /**
+   * What the question cost.
+   */
+  input_tokens: number;
+  output_tokens: number;
+  /**
+   * What the server has spent on model calls in the last 24 hours, input and output together, this question not counted. Absent when none is configured.
+   */
+  used_tokens?: number;
+  /**
+   * The most the server may spend on model calls in 24 hours: readings of sessions wait once it is reached. Absent when none is configured.
+   */
+  budget_tokens?: number;
 }
 
 export const TOOL_NAMES = ["search_facts","publish_fact","update_fact","search_tasks","publish_task","claim_task","update_task"] as const;

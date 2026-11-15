@@ -3,7 +3,15 @@ import { API_CSRF_HEADER } from "@uketsugi/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
-import { activity, CLAIM, idempotency, retries, rulings, session } from "./fixtures.ts";
+import {
+  activity,
+  CLAIM,
+  idempotency,
+  readByModel,
+  retries,
+  rulings,
+  session,
+} from "./fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
 
 /** The cells of each body row of a table, as text. */
@@ -83,6 +91,32 @@ describe("Activity", () => {
     expect(await screen.findByText("No ruling has been made yet")).toBeTruthy();
     await user.click(screen.getByRole("link", { name: "Connect an agent" }));
     expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeTruthy();
+  });
+
+  it("says nothing of a language model where none read a session", async () => {
+    open("/activity");
+    await clients();
+    await recent();
+    expect(screen.queryByRole("region", { name: "Sessions a language model read" })).toBeNull();
+  });
+
+  it("lists the sessions a language model read, with what each reading cost", async () => {
+    api.use(answer("/api/activity", { ...activity, recent: [...activity.recent, readByModel] }));
+    open("/activity");
+    const table = await screen.findByRole("table", {
+      name: "Your recent sessions a language model read",
+    });
+    const [cells = []] = rows(table);
+    expect(rows(table)).toHaveLength(1);
+    expect([...cells.slice(0, 3), ...cells.slice(4)]).toEqual([
+      "s-41ab",
+      "claude-code",
+      readByModel.project,
+      "4210",
+      "380",
+    ]);
+    expect(cells[3]).toMatch(/ ago$/);
+    expect(await violations()).toEqual([]);
   });
 
   it("shows each ruling with who decided and why, and a revert only where one is possible", async () => {

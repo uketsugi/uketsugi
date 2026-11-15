@@ -8,6 +8,7 @@
  * starting has its session begun before any call, and is handed the brief there.
  */
 import AsyncLock from "async-lock";
+import { hastenLast } from "./digest/hasten.ts";
 import type { Caller, Session, SessionKey, SessionMark } from "./domain.ts";
 import type { CorePorts } from "./ports.ts";
 import type { SessionsRepo } from "./store-port.ts";
@@ -80,7 +81,12 @@ export interface SessionInference {
 }
 
 /** A session that begins at `now` and has made no call yet. */
-function newSession(key: SessionKey, id: string, version: string | null, now: Date): Session {
+export function newSession(
+  key: SessionKey,
+  id: string,
+  version: string | null,
+  now: Date,
+): Session {
   return {
     ...key,
     id,
@@ -94,6 +100,8 @@ function newSession(key: SessionKey, id: string, version: string | null, now: Da
     calls: 0,
     briefedAt: null,
     note: null,
+    digestedAt: null,
+    modelTokens: { input: 0, output: 0 },
   };
 }
 
@@ -122,7 +130,7 @@ async function openSessionOf(
  * its database.
  */
 export function createSessionInference(
-  ports: Pick<CorePorts, "store" | "clock" | "ids">,
+  ports: Pick<CorePorts, "store" | "clock" | "ids" | "runner">,
 ): SessionInference {
   const turns = new AsyncLock();
   const { sessions } = ports.store;
@@ -150,6 +158,7 @@ export function createSessionInference(
       briefedAt: refused ? null : now,
     };
     await sessions.open(session);
+    await hastenLast(ports, session);
     return { session, owesBrief: !refused };
   }
 
@@ -162,6 +171,7 @@ export function createSessionInference(
   ): Promise<Session> {
     const session = { ...newSession(key, ports.ids.uuid(), client.version, now), briefedAt };
     await sessions.open(session);
+    await hastenLast(ports, session);
     return session;
   }
 

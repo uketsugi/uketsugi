@@ -4,7 +4,9 @@
   "contractVersion": "0.1.0",
   "limits": {
     "citations_chars": 20000,
-    "closing_note_chars": 4000
+    "closing_note_chars": 4000,
+    "turn_request_chars": 4000,
+    "turn_answer_chars": 16000
   },
   "tools": [
     {
@@ -711,7 +713,7 @@
           "hook_event_name": {
             "type": "string",
             "maxLength": 80,
-            "description": "The event. The server acts on `SessionStart`, `PreToolUse`, `Stop` and `SessionEnd`, and answers any other with nothing."
+            "description": "The event. The server acts on `SessionStart`, `PreToolUse`, `UserPromptSubmit`, `Stop` and `SessionEnd`, and answers any other with nothing."
           },
           "session_id": {
             "type": "string",
@@ -727,6 +729,10 @@
           "last_assistant_message": {
             "type": "string",
             "description": "`Stop`: the agent's last message. It is scanned like any write, kept private to the person, and its beginning is what is kept."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "`UserPromptSubmit`: what the person asked. The plugin sends this event only where the person turned on sending each turn; the server keeps the text, scanned and cut, only for a language model that reads the person's sessions, and deletes it once read."
           }
         },
         "required": ["hook_event_name", "session_id"]
@@ -1269,6 +1275,39 @@
           }
         },
         "required": ["id", "revoked"]
+      },
+      "ModelCheck": {
+        "type": "object",
+        "description": "`POST /api/model-check`: whether the language model this server was given answers, asked now with one small question.",
+        "properties": {
+          "model": {
+            "type": ["string", "null"],
+            "description": "The provider and model the server was started with; null when it was given none, and then nothing is asked."
+          },
+          "answers": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string",
+            "description": "Why it does not answer, in the provider's words. Absent when it does, or none is configured."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "description": "What the question cost."
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "used_tokens": {
+            "type": "integer",
+            "description": "What the server has spent on model calls in the last 24 hours, input and output together, this question not counted. Absent when none is configured."
+          },
+          "budget_tokens": {
+            "type": "integer",
+            "description": "The most the server may spend on model calls in 24 hours: readings of sessions wait once it is reached. Absent when none is configured."
+          }
+        },
+        "required": ["model", "answers", "input_tokens", "output_tokens"]
       }
     }
   },
@@ -1405,6 +1444,13 @@
               "items": {
                 "$ref": "#/$defs/briefFact"
               }
+            },
+            "digested": {
+              "type": "array",
+              "description": "Facts a model wrote from what the session left, once it was over. Absent when there are none.",
+              "items": {
+                "$ref": "#/$defs/briefFact"
+              }
             }
           },
           "required": ["session", "client", "closed", "open", "calls", "last_call_at", "published"]
@@ -1435,6 +1481,10 @@
         },
         "trust": {
           "$ref": "#/$defs/trust"
+        },
+        "from_session": {
+          "type": "string",
+          "description": "Present when a model wrote the fact from what a session left: that session's display id. The brief's line says so, since nobody checked the fact when it was written."
         }
       },
       "required": ["id", "claim", "trust"]
@@ -1594,8 +1644,8 @@
     },
     "privateBecause": {
       "type": "string",
-      "enum": ["project", "no_source", "cites_private", "merged_word"],
-      "description": "Why a fact is its author's alone on a server with several people. `project`: its project is private. In a project its person shares: `no_source`, none of its citations is checkable; `cites_private`, it cites a fact of its author's that others cannot see; `merged_word`, a duplicate merged into it has no checkable citation and would be shown with it."
+      "enum": ["project", "model_unchecked", "no_source", "cites_private", "merged_word"],
+      "description": "Why a fact is its author's alone on a server with several people. `project`: its project is private. In a project its person shares: `model_unchecked`, a model wrote it and nobody has checked it; `no_source`, none of its citations is checkable; `cites_private`, it cites a fact of its author's that others cannot see; `merged_word`, a duplicate merged into it has no checkable citation and would be shown with it."
     },
     "fact": {
       "type": "object",
@@ -1649,6 +1699,10 @@
         "superseded_by": {
           "type": "string",
           "description": "The live fact at the head of the chain."
+        },
+        "from_session": {
+          "type": "string",
+          "description": "Present when a model wrote the fact from what a session left, and its author's agent never did: that session's display id, for example `s-7f2c`."
         }
       },
       "required": ["id", "claim", "citations", "status", "flags", "trust", "author", "updated_at"]
@@ -1884,6 +1938,10 @@
         "superseded_by": {
           "type": ["string", "null"],
           "description": "The live fact at the head of the chain, when this one is superseded."
+        },
+        "from_session": {
+          "type": ["string", "null"],
+          "description": "The display id of the session a model wrote the fact from; null for a fact an agent published."
         }
       },
       "required": [
@@ -1903,7 +1961,8 @@
         "created_at",
         "updated_at",
         "confirmed_at",
-        "superseded_by"
+        "superseded_by",
+        "from_session"
       ]
     },
     "apiConfirmation": {
@@ -2056,6 +2115,24 @@
         },
         "refused_calls": {
           "type": "integer"
+        },
+        "digest": {
+          "type": ["object", "null"],
+          "description": "What the model step did with the session; null when it never had anything of the session to read.",
+          "properties": {
+            "at": {
+              "type": ["string", "null"],
+              "description": "When a model last finished reading the session; null while it has not. ISO 8601, UTC."
+            },
+            "input_tokens": {
+              "type": "integer",
+              "description": "The tokens every model call about the session took in, added up."
+            },
+            "output_tokens": {
+              "type": "integer"
+            }
+          },
+          "required": ["at", "input_tokens", "output_tokens"]
         }
       },
       "required": [
@@ -2067,7 +2144,8 @@
         "last_call_at",
         "last_search_at",
         "last_publish_at",
-        "refused_calls"
+        "refused_calls",
+        "digest"
       ]
     },
     "apiProject": {

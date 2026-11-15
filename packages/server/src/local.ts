@@ -15,6 +15,7 @@ import {
   type AppPorts,
   type Caller,
   type Clock,
+  type DigestReport,
   type Embedder,
   type IdGen,
 } from "@uketsugi/core";
@@ -22,6 +23,7 @@ import { openEmbeddedStore, openServerStore } from "@uketsugi/store";
 import { v7 as uuidv7 } from "uuid";
 import { composeServer } from "./compose.ts";
 import { DEFAULT_HOST } from "./guard.ts";
+import { createModelRunner, type ModelConfig } from "./model-runner.ts";
 
 /** The system's clock, in whole milliseconds. */
 const systemClock: Clock = {
@@ -50,6 +52,12 @@ export interface LocalPortsOptions {
   readonly taskLeaseMs?: number;
   /** Whether every caller must send a token, the owner's own harnesses on this machine included. */
   readonly requireToken?: boolean;
+  /**
+   * The language model whoever runs the server configured: it reads their sessions once they are
+   * over, and nobody else's. Left out, every job runs on rules and nothing a session said is sent
+   * anywhere.
+   */
+  readonly model?: ModelConfig;
 }
 
 /** The ports of the server `ukt` runs, and the owner they belong to. */
@@ -66,15 +74,16 @@ export interface LocalPorts {
  * `ports.identity` and passes the rest to `composeServer` unchanged.
  */
 export async function openLocalPorts(options: LocalPortsOptions): Promise<LocalPorts> {
-  const { dataDir, databaseUrl, taskLeaseMs, requireToken } = options;
+  const { dataDir, databaseUrl, taskLeaseMs, requireToken, model } = options;
   const embedded = databaseUrl === undefined ? await openEmbeddedStore({ dataDir }) : null;
   const store = embedded ?? (await openServerStore({ connectionString: databaseUrl ?? "" }));
   const embedder = options.embedder ?? null;
   const base = { store, clock: systemClock, ids: systemIds, embedder, taskLeaseMs };
   try {
     const owner = await ensureOwner(base);
+    const runner = model === undefined ? {} : { runner: await createModelRunner(model, owner) };
     return {
-      ports: { ...base, identity: createTokenIdentity(base, { requireToken }) },
+      ports: { ...base, ...runner, identity: createTokenIdentity(base, { requireToken }) },
       owner,
       snapshot: embedded === null ? null : () => embedded.snapshot(),
       close: () => store.close(),
@@ -104,6 +113,8 @@ export interface LocalServerOptions extends LocalPortsOptions {
    * binds. A server bound to every address answers to the loopback names and to these.
    */
   readonly allowedHosts?: readonly string[];
+  /** Told of every session the model step has read. */
+  readonly onDigest?: (report: DigestReport) => void;
 }
 
 export interface LocalServer {
@@ -150,6 +161,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
               caller: () => ensureOwner(ports),
             },
       snapshot: local.snapshot ?? undefined,
+      onDigest: options.onDigest,
     });
     const listening = await server.listen({
       host: options.host ?? DEFAULT_HOST,

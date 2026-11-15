@@ -55,6 +55,8 @@ function previous(change: Partial<Session> = {}): Session {
     calls: 9,
     briefedAt: null,
     note: null,
+    digestedAt: null,
+    modelTokens: { input: 0, output: 0 },
     ...change,
   };
 }
@@ -107,6 +109,7 @@ describe("the session brief", () => {
             note: noted("Stopped after the queue tests passed.", minutes(-235)),
           }),
           published: [fact(20, "The retry queue caps at five attempts")],
+          digested: [],
         },
         facts: [
           fact(21, "Uploads are chunked at 8 MB", "reviewed"),
@@ -151,9 +154,48 @@ describe("the session brief", () => {
     });
   });
 
+  test("a fact a model wrote says so on its line, and under the session a model read", () => {
+    const written = (n: number, claim: string): BriefFact => ({
+      ...fact(n, claim),
+      from_session: "s-0800",
+    });
+    const { brief, text } = composeBrief(
+      sources({
+        previous: {
+          session: previous({
+            note: noted("Stopped after the queue tests passed.", minutes(-235)),
+          }),
+          published: [],
+          digested: [written(30, "Deliveries are deduplicated on the event id")],
+        },
+        facts: [
+          written(30, "Deliveries are deduplicated on the event id"),
+          { ...written(31, "The cap is 30 seconds"), trust: "reviewed" },
+          fact(20, "The retry queue caps at five attempts"),
+        ],
+        factCount: 3,
+      }),
+    );
+    expect(text.split("\n").slice(1)).toEqual([
+      "Your previous session here (s-0800, claude-code) closed at 2026-11-13T08:05Z with this note:",
+      '  "Stopped after the queue tests passed."',
+      "Facts a model wrote from what it left, which nobody has checked:",
+      `- ${id(30)} · Deliveries are deduplicated on the event id`,
+      "Facts (3 of 3 shown; search_facts finds the rest):",
+      `- ${id(30)} · Deliveries are deduplicated on the event id (written by a model, unchecked)`,
+      `- ${id(31)} · The cap is 30 seconds (reviewed)`,
+      `- ${id(20)} · The retry queue caps at five attempts`,
+    ]);
+    expect(brief.last_session).toMatchObject({
+      published: [],
+      digested: [{ id: id(30), from_session: "s-0800" }],
+    });
+    expect(brief.facts[2]).not.toHaveProperty("from_session");
+  });
+
   test("says a session never closed when it left no note, and what it did instead", () => {
     const { brief, text } = composeBrief(
-      sources({ previous: { session: previous(), published: [] } }),
+      sources({ previous: { session: previous(), published: [], digested: [] } }),
     );
     expect(text).toContain(
       "Your previous session here (s-0800, claude-code) never closed: 9 calls, the last at 2026-11-13T08:00Z. It left no note.",
@@ -171,7 +213,9 @@ describe("the session brief", () => {
 
   test("a session that closed without a word is told of as closed, and one that left a note and made no call has no last call", () => {
     const wordless = previous({ note: noted("", minutes(-230)) });
-    const quit = composeBrief(sources({ previous: { session: wordless, published: [] } }));
+    const quit = composeBrief(
+      sources({ previous: { session: wordless, published: [], digested: [] } }),
+    );
     expect(quit.text).toContain(
       "Your previous session here (s-0800, claude-code) closed at 2026-11-13T08:10Z: 9 calls, the last at 2026-11-13T08:00Z. It left no note.",
     );
@@ -180,7 +224,9 @@ describe("the session brief", () => {
 
     const checkpoint = noted("Read the config; nothing looked up.", minutes(-230), false);
     const callless = previous({ calls: 0, note: checkpoint });
-    const killed = composeBrief(sources({ previous: { session: callless, published: [] } }));
+    const killed = composeBrief(
+      sources({ previous: { session: callless, published: [], digested: [] } }),
+    );
     expect(killed.text).toContain(
       "Your previous session here (s-0800, claude-code) never closed: no calls. Its latest note, from 2026-11-13T08:10Z:",
     );
@@ -188,7 +234,9 @@ describe("the session brief", () => {
 
   test("a final note older than the session's last call is its latest note, not its closing", () => {
     const session = previous({ note: noted("First turn done.", minutes(-280)) });
-    const { brief, text } = composeBrief(sources({ previous: { session, published: [] } }));
+    const { brief, text } = composeBrief(
+      sources({ previous: { session, published: [], digested: [] } }),
+    );
     expect(text).toContain("never closed: 9 calls, the last at 2026-11-13T08:00Z. Its latest note");
     expect(brief.last_session).toMatchObject({ closed: false, note: "First turn done." });
   });
@@ -196,7 +244,9 @@ describe("the session brief", () => {
   test("a note at a checkpoint never closes its session, however late it was written", () => {
     const checkpoint = noted("Tests pass; refactor next.", minutes(-230), false);
     const stopped = composeBrief(
-      sources({ previous: { session: previous({ note: checkpoint }), published: [] } }),
+      sources({
+        previous: { session: previous({ note: checkpoint }), published: [], digested: [] },
+      }),
     );
     expect(stopped.text).toContain(
       "Your previous session here (s-0800, claude-code) never closed: 9 calls, the last at 2026-11-13T08:00Z. Its latest note, from 2026-11-13T08:10Z:",
@@ -207,7 +257,9 @@ describe("the session brief", () => {
       note: "Tests pass; refactor next.",
     });
     const running = previous({ lastCallAt: minutes(-3), note: { ...checkpoint, at: minutes(-2) } });
-    const going = composeBrief(sources({ previous: { session: running, published: [] } }));
+    const going = composeBrief(
+      sources({ previous: { session: running, published: [], digested: [] } }),
+    );
     expect(going.text).toContain("is still open: 9 calls, the last at 2026-11-13T11:57Z.");
     expect(going.brief.last_session).toMatchObject({ closed: false, open: true });
   });
@@ -215,7 +267,7 @@ describe("the session brief", () => {
   test("a session that called within the idle gap is still open, not unclosed", () => {
     const running = previous({ lastCallAt: minutes(-3), calls: 1 });
     const { brief, text } = composeBrief(
-      sources({ previous: { session: running, published: [] } }),
+      sources({ previous: { session: running, published: [], digested: [] } }),
     );
     expect(text).toContain(
       "Another session of yours here (s-0800, claude-code) is still open: 1 call, the last at 2026-11-13T11:57Z.",
@@ -240,6 +292,7 @@ describe("the session brief", () => {
         previous: {
           session: previous({ note: noted(long, minutes(-200)) }),
           published: many.map((n) => fact(100 + n, long)),
+          digested: [],
         },
         facts: many.map((n) => fact(200 + n, `${n} ${long}`)),
         factCount: 4321,

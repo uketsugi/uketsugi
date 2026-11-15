@@ -59,6 +59,8 @@ export interface Io {
   out(line: string): void;
   err(line: string): void;
   confirm(question: string): Promise<boolean>;
+  /** Asks for a secret, which is not shown as it is typed; null when the person gave none. */
+  secret(question: string): Promise<string | null>;
   progress(title: string): Progress;
   /** Opens a URL in the person's browser; false when none could be opened. */
   open(url: string): Promise<boolean>;

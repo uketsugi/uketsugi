@@ -151,6 +151,7 @@ export const retries: ApiFact = {
   flags: [],
   trust: "reviewed",
   author: "Dana's Claude Code",
+  from_session: null,
   own: true,
   redacted: false,
   created_at: "2026-11-01T10:00:00Z",
@@ -316,8 +317,23 @@ export const activity: ActivityReport = {
       last_search_at: "2026-11-13T09:01:00Z",
       last_publish_at: null,
       refused_calls: 2,
+      digest: null,
     },
   ],
+};
+
+/** A session a language model read once it was over, and what the reading cost. */
+export const readByModel: ActivityReport["recent"][number] = {
+  session: "s-41ab",
+  client: "claude-code",
+  version: "2.1.0",
+  project: PROJECT,
+  first_call_at: "2026-11-13T10:00:00Z",
+  last_call_at: "2026-11-13T10:40:00Z",
+  last_search_at: "2026-11-13T10:01:00Z",
+  last_publish_at: null,
+  refused_calls: 0,
+  digest: { at: "2026-11-13T10:41:00Z", input_tokens: 4210, output_tokens: 380 },
 };
 
 export const rulings: RulingList = {

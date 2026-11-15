@@ -7,19 +7,16 @@
  * project's standing facts one line each, and how many facts the project holds against how many
  * are shown. The whole text stays under `BRIEF_MAX_CHARS`; the structured brief carries exactly
  * what the text shows.
+ *
+ * This file composes a brief from records already read, and is pure. What is read, and in what
+ * order the facts come, is `brief-sources.ts`.
  */
-import type { Brief, BriefFact, Fact as FactView, Task as TaskView } from "@uketsugi/contracts";
-import { scopeOf, type CallContext } from "./context.ts";
-import type { Fact, Session, Task, TaskNote } from "./domain.ts";
-import { isLive } from "./facts/duplicates.ts";
-import { factViews } from "./facts/views.ts";
-import type { CorePorts } from "./ports.ts";
+import type { Brief, BriefFact, Task as TaskView } from "@uketsugi/contracts";
+import type { Session, Task, TaskNote } from "./domain.ts";
 import { headOf } from "./render.ts";
-import { factStanding, standingWeight } from "./search/standing.ts";
 import { sessionState } from "./sessions.ts";
 import { leaseStanding } from "./tasks/lease.ts";
 import { taskLines, taskView, type Viewer } from "./tasks/views.ts";
-import { viewerOf } from "./usecases/tasks/shared.ts";
 
 /** The most characters a brief's text takes. */
 export const BRIEF_MAX_CHARS = 4000;
@@ -32,8 +29,6 @@ const LIMITS = {
   tasks: 6,
   /** Facts of the previous session listed. */
   published: 5,
-  /** Facts read to choose from, newest first. */
-  factPool: 60,
   title: 120,
   taskNote: 240,
   closingNote: 700,
@@ -55,10 +50,14 @@ export interface BriefSources extends Viewer {
   readonly tasks: readonly Task[];
   /** The newest note of each task that has one. */
   readonly notes: readonly TaskNote[];
-  /** The person's previous session in the project, with its note, and what was published in it. */
+  /**
+   * The person's previous session in the project, with its note, what its agent published in it
+   * and what a model wrote from what it left.
+   */
   readonly previous: {
     readonly session: Session;
     readonly published: readonly BriefFact[];
+    readonly digested: readonly BriefFact[];
   } | null;
   /** The project's standing facts, most relevant first. */
   readonly facts: readonly BriefFact[];
@@ -143,7 +142,24 @@ function taskSection(
   };
 }
 
+/**
+ * A fact in one line. An agent that is handed its brief acts on these lines without searching, so
+ * a line says what a search result would of how far to trust it: that someone else confirmed the
+ * fact, or that a model wrote it and nobody has. No recorded run held a fact a model wrote, so
+ * every other line reads as it was measured.
+ */
 function factLine(fact: BriefFact): string {
+  const standing =
+    fact.trust === "reviewed"
+      ? " (reviewed)"
+      : fact.from_session === undefined
+        ? ""
+        : " (written by a model, unchecked)";
+  return `- ${fact.id} · ${fact.claim}${standing}`;
+}
+
+/** The same line under a heading that already says a model wrote what it lists. */
+function plainLine(fact: BriefFact): string {
   return `- ${fact.id} · ${fact.claim}${fact.trust === "reviewed" ? " (reviewed)" : ""}`;
 }
 
@@ -180,6 +196,19 @@ function previousHead(previous: Previous, now: Date) {
   return { closed, open, calls, said, line };
 }
 
+/** The leading facts of a list that fit under its heading in `budget` characters. */
+function factList(
+  heading: string,
+  facts: readonly BriefFact[],
+  budget: number,
+  line: (fact: BriefFact) => string = factLine,
+): Section<BriefFact> {
+  const listed = facts.slice(0, LIMITS.published);
+  const kept = fitting(listed.map(line), budget - heading.length - 1);
+  if (kept.length === 0) return { lines: [], shown: [] };
+  return { lines: [heading, ...kept], shown: listed.slice(0, kept.length) };
+}
+
 /** How the previous session ended: with a final note, or without one and what it left instead. */
 function previousSection(
   sources: BriefSources,
@@ -190,20 +219,22 @@ function previousSection(
   const { note } = session;
   const { closed, open, calls, said, line } = previousHead(sources.previous, sources.now);
   const text = note !== null && said ? [clip(note.text, LIMITS.closingNote)] : [];
-  const published = sources.previous.published.slice(0, LIMITS.published);
-  const wrote = published.length === 0 ? [] : ["Facts published while it ran:"];
-  const all = [
-    line,
-    ...text.map((quoted) => `  "${quoted}"`),
-    ...wrote,
-    ...published.map(factLine),
-  ];
-  const lines = fitting(all, budget);
-  if (lines.at(-1) === wrote[0]) lines.pop();
-  if (lines.length === 0) return { lines, view: undefined };
-  const noted = note !== null && said && lines.length > 1;
+  const head = fitting([line, ...text.map((quoted) => `  "${quoted}"`)], budget);
+  if (head.length === 0) return { lines: [], view: undefined };
+  const published = factList(
+    "Facts published while it ran:",
+    sources.previous.published,
+    budget - sizeOf(head),
+  );
+  const digested = factList(
+    "Facts a model wrote from what it left, which nobody has checked:",
+    sources.previous.digested,
+    budget - sizeOf(head) - sizeOf(published.lines),
+    plainLine,
+  );
+  const noted = note !== null && said && head.length > 1;
   return {
-    lines,
+    lines: [...head, ...published.lines, ...digested.lines],
     view: {
       session: session.displayId,
       client: session.clientName,
@@ -212,7 +243,8 @@ function previousSection(
       calls,
       last_call_at: session.lastCallAt.toISOString(),
       ...(noted ? { note: text[0], note_at: note.at.toISOString() } : {}),
-      published: published.slice(0, Math.max(0, lines.length - 2 - text.length)),
+      published: published.shown,
+      ...(digested.shown.length === 0 ? {} : { digested: digested.shown }),
     },
   };
 }
@@ -236,7 +268,14 @@ function withShortClaims(sources: BriefSources): BriefSources {
   return {
     ...sources,
     facts: sources.facts.map(short),
-    previous: previous === null ? null : { ...previous, published: previous.published.map(short) },
+    previous:
+      previous === null
+        ? null
+        : {
+            ...previous,
+            published: previous.published.map(short),
+            digested: previous.digested.map(short),
+          },
   };
 }
 
@@ -274,95 +313,4 @@ export function composeBrief(given: BriefSources): ComposedBrief {
     },
     text: lines.join("\n"),
   };
-}
-
-/** A fact as a brief lists it. */
-function briefFact(view: FactView): BriefFact {
-  return { id: view.id, claim: view.claim, trust: view.trust };
-}
-
-/**
- * The project's standing facts, most relevant first for a session that has asked nothing yet. Each
- * is weighed as a search weighs a match's standing: by who vouches for it, whether it is doubted
- * and how lately it was written or checked. Equal weights go to the most recently changed.
- */
-function byStanding(
-  facts: readonly Fact[],
-  views: readonly FactView[],
-  reader: string,
-  now: Date,
-): FactView[] {
-  const weights = new Map<string, number>();
-  for (const view of views) {
-    const fact = facts.find((entry) => entry.id === view.id);
-    if (fact === undefined) continue;
-    const row = {
-      status: fact.status,
-      author: fact.author,
-      flagged: view.flags.length > 0,
-      updatedAt: fact.updatedAt,
-      confirmedAt: view.confirmed_at === undefined ? null : new Date(view.confirmed_at),
-    };
-    weights.set(view.id, standingWeight(factStanding(row, reader, now)));
-  }
-  const weight = (view: FactView): number => weights.get(view.id) ?? 0;
-  return [...views].sort(
-    (a, b) => weight(b) - weight(a) || b.updated_at.localeCompare(a.updated_at),
-  );
-}
-
-/** The facts the person published between a session's first and last call. */
-function publishedIn(session: Session, person: string, facts: readonly Fact[]): Set<string> {
-  const from = session.firstCallAt.getTime();
-  const to = session.lastCallAt.getTime();
-  const during = (fact: Fact) => fact.createdAt.getTime() >= from && fact.createdAt.getTime() <= to;
-  return new Set(facts.filter((fact) => fact.author === person && during(fact)).map((f) => f.id));
-}
-
-/**
- * Reads what a brief is composed from and composes it, for the session of a call. `notice` is what
- * the person has yet to decide about the project, if anything.
- */
-export async function sessionBrief(
-  ports: Pick<CorePorts, "store" | "clock">,
-  ctx: Pick<CallContext, "caller" | "project" | "session">,
-  notice: string | null,
-): Promise<ComposedBrief> {
-  const { store } = ports;
-  const { caller, session } = ctx;
-  const project = ctx.project.key;
-  const scope = scopeOf(caller);
-  const now = ports.clock.now();
-  const [tasks, pool, factCount, previous] = await Promise.all([
-    store.tasks.list(scope, { project, states: ["open", "claimed", "handed_off"], limit: 50 }),
-    store.facts.list(scope, { project, limit: LIMITS.factPool }),
-    store.facts.count(scope, project),
-    store.sessions.previous(caller.orgId, caller.principalId, project, session.id),
-  ]);
-  const standing = pool.filter(isLive);
-  const taskIds = tasks.map((task) => task.id);
-  const [views, notes] = await Promise.all([
-    factViews(ports, caller, standing),
-    store.tasks.latestNotes(scope, taskIds),
-  ]);
-  const viewer = await viewerOf(ports, ctx, now, { tasks, notes });
-  const during =
-    previous === null ? new Set<string>() : publishedIn(previous, caller.principalId, standing);
-  return composeBrief({
-    ...viewer,
-    project,
-    notice,
-    person: caller.principalId,
-    tasks,
-    notes,
-    previous:
-      previous === null
-        ? null
-        : {
-            session: previous,
-            published: views.filter((view) => during.has(view.id)).map(briefFact),
-          },
-    facts: byStanding(standing, views, caller.principalId, now).map(briefFact),
-    factCount,
-  });
 }

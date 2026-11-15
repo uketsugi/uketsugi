@@ -7,6 +7,7 @@
 import { dirname, join } from "node:path";
 import { installModel, verifyModel } from "@uketsugi/embed";
 import type { Home } from "./home.ts";
+import { llmChange, rememberModel, sentLine, type LlmOptions } from "./llm.ts";
 import { dirFlag, type OnStore, type Serving } from "./program.ts";
 import type { Failure, Io } from "./report.ts";
 import { servingNow, whoAnswers } from "./server-client.ts";
@@ -22,7 +23,7 @@ import {
   type ServiceState,
 } from "./service.ts";
 
-export interface SetupOptions extends Serving, OnStore {
+export interface SetupOptions extends Serving, OnStore, LlmOptions {
   readonly dataDir?: string;
   /** False with `--no-model`: the model is left out and search matches words only. */
   readonly model: boolean;
@@ -129,6 +130,44 @@ export async function modelPart(io: Io, home: Home, wanted: boolean): Promise<Pa
         ],
     pending: !there,
     apply: () => prepareModel(io, home),
+  };
+}
+
+/**
+ * The language model the server reads sessions with, remembered in the data directory, where the
+ * service finds it: the unit carries no environment. Nothing to show where none is remembered or
+ * told. A change restarts a service that is in place, which `pending` tells.
+ */
+export async function llmPart(
+  io: Io,
+  env: NodeJS.ProcessEnv,
+  home: Home,
+  options: SetupOptions,
+): Promise<Part> {
+  const part = { id: "llm", label: "language model", outside: false, state: SKIPPED };
+  const { named, onFile, pending } = await llmChange(home, options);
+  const [what, forgets] = [named ?? onFile, named === null && pending];
+  if (what === null) return { ...part, plan: [], pending: false, apply: null };
+  const name = `${what.provider} · ${what.model}`;
+  if (!pending)
+    return {
+      ...part,
+      plan: [`${name}, remembered in ${home.llmFile}. ${sentLine(name)}`],
+      pending: false,
+      apply: null,
+    };
+  return {
+    ...part,
+    plan: [
+      forgets
+        ? `${name} is forgotten: nothing is sent to a provider.`
+        : `remember ${name} with its key in ${home.llmFile}, which only you can read. ${sentLine(name)}`,
+    ],
+    pending: true,
+    apply: async () => {
+      const line = await rememberModel(io, home, options, env);
+      return { lines: line === null ? [] : [line], state: "done" };
+    },
   };
 }
 

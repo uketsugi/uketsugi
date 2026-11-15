@@ -11,6 +11,7 @@ import {
   type HostProof,
   type Invitation,
   type InviteRequest,
+  type ModelCheck,
   type PeopleList,
   type ProjectList,
   type SignInCode,
@@ -228,6 +229,16 @@ export async function signInCode(server: Running): Promise<SignInCode> {
 export async function exportMarkdown(server: Running, project: string): Promise<string> {
   const path = `/api/export?${new URLSearchParams({ project }).toString()}`;
   return (await request(server, path, signed(server))).text();
+}
+
+/** How long the server may take to ask its language model one question. */
+const MODEL_ANSWERS_WITHIN_MS = 45_000;
+
+/** Whether the language model the server was given answers, asked now. */
+export async function modelCheck(server: Running): Promise<ModelCheck> {
+  const init = { ...signed(server), method: "POST" };
+  const asked = await request(server, "/api/model-check", init, MODEL_ANSWERS_WITHIN_MS);
+  return (await asked.json()) as ModelCheck;
 }
 
 /** Everyone on the server with their tokens: for whoever runs it. */

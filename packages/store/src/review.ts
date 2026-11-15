@@ -204,4 +204,15 @@ export class SqlReview extends Repo implements ReviewRepo {
       .execute();
     return rows.map(toEvent);
   }
+
+  async publishedIn(scope: ReadScope, sessionId: string): Promise<string[]> {
+    if (!isUuid(sessionId)) return [];
+    const rows = await this.eventsIn(scope)
+      .where("session", "=", sessionId)
+      .where("kind", "=", "FactPublished")
+      .orderBy("at")
+      .orderBy("seq")
+      .execute();
+    return rows.map((row) => row.subject);
+  }
 }

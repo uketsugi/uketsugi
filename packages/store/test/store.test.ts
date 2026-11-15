@@ -1,6 +1,7 @@
 import type { Store } from "@uketsugi/core";
 import {
   createTestDatabase,
+  describeModelStepConformance,
   describeMoveConformance,
   describeStoreConformance,
   describeTaskStoreConformance,
@@ -34,6 +35,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("on a server", () => {
   describeStoreConformance("PostgreSQL server", harness);
   describeMoveConformance("PostgreSQL server", harness);
   describeTaskStoreConformance("PostgreSQL server", harness);
+  describeModelStepConformance("PostgreSQL server", harness);
 
   test("a database has one owner: a second opener is refused and told why, until the first lets go", async () => {
     const database = await createTestDatabase();

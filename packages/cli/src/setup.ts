@@ -25,11 +25,13 @@ import {
 import { hostStore, storePlace, withStore, type HostStore } from "./host-store.ts";
 import { dirFlag, onStore, serving, servingOf, toldOf, type Program } from "./program.ts";
 import { CliFailure, type Io, type Report } from "./report.ts";
+import { llmOptions } from "./llm.ts";
 import { leaseMs, numberOf } from "./serve.ts";
 import { connectLines } from "./harness-lines.ts";
 import { connect, connectInfo, projects, toolsListed, whoAnswers } from "./server-client.ts";
 import {
   LEFT_OUT,
+  llmPart,
   modelPart,
   RUNNING,
   servicePart,
@@ -205,9 +207,12 @@ async function survey(
   origin: string,
 ): Promise<Part[]> {
   const { changed } = await settingsWith(home, toldOf(options));
+  const llm = await llmPart(io, env, home, options);
   return [
     await modelPart(io, home, options.model),
-    await servicePart(io, env, home, options, origin, changed),
+    llm,
+    // A service in place runs the settings and the language model it started with.
+    await servicePart(io, env, home, options, origin, changed || llm.pending),
   ];
 }
 
@@ -262,6 +267,7 @@ export async function setup(
       ...(store.kind === "postgres" ? [`store           ${storePlace(home, store)}`] : []),
       `token           ${tokenText}`,
       ...column("model", ended("model").lines),
+      ...column("language model", ended("llm").lines),
       `server URL      ${origin}/mcp`,
       ...outside.flatMap((part) => column(part.label, ended(part.id).lines)),
       ...column("server", checked.lines),
@@ -276,9 +282,11 @@ export async function setup(
 /** Adds `setup` and `uninstall` to the program. */
 export function setupVerbs(program: Program): void {
   const { io, env, verb, run } = program;
+  const llmAbout =
+    "remember a language model to read sessions once they are over, with its key, which is read from UKT_LLM_KEY or asked for; `none` forgets it";
   const about =
     "make the data directory, the store and the token, install the model and run the server as your service";
-  onStore(serving(verb("setup", about)))
+  llmOptions(onStore(serving(verb("setup", about))), llmAbout, "flag")
     .option("--no-model", "leave the embedding model out; search then matches words only")
     .option("--no-service", "do not install the service; the server runs while `ukt serve` does")
     .option("--plan", "print what set-up would do and change nothing")

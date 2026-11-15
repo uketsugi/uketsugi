@@ -1,18 +1,22 @@
 /**
- * Inferred sessions, each with its note: the directory records behind session inference, the
- * brief's "previous session" and Activity. A session write takes no audience lock and writes no
- * event.
+ * Inferred sessions, each with its note, the turns its hook left for a model to read and what a
+ * model's reading of it came to: the directory records behind session inference, the brief's
+ * "previous session", Activity and the model step. A session write takes no audience lock and
+ * writes no event.
  */
-import type {
-  ActivityRow,
-  Session,
-  SessionKey,
-  SessionMark,
-  SessionNote,
-  SessionsRepo,
+import {
+  MOST_TURNS_KEPT,
+  type ActivityRow,
+  type ModelTokens,
+  type Session,
+  type SessionKey,
+  type SessionMark,
+  type SessionNote,
+  type SessionsRepo,
+  type Turn,
 } from "@uketsugi/core";
 import { sql, type Selectable } from "kysely";
-import { inByteOrder, Repo, uuidsOf } from "./codec.ts";
+import { inByteOrder, Repo, uuidsOf, type Db } from "./codec.ts";
 import type { Database } from "./schema.ts";
 
 /**
@@ -35,10 +39,42 @@ function noteColumns(note: SessionNote | null) {
   };
 }
 
-function toSession(row: Selectable<Database["sessions"]>): Session {
-  const { noteText, noteFinal, noteAt, ...session } = row;
+/**
+ * What a session is read as: every column but the facts chosen for the next brief, which are read
+ * by themselves (`picks`) and never with a session.
+ */
+const COLUMNS = [
+  "orgId",
+  "id",
+  "principalId",
+  "displayId",
+  "clientName",
+  "clientVersion",
+  "conversationId",
+  "project",
+  "firstCallAt",
+  "lastCallAt",
+  "lastSearchAt",
+  "lastPublishAt",
+  "refusedCalls",
+  "calls",
+  "briefedAt",
+  "noteText",
+  "noteFinal",
+  "noteAt",
+  "digestedAt",
+  "modelInputTokens",
+  "modelOutputTokens",
+] as const;
+
+function toSession(row: Pick<Selectable<Database["sessions"]>, (typeof COLUMNS)[number]>): Session {
+  const { noteText, noteFinal, noteAt, modelInputTokens, modelOutputTokens, ...session } = row;
   const noted = noteText !== null && noteFinal !== null && noteAt !== null;
-  return { ...session, note: noted ? { text: noteText, final: noteFinal, at: noteAt } : null };
+  return {
+    ...session,
+    note: noted ? { text: noteText, final: noteFinal, at: noteAt } : null,
+    modelTokens: { input: modelInputTokens, output: modelOutputTokens },
+  };
 }
 
 export class SqlSessions extends Repo implements SessionsRepo {
@@ -46,7 +82,7 @@ export class SqlSessions extends Repo implements SessionsRepo {
   private of(orgId: string, principalId: string) {
     return this.db
       .selectFrom("sessions")
-      .selectAll()
+      .select(COLUMNS)
       .where("orgId", "=", orgId)
       .where("principalId", "=", principalId);
   }
@@ -60,6 +96,8 @@ export class SqlSessions extends Repo implements SessionsRepo {
     );
   }
 
+  // What a model's reading of a session came to is written by a reading alone: a session opens
+  // unread, at no cost.
   async open(session: Session): Promise<void> {
     await this.db
       .insertInto("sessions")
@@ -194,10 +232,158 @@ export class SqlSessions extends Repo implements SessionsRepo {
     if (wanted.length === 0) return [];
     const rows = await this.db
       .selectFrom("sessions")
-      .selectAll()
+      .select(COLUMNS)
       .where("orgId", "=", orgId)
       .where("id", "in", wanted)
       .execute();
     return rows.map(toSession);
+  }
+
+  async addTurn(orgId: string, sessionId: string, turn: Turn): Promise<void> {
+    const { id, request, answer, at } = turn;
+    await this.keepTurn(this.db, { orgId, sessionId, id, request, answer, at });
+  }
+
+  /** One statement: the turn is kept only while the session holds fewer than `MOST_TURNS_KEPT`. */
+  private async keepTurn(
+    db: Db,
+    turn: {
+      orgId: string;
+      sessionId: string;
+      id: string;
+      request: string | null;
+      answer: string | null;
+      at: Date;
+    },
+  ): Promise<void> {
+    const { orgId, sessionId, id, request, answer, at } = turn;
+    await sql`
+      insert into session_turns (org_id, session_id, id, request, answer, at)
+      select ${orgId}, ${sessionId}, ${id}, ${request}, ${answer}, ${at}
+      where (select count(*) from session_turns
+             where org_id = ${orgId} and session_id = ${sessionId}) < ${MOST_TURNS_KEPT}`.execute(
+      db,
+    );
+  }
+
+  async answerTurn(
+    orgId: string,
+    sessionId: string,
+    answered: { id: string; answer: string; at: Date },
+  ): Promise<void> {
+    const { id, answer, at } = answered;
+    await this.db.transaction().execute(async (trx) => {
+      const open = await sql<{ id: string }>`
+        update session_turns set answer = ${answer}, at = ${at}
+        where org_id = ${orgId} and session_id = ${sessionId} and id = (
+          select id from session_turns
+          where org_id = ${orgId} and session_id = ${sessionId} and answer is null
+          order by at desc, id desc limit 1)
+        returning id`.execute(trx);
+      if (open.rows.length > 0) return;
+      await this.keepTurn(trx, { orgId, sessionId, id, request: null, answer, at });
+    });
+  }
+
+  /** A deletion of one session's turns. */
+  private deleteTurns(db: Db, orgId: string, sessionId: string) {
+    return db
+      .deleteFrom("sessionTurns")
+      .where("orgId", "=", orgId)
+      .where("sessionId", "=", sessionId);
+  }
+
+  async turns(orgId: string, sessionId: string): Promise<Turn[]> {
+    return this.db
+      .selectFrom("sessionTurns")
+      .select(["id", "request", "answer", "at"])
+      .where("orgId", "=", orgId)
+      .where("sessionId", "=", sessionId)
+      .orderBy("at")
+      .orderBy("id")
+      .execute();
+  }
+
+  async dropTurns(orgId: string, sessionId: string): Promise<void> {
+    await this.deleteTurns(this.db, orgId, sessionId).execute();
+  }
+
+  async digested(
+    orgId: string,
+    id: string,
+    read: { at: Date; turns: readonly string[]; picks?: readonly string[] },
+  ): Promise<void> {
+    const turns = uuidsOf(read.turns);
+    const picks = read.picks === undefined ? {} : { briefPicks: JSON.stringify(read.picks) };
+    await this.db.transaction().execute(async (trx) => {
+      if (turns.length > 0) {
+        await this.deleteTurns(trx, orgId, id).where("id", "in", turns).execute();
+      }
+      await trx
+        .updateTable("sessions")
+        .set({ digestedAt: read.at, ...picks })
+        .where("orgId", "=", orgId)
+        .where("id", "=", id)
+        .execute();
+    });
+  }
+
+  async spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void> {
+    await this.db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable("sessions")
+        .where("orgId", "=", orgId)
+        .where("id", "=", id)
+        .set((eb) => ({
+          modelInputTokens: eb("modelInputTokens", "+", tokens.input),
+          modelOutputTokens: eb("modelOutputTokens", "+", tokens.output),
+        }))
+        .execute();
+      await trx
+        .insertInto("modelSpend")
+        .values({ orgId, at, tokens: tokens.input + tokens.output })
+        .execute();
+      // A week is more than any budget looks back over.
+      await trx
+        .deleteFrom("modelSpend")
+        .where("at", "<", new Date(at.getTime() - 7 * 24 * 3_600_000))
+        .execute();
+    });
+  }
+
+  async spentSince(since: Date): Promise<number> {
+    const { total } = await this.db
+      .selectFrom("modelSpend")
+      .select(sql<number>`coalesce(sum(tokens), 0)::int`.as("total"))
+      .where("at", ">", since)
+      .executeTakeFirstOrThrow();
+    return Number(total);
+  }
+
+  async runningTurn(orgId: string, sessionId: string, since: Date): Promise<boolean> {
+    const open = await this.db
+      .selectFrom("sessionTurns")
+      .select("id")
+      .where("orgId", "=", orgId)
+      .where("sessionId", "=", sessionId)
+      .where("answer", "is", null)
+      .where("at", ">", since)
+      .limit(1)
+      .executeTakeFirst();
+    return open !== undefined;
+  }
+
+  async picks(orgId: string, principalId: string, project: string): Promise<string[]> {
+    const newest = await this.db
+      .selectFrom("sessions")
+      .select("briefPicks")
+      .where("orgId", "=", orgId)
+      .where("principalId", "=", principalId)
+      .where("project", "=", project)
+      .where("briefPicks", "is not", null)
+      .orderBy("digestedAt", "desc")
+      .orderBy("id", "desc")
+      .executeTakeFirst();
+    return newest?.briefPicks ?? [];
   }
 }

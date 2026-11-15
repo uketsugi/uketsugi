@@ -1,7 +1,7 @@
 import type { Caller, Store } from "@uketsugi/core";
 import { expect, test } from "vitest";
 import type { FakeClock, FakeIdGen } from "../fakes.ts";
-import { PROJECT } from "./support.ts";
+import { PROJECT, UNREAD } from "./support.ts";
 
 /** What the Store suite lends its session cases: the store under test, a person, and its clock and ids. */
 export interface SessionFixture {
@@ -41,6 +41,7 @@ export function sessionCases(fixture: SessionFixture): void {
       calls: 1,
       briefedAt: null,
       note: null,
+      ...UNREAD,
     };
     const ref = { kind: "repository" as const, key: PROJECT };
     const first = await projects.ensure(person.orgId, ref, clock.now());

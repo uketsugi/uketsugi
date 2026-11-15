@@ -146,6 +146,11 @@ export interface Fact {
   readonly embedded: boolean;
   /** When the fact's text was taken out; null unless it was redacted. Who did it is in the log. */
   readonly redactedAt: Date | null;
+  /**
+   * The session a model wrote the fact from, when one did: its author is that session's person,
+   * who never saw it written. Null for a fact an agent published.
+   */
+  readonly digestSession: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -252,24 +257,35 @@ export interface StoredEvent extends EventDraft {
   readonly at: Date;
 }
 
-export const JOB_KINDS = ["embed", "consolidate"] as const;
+export const JOB_KINDS = ["embed", "consolidate", "digest"] as const;
 
-/** The follow-up jobs a unit may leave. Only these two run in this build. */
+/**
+ * The jobs a worker runs. `embed` and `consolidate` are about a fact and are left by the unit
+ * that wrote it. `digest` is about a session: a model's reading of it once it is over, on a
+ * server that has a model.
+ */
 export type JobKind = (typeof JOB_KINDS)[number];
 
-/** A follow-up job as a unit enqueues it. */
+/** A follow-up job as a unit enqueues it, about a fact of the unit's audience. */
 export interface JobDraft {
   readonly id: string;
-  readonly kind: JobKind;
+  readonly kind: Exclude<JobKind, "digest">;
   /** The fact the job is about. */
   readonly subject: string;
   readonly runAfter: Date;
 }
 
 /** A job a worker has claimed. */
-export interface ClaimedJob extends JobDraft {
+export interface ClaimedJob {
   readonly orgId: string;
-  readonly audienceId: string;
+  readonly id: string;
+  readonly kind: JobKind;
+  /** The fact the job is about, or for `digest` the session. */
+  readonly subject: string;
+  /** The audience of the job's fact; null for a job about a session, which has none. */
+  readonly audienceId: string | null;
+  /** When it was due, as the claim found it: a job armed again while it runs has a later time. */
+  readonly runAfter: Date;
   /** How many times it has been claimed, this claim included. */
   readonly attempts: number;
 }
@@ -302,6 +318,16 @@ export interface Session extends SessionKey {
   readonly briefedAt: Date | null;
   /** The session's one note, if it has left one: a later note replaces an earlier. */
   readonly note: SessionNote | null;
+  /** When a model last finished reading what the session left; null until one has. */
+  readonly digestedAt: Date | null;
+  /** The tokens every model call about the session took in and gave out, added up. */
+  readonly modelTokens: ModelTokens;
+}
+
+/** What model calls cost, in the provider's own count of tokens. */
+export interface ModelTokens {
+  readonly input: number;
+  readonly output: number;
 }
 
 /**
@@ -331,8 +357,23 @@ export interface ActivityRow {
   readonly refused: number;
 }
 
-/** Who runs a job's model step. Only `rules` exists in this build: nobody runs a prompt. */
-export type RunnerKind = "rules" | "endpoint" | "hosted";
+/**
+ * Who ran the step a job's act came from: a rule, a model at the endpoint the server's operator
+ * configured, or a hosted edition's own model.
+ */
+export type RunnerKind = "rules" | "endpoint";
+
+/**
+ * One turn of a session as its harness's hook sent it: what the person asked and the agent's final
+ * answer, each scanned like any write. Only the model step reads a turn, once, and it is deleted
+ * when it has been read.
+ */
+export interface Turn {
+  readonly id: string;
+  readonly request: string | null;
+  readonly answer: string | null;
+  readonly at: Date;
+}
 
 /**
  * A task's lease. It is held by its token, never by a session: `claim_task` returns the token

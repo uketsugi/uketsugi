@@ -6,13 +6,16 @@
 import { Migrator, type Migration } from "kysely/migration";
 import type { Db } from "./codec.ts";
 import { INIT_0001 } from "./migrations/0001_init.ts";
+import { MODEL_STEP_0002 } from "./migrations/0002_model_step.ts";
 
 /**
- * Until the first release the one migration is edited in place, and its name changes with it: a
- * store made by an earlier edit is then refused by name, in words, instead of failing later on a
- * column it lacks.
+ * Every migration, by the name it is recorded under. `0001_init.3` is the schema 0.1.0 released:
+ * it is never edited again, and what a later version needs is a migration after it.
  */
-export const MIGRATIONS: Record<string, Migration> = { "0001_init.3": INIT_0001 };
+export const MIGRATIONS: Record<string, Migration> = {
+  "0001_init.3": INIT_0001,
+  "0002_model_step": MODEL_STEP_0002,
+};
 
 /** The migrator over a set of migrations: this package's, unless a test of an upgrade gives fewer. */
 function migratorOf(db: Db, migrations: Record<string, Migration>): Migrator {

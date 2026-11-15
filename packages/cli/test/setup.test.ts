@@ -114,6 +114,23 @@ describe("ukt setup on a machine with a service manager", () => {
     );
   });
 
+  test("a language model told to set-up is kept where the service finds it, which restarts a service in place", async () => {
+    const { dataDir, machine, env, io, options } = await account(MANAGED);
+    await setup(io(), { ...options, yes: true }, env);
+    const before = machine.changes.length;
+
+    const plan = await setup(io(), { ...options, plan: true, llm: "google/gemini-3.8-flash" }, env);
+    expect(plan.lines.join("\n")).toContain("is sent what your sessions' agents said");
+    expect(machine.changes).toHaveLength(before);
+
+    const told = { ...options, yes: true, llm: "google/gemini-3.8-flash" };
+    await setup(io(), told, { ...env, UKT_LLM_KEY: "sk-held" });
+    // The service was running; it is started again to read the model, from the file and not the unit.
+    expect(machine.changes.slice(before)).toContain("systemctl --user restart uketsugi.service");
+    expect(await readFile(join(dataDir, "llm.json"), "utf8")).toContain("sk-held");
+    expect(await readFile(machine.unitFile, "utf8")).not.toContain("sk-held");
+  });
+
   test("a person at the terminal is shown the plan and asked once", async () => {
     const { machine, env, io, options } = await account(MANAGED);
     const asked = io({ interactive: true, answer: true });

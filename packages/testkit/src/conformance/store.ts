@@ -11,6 +11,7 @@ import {
   person,
   PROJECT,
   targetOf,
+  UNREAD,
   type StoreHarness,
 } from "./support.ts";
 
@@ -80,7 +81,8 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
       expect(events.map((entry) => [entry.seq, entry.subject])).toEqual([[1, id]]);
       const jobs = await store.jobs.claim(clock.now(), 60_000, 10);
       expect(jobs.map((job) => [job.kind, job.subject, job.attempts])).toEqual([["embed", id, 1]]);
-      await store.jobs.complete(jobs[0] ?? { orgId: "", id: "" });
+      const [job] = jobs;
+      if (job !== undefined) await store.jobs.complete(job);
       expect(await store.jobs.counts()).toEqual({ waiting: 0, dead: 0 });
     });
 
@@ -323,6 +325,7 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
         briefedAt: null,
         clientVersion: null,
         note: null,
+        ...UNREAD,
       };
       for (const clientName of ["claude-code", "Zed"]) {
         const session = { ...who, clientName, project: here, id: ids.uuid(), displayId: "s-1" };

@@ -1,5 +1,5 @@
-/** Deterministic stand-ins for the ports that read the world: time, randomness and the embedding model. */
-import type { Clock, Embedder, IdGen } from "@uketsugi/core";
+/** Deterministic stand-ins for the ports that read the world: time, randomness, the embedding model and a language model. */
+import type { Chore, Clock, Embedder, IdGen, ModelAnswer, ModelRunner } from "@uketsugi/core";
 
 /** A clock that moves only when a test moves it. */
 export class FakeClock implements Clock {
@@ -97,5 +97,40 @@ export class FakeEmbedder implements Embedder {
     }
     const norm = Math.hypot(...vector);
     return norm === 0 ? vector : vector.map((value) => value / norm);
+  }
+}
+
+/**
+ * A model runner with no model: a test says what each chore is answered with, and reads back what
+ * was asked. Every character counts as one token in and every answer as ten out, so a test can
+ * tell what a reading cost. An answer that is an `Error` is thrown, as a provider's failure is.
+ * It serves everyone unless a test says whom.
+ */
+export class FakeRunner implements ModelRunner {
+  readonly kind = "endpoint";
+  readonly name = "fake · scripted";
+  /** What the server may spend in a day; a test lowers it to see readings wait. */
+  dailyTokens = Number.MAX_SAFE_INTEGER;
+  /** Every chore asked, in order. */
+  readonly asked: Chore[] = [];
+  readonly serves: ModelRunner["serves"];
+  private readonly answer: (chore: Chore) => unknown;
+
+  constructor(answer: (chore: Chore) => unknown, serves: ModelRunner["serves"] = () => true) {
+    this.answer = answer;
+    this.serves = serves;
+  }
+
+  /** The chores of one step, for example `digest.extract`. */
+  askedFor(step: string): Chore[] {
+    return this.asked.filter((chore) => chore.step === step);
+  }
+
+  run(chore: Chore): Promise<ModelAnswer> {
+    this.asked.push(chore);
+    const output = this.answer(chore);
+    if (output instanceof Error) return Promise.reject(output);
+    const inputTokens = chore.instructions.length + chore.material.length;
+    return Promise.resolve({ output, inputTokens, outputTokens: 10 });
   }
 }

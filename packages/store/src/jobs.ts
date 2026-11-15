@@ -1,4 +1,4 @@
-import type { ClaimedJob, JobsRepo } from "@uketsugi/core";
+import { isUuid, type ClaimedJob, type JobsRepo } from "@uketsugi/core";
 import { sql } from "kysely";
 import { live, Repo } from "./codec.ts";
 
@@ -19,9 +19,18 @@ export class SqlJobs extends Repo implements JobsRepo {
     );
   }
 
-  async complete(job: Pick<ClaimedJob, "orgId" | "id">): Promise<void> {
-    await this.db
+  async complete(job: Pick<ClaimedJob, "orgId" | "id" | "runAfter">): Promise<void> {
+    const retired = await this.db
       .deleteFrom("outbox")
+      .where("orgId", "=", job.orgId)
+      .where("id", "=", job.id)
+      .where("runAfter", "=", job.runAfter)
+      .executeTakeFirst();
+    if (retired.numDeletedRows > 0n) return;
+    // Armed again while it ran: it keeps its new time and is free to be claimed then.
+    await this.db
+      .updateTable("outbox")
+      .set({ lockedUntil: null })
       .where("orgId", "=", job.orgId)
       .where("id", "=", job.id)
       .execute();
@@ -62,5 +71,38 @@ export class SqlJobs extends Repo implements JobsRepo {
           where o.org_id = f.org_id and o.subject = f.id and o.kind = 'embed')
       on conflict do nothing`.execute(this.db);
     return Number(left.numAffectedRows ?? 0n);
+  }
+
+  async armDigest(orgId: string, sessionId: string, dueAt: Date): Promise<void> {
+    // A session has one such job at a time, by its own id; a claim that holds it keeps its lock.
+    await this.db
+      .insertInto("outbox")
+      .values({
+        orgId,
+        id: sessionId,
+        audienceId: null,
+        kind: "digest",
+        subject: sessionId,
+        runAfter: dueAt,
+      })
+      .onConflict((conflict) =>
+        conflict
+          .columns(["orgId", "id"])
+          .doUpdateSet({ runAfter: dueAt, attempts: 0, dead: false }),
+      )
+      .execute();
+  }
+
+  async hastenDigest(orgId: string, sessionId: string, now: Date): Promise<void> {
+    if (!isUuid(sessionId)) return;
+    await this.db
+      .updateTable("outbox")
+      .set({ runAfter: now })
+      .where("orgId", "=", orgId)
+      .where("id", "=", sessionId)
+      .where("kind", "=", "digest")
+      .where("runAfter", ">", now)
+      .where("dead", "=", false)
+      .execute();
   }
 }

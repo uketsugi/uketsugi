@@ -9,8 +9,14 @@
  *   front of the agent before the first prompt, and again after a compaction or a resume.
  * - `PreToolUse`, before each call of one of the server's tools: which conversation the call
  *   belongs to, by the call's own id (`tool-uses.ts`).
- * - `Stop`, as each turn ends: the agent's last message, as the session's note.
+ * - `UserPromptSubmit`, as a turn begins: what the person asked. The script sends this event only
+ *   where the person turned on sending each turn, and says so in a header with everything it sends.
+ * - `Stop`, as each turn ends: the agent's last message, as the session's note, and, where each
+ *   turn is sent, as the turn's answer.
  * - `SessionEnd`: that note is the session's last word.
+ *
+ * A turn is kept only for a language model that reads the person's sessions (`keepTurn`): on a
+ * server with none, a prompt that arrives is dropped where it lands.
  *
  * The project is this session's own word on where it is: the origin remote of the directory it
  * started in, which the script reads and sends in a header, since it cannot write into JSON.
@@ -23,6 +29,23 @@ import type { ToolUses } from "./tool-uses.ts";
 
 /** The header the script names the session's project in: the directory's origin remote. */
 export const ORIGIN_HEADER = "x-uketsugi-origin";
+/**
+ * The header the script says in that its person turned on sending each turn: the plugin's
+ * `capture` option as Claude Code hands it to a hook.
+ */
+export const CAPTURE_HEADER = "x-uketsugi-capture";
+
+/** Whether a plugin option that is a switch reads as on, however the harness spells that. */
+export function isOn(option: string | undefined): boolean {
+  return /^(?:true|1|yes|on)$/i.test(option?.trim() ?? "");
+}
+
+/** What the script sent beside the hook's own input. */
+export interface HookHeaders {
+  readonly origin: string | undefined;
+  /** Whether the person turned on sending each turn's request and final answer. */
+  readonly capture: boolean;
+}
 
 export interface HookDeps {
   readonly app: App;
@@ -36,7 +59,7 @@ export async function answerClaudeCode(
   { app, toolUses, onError }: HookDeps,
   caller: Caller,
   hook: ClaudeCodeHook,
-  origin: string | undefined,
+  { origin, capture }: HookHeaders,
 ): Promise<ClaudeCodeHookOutput> {
   const conversation = { client: CLAUDE_CODE, id: hook.session_id, project: origin };
   switch (hook.hook_event_name) {
@@ -57,9 +80,16 @@ export async function answerClaudeCode(
         toolUses.expect(caller.principalId, hook.tool_use_id, word);
       }
       return {};
+    case "UserPromptSubmit":
+      if (capture && hook.prompt !== undefined) {
+        await app.keepTurn(caller, conversation, { request: hook.prompt });
+      }
+      return {};
     case "Stop":
       if (hook.last_assistant_message !== undefined) {
-        await app.noteSession(caller, conversation, hook.last_assistant_message);
+        const answer = hook.last_assistant_message;
+        await app.noteSession(caller, conversation, answer);
+        if (capture) await app.keepTurn(caller, conversation, { answer });
       }
       return {};
     case "SessionEnd":

@@ -1,5 +1,5 @@
 {
-  "description": "Tells the uketsugi server when a session starts, which session each of its calls belongs to, and where each turn ended. Only the start is answered with anything: the session's brief.",
+  "description": "Tells the uketsugi server when a session starts, which session each of its calls belongs to, and where each turn ended. Only the start is answered with anything: the session's brief. Where you turned on sending each turn, it is also told what you asked.",
   "hooks": {
     "SessionStart": [
       {
@@ -21,6 +21,18 @@
             "type": "command",
             "command": "sh",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/to-server.sh"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/to-server.sh", "UserPromptSubmit"],
             "timeout": 5
           }
         ]

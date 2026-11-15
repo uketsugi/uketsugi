@@ -322,9 +322,14 @@ describe("ukt doctor with no server running", () => {
       { check: "server", state: "fail", detail: "not running", fix: "ukt serve" },
       { check: "store", state: "ok", detail: expect.stringContaining("not checked") as string },
       { check: "model", state: "warn", detail: expect.any(String) as string, fix: "ukt setup" },
+      {
+        check: "language model",
+        state: "ok",
+        detail: "not checked: it is asked of the running server",
+      },
     ]);
     expect(report.failure).toMatchObject({
-      what: "3 of 6 checks failed.",
+      what: "3 of 7 checks failed.",
       meaning: "Until they are fixed, an agent may not reach its memory on this machine.",
     });
     expect(report.lines).toContain("FAIL  server          not running");

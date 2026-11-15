@@ -33,6 +33,7 @@ import type {
   Flag,
   FlagKind,
   JobDraft,
+  ModelTokens,
   Person,
   PersonProject,
   Project,
@@ -49,6 +50,7 @@ import type {
   TaskNote,
   TaskState,
   Treatment,
+  Turn,
 } from "./domain.ts";
 import type { SearchRepo } from "./search-port.ts";
 
@@ -68,6 +70,8 @@ export interface NewFact {
   readonly content: FactContent;
   /** The fact's vector when the call made one; null leaves it to the embed job. */
   readonly vector: Float32Array | null;
+  /** The session a model wrote the fact from. Left out for a fact an agent published. */
+  readonly digestSession?: string;
 }
 
 /**
@@ -111,7 +115,11 @@ export interface UnitFacts {
   findByClaimHash(author: string, project: string, claimHash: string): Promise<Fact | null>;
   /** Inserts the fact as `unconfirmed`, with its search columns, its identifiers and the facts it cites. */
   insert(fact: NewFact): Promise<void>;
-  /** The author's correction: replaces text, citations, hashes, identifiers and cited facts. Throws when the unit's audience holds no such fact. */
+  /**
+   * The author's correction: replaces text, citations, hashes, identifiers and cited facts. A fact
+   * a model wrote is its author's own words from then on. Throws when the unit's audience holds no
+   * such fact.
+   */
   rewrite(id: string, content: FactContent, vector: VectorChange): Promise<void>;
   /**
    * Replaces the fact's citations, the facts they name and its content hash, and clears its
@@ -319,14 +327,26 @@ export interface ReviewRepo {
    * publishing, corrections and checks. A record that moved has entries in two logs.
    */
   history(scope: ReadScope, subject: string, limit: number): Promise<StoredEvent[]>;
+  /**
+   * The ids of the facts published in one session, oldest first, as the logs the reader may see
+   * record it: by an agent's call in that session, or by a model that read it.
+   */
+  publishedIn(scope: ReadScope, sessionId: string): Promise<string[]>;
 }
 
-/** The outbox as a worker sees it. Claiming work crosses organizations by nature. */
+/**
+ * The outbox as a worker sees it. Claiming work crosses organizations by nature. A unit leaves the
+ * jobs about its facts (`UnitWrites.enqueue`); the job about a session is armed here, since a
+ * session is written outside any unit.
+ */
 export interface JobsRepo {
   /** Claims up to `limit` due jobs until `now + leaseMs`, oldest first. No other claim takes them meanwhile. */
   claim(now: Date, leaseMs: number, limit: number): Promise<ClaimedJob[]>;
-  /** Retires a finished job. */
-  complete(job: Pick<ClaimedJob, "orgId" | "id">): Promise<void>;
+  /**
+   * Retires a finished job. One that was armed again while it ran (its time is no longer the one
+   * the claim found) stays, free to be claimed at its new time.
+   */
+  complete(job: Pick<ClaimedJob, "orgId" | "id" | "runAfter">): Promise<void>;
   /** Releases a failed job to run again at `retryAt`, or marks it dead when `retryAt` is null. */
   fail(job: Pick<ClaimedJob, "orgId" | "id">, retryAt: Date | null): Promise<void>;
   /** How many jobs wait and how many are dead, for the health route. */
@@ -337,6 +357,14 @@ export interface JobsRepo {
    * Returns how many it left.
    */
   embedMissing(now: Date): Promise<number>;
+  /**
+   * Leaves the one `digest` job of a session, due at `dueAt`, or moves it there when the session
+   * has one already, sooner or later: a session's reading waits for the last thing the session
+   * leaves. The job takes its session's id. A job that had failed starts its attempts from none.
+   */
+  armDigest(orgId: string, sessionId: string, dueAt: Date): Promise<void>;
+  /** Makes a session's `digest` job due at `now` if it waits for a later time; none is left where none waits. */
+  hastenDigest(orgId: string, sessionId: string, now: Date): Promise<void>;
 }
 
 /** Inferred sessions, each with its note. A session write takes no audience lock and writes no event. */
@@ -392,6 +420,46 @@ export interface SessionsRepo {
   recent(orgId: string, principalId: string, limit: number): Promise<Session[]>;
   /** The sessions found among `ids`: where a task's lease, note or step reads its client's name. */
   byIds(orgId: string, ids: readonly string[]): Promise<Session[]>;
+  /** Keeps a turn of a session until the model step has read it, or drops it where the session already holds `MOST_TURNS_KEPT`. */
+  addTurn(orgId: string, sessionId: string, turn: Turn): Promise<void>;
+  /**
+   * Keeps the agent's final answer of a turn: on the session's newest turn that has a request and
+   * no answer yet, or, where there is none, as a turn of its own with `id`. A turn's hook sends
+   * the request when the turn begins and the answer when it ends.
+   */
+  answerTurn(
+    orgId: string,
+    sessionId: string,
+    answered: { id: string; answer: string; at: Date },
+  ): Promise<void>;
+  /** The session's turns that wait to be read, oldest first. */
+  turns(orgId: string, sessionId: string): Promise<Turn[]>;
+  /** Deletes every turn the session has waiting: what a reading that is given up could not read. */
+  dropTurns(orgId: string, sessionId: string): Promise<void>;
+  /**
+   * Records that a model finished reading the session, in one step: the turns it read are
+   * deleted, the session is stamped as read at `at`, and the facts it chose for the person's next
+   * brief in the project replace an earlier choice when it made one.
+   */
+  digested(
+    orgId: string,
+    id: string,
+    read: { at: Date; turns: readonly string[]; picks?: readonly string[] },
+  ): Promise<void>;
+  /** Adds what model calls about the session cost, made at `at`, to what it has cost so far and to the server's account. */
+  spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void>;
+  /** What model calls have cost, input and output together, since `since`, across everyone the server serves. */
+  spentSince(since: Date): Promise<number>;
+  /**
+   * Whether the session has a turn that was asked after `since` and has no answer yet: the agent
+   * is working on it, and what it will say is not there to be read.
+   */
+  runningTurn(orgId: string, sessionId: string, since: Date): Promise<boolean>;
+  /**
+   * The facts chosen for a person's next brief in a project, in order: the choice of the reading
+   * that finished last among their sessions there. None when no reading has chosen.
+   */
+  picks(orgId: string, principalId: string, project: string): Promise<string[]>;
 }
 
 /** An organization's projects, and each person's choice for the ones they work in. */

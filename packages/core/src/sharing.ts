@@ -132,11 +132,21 @@ export async function holderOfTask(
   return shared === null || theirs === null ? null : { writes: shared, task: theirs };
 }
 
-/** What decides whether others can check a fact: its citations. */
-export type Cited = { readonly citations: readonly ClassedCitation[] };
+/**
+ * What decides whether others are shown a fact: its citations, and whether a model wrote it and
+ * nobody has checked it. A stored fact is one, and so is the content of a fact about to be stored.
+ */
+export type Cited = {
+  readonly citations: readonly ClassedCitation[];
+  /** The session a model wrote it from, where a model did. */
+  readonly digestSession?: string | null;
+  readonly status?: Fact["status"];
+};
 
 /**
  * Why a fact is kept from other people in a project its person shares:
+ * - `model_unchecked`: a model wrote it from a session, and neither its person nor an agent of
+ *   theirs has checked it: a model's word reaches nobody else until someone has;
  * - `no_source`: none of its citations is one anyone can open;
  * - `cites_private`: it cites a fact of its author's that others cannot see, so they could not
  *   follow it;
@@ -147,6 +157,18 @@ export type HeldBack = Exclude<PrivateBecause, "project">;
 
 function hasSource(fact: Cited): boolean {
   return fact.citations.some((entry) => entry.class === "checkable");
+}
+
+/**
+ * Whether only a model has said this fact, and nobody has checked it: it was written by a model,
+ * is unconfirmed, and nothing merged into it was said by a person's agent. A model cannot check
+ * its own work, and the check that the record names its source ties a claim to a file, not to
+ * what the claim says. The person's check (`update_fact` with `confirm`) releases it.
+ */
+function modelAlone(fact: Cited, behind: readonly Fact[]): boolean {
+  const byModel = (one: Pick<Cited, "digestSession">): boolean =>
+    (one.digestSession ?? null) !== null;
+  return byModel(fact) && fact.status !== "confirmed" && behind.every(byModel);
 }
 
 /**
@@ -165,6 +187,7 @@ export async function heldBack(
   behind: readonly Fact[],
   ownAlone: (ids: readonly string[]) => Promise<readonly Fact[]>,
 ): Promise<HeldBack | null> {
+  if (modelAlone(fact, behind)) return "model_unchecked";
   if (!hasSource(fact)) return "no_source";
   const within = new Set(behind.map((member) => member.id));
   const cited = citedBy(fact.citations).filter((id) => !within.has(id));

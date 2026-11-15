@@ -28,6 +28,7 @@
  * | GET    | `/api/host-proof`         | nobody, loopback   | `HostProofParams`      | `HostProof`            |
  * | POST   | `/api/sign-in-codes`      | host, loopback     | none                   | `SignInCode`           |
  * | GET    | `/api/backup`             | host, loopback     | none                   | `application/gzip`     |
+ * | POST   | `/api/model-check`        | host, loopback     | none                   | `ModelCheck`           |
  * | GET    | `/api/people`             | host, loopback     | none                   | `PeopleList`           |
  * | POST   | `/api/people`             | host, loopback     | `InviteRequest`        | `Invitation`           |
  * | POST   | `/api/tokens/:id/revoke`  | host, loopback     | none                   | `TokenRevoked`         |

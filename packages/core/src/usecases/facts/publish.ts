@@ -1,9 +1,10 @@
 import type { PublishFactInput, PublishFactResult } from "@uketsugi/contracts";
-import { eventOf, scopeOf, type CallContext, type Outcome } from "../../context.ts";
-import type { Fact, FactContent } from "../../domain.ts";
+import { eventBy, personActor, scopeOf, type CallContext, type Outcome } from "../../context.ts";
+import type { Actor, Caller, Fact, FactContent, ProjectRef } from "../../domain.ts";
 import { citationView, parseCitations } from "../../facts/citations.ts";
 import { nearFacts } from "../../facts/duplicates.ts";
 import { forbidden, invalidInput } from "../../failure.ts";
+import { armDigest } from "../../digest/arm.ts";
 import type { CorePorts } from "../../ports.ts";
 import { scanFields } from "../../scan/scanner.ts";
 import { asPerson, seenBy, sharedIfSharing, type Place } from "../../sharing.ts";
@@ -23,9 +24,12 @@ type PublishOutcome = Outcome<PublishFactResult>;
 /** The most near-identical facts a result names. */
 const SIMILAR_LIMIT = 3;
 
+/** What a new fact is written from, as a call or a model's answer gives it. */
+export type FactWords = Pick<PublishFactInput, "claim" | "citations" | "detail" | "question">;
+
 /** A write's text and citations after the scan: nothing unscanned goes further than this. */
-function scanned(ctx: CallContext, input: PublishFactInput) {
-  const parsed = scanCitations(parseCitations(input.citations, ctx.project));
+export function scanned(project: ProjectRef, input: FactWords) {
+  const parsed = scanCitations(parseCitations(input.citations, project));
   const text = scanFields({ claim: input.claim, detail: input.detail, question: input.question });
   const { claim, detail, question } = text.fields;
   if (claim === null) {
@@ -82,25 +86,40 @@ async function correctOwn(
 }
 
 /** A new fact as its unit stores it: what was prepared before the unit opened. */
-interface Draft {
+export interface Draft {
   readonly id: string;
   readonly content: FactContent;
   readonly vector: Float32Array | null;
 }
 
 /**
- * Inside the caller's unit: the caller's same claim already stored, in whichever audience holds
- * it, or the new fact, written where the person's choice and its citations say at that moment.
+ * Whose fact a write stores, and who performs it. An agent's publish is its person's own act in
+ * the call's session. A model writes for the person of the session it read: the fact is theirs,
+ * the act is the job's, and the fact names that session.
+ */
+export interface Writer {
+  readonly caller: Caller;
+  readonly project: string;
+  readonly actor: Actor;
+  /** The session the write belongs to, as its event records it. */
+  readonly session: string;
+  /** Set when a model wrote the fact from that session. */
+  readonly digested?: boolean;
+}
+
+/**
+ * Inside the author's unit: their same claim already stored, in whichever audience holds it, or
+ * the new fact, written where the person's choice and its citations say at that moment.
  */
 async function store(
   ports: CorePorts,
-  ctx: CallContext,
+  writer: Writer,
   place: Place,
   draft: Draft,
 ): Promise<{ fact: Fact; created: boolean }> {
   const { id, content, vector } = draft;
-  const author = ctx.caller.principalId;
-  const project = ctx.project.key;
+  const { project, session } = writer;
+  const author = writer.caller.principalId;
   await holdCited(place, content.citedFacts);
   const shared = await sharedIfSharing(place);
   const existing =
@@ -108,14 +127,34 @@ async function store(
     (await shared?.facts.findByClaimHash(author, project, content.claimHash)) ??
     null;
   if (existing !== null) return { fact: existing, created: false };
-  const writes = await landingOf(place, project, content);
-  await writes.facts.insert({ id, project, author, content, vector });
+  const from = writer.digested === true ? { digestSession: session } : {};
+  const writes = await landingOf(place, project, { ...content, ...from, status: "unconfirmed" });
+  await writes.facts.insert({ id, project, author, content, vector, ...from });
   const hashes = { id, contentHash: content.contentHash, claimHash: content.claimHash };
-  await writes.append(eventOf(ctx, "FactPublished", id, hashes));
+  await writes.append(eventBy(writer, "FactPublished", id, hashes));
   await enqueueFollowUps(ports, writes, id, { embed: vector === null, at: place.at });
   const fact = await writes.facts.get(id);
   if (fact === null) throw new Error("a published fact was not readable inside its own unit");
   return { fact, created: true };
+}
+
+/**
+ * Stores a new fact in one unit on its author's own audience, which decides where it lands and
+ * writes it there with its event and its follow-up jobs. The author's same claim in the same
+ * project is returned as it is already stored, wherever it is.
+ */
+export function writeFact(
+  ports: CorePorts,
+  writer: Writer,
+  draft: Draft,
+): Promise<{ fact: Fact; created: boolean }> {
+  const who = {
+    caller: writer.caller,
+    project: writer.project,
+    at: ports.clock.now(),
+    by: writer.actor,
+  };
+  return asPerson(ports, who, (place) => store(ports, writer, place, draft));
 }
 
 /**
@@ -132,7 +171,7 @@ export async function publishFact(
   ctx: CallContext,
   input: PublishFactInput,
 ): Promise<PublishOutcome> {
-  const draft = scanned(ctx, input);
+  const draft = scanned(ctx.project, input);
   if (input.supersedes !== undefined) return correctOwn(ports, ctx, input.supersedes, draft);
 
   const citations = await classCitations(ports, ctx.caller, draft.citations);
@@ -141,11 +180,15 @@ export async function publishFact(
   const content = await contentOf(text);
   const near = await nearFacts(ports.store, scopeOf(ctx.caller), ctx.project.key, content.claim);
 
-  const who = { caller: ctx.caller, project: ctx.project.key, at: ports.clock.now() };
-  const id = ports.ids.uuid();
-  const stored = await asPerson(ports, who, (place) =>
-    store(ports, ctx, place, { id, content, vector }),
-  );
+  const writer = {
+    caller: ctx.caller,
+    project: ctx.project.key,
+    actor: personActor(ctx.caller),
+    session: ctx.session.id,
+  };
+  const stored = await writeFact(ports, writer, { id: ports.ids.uuid(), content, vector });
+  // What a session published is judged, with a model, against what was held, once it is over.
+  if (stored.created) await armDigest(ports, ctx.session, "quiet");
 
   const fact = stored.fact;
   const similar = near.filter((other) => other.id !== fact.id).slice(0, SIMILAR_LIMIT);

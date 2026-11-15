@@ -1,7 +1,8 @@
 #!/bin/sh
 # Sends what Claude Code hands a hook on to the uketsugi server, with the origin remote of the
-# directory the session started in. The hook that starts a session names its event as the first
-# argument, and for that one alone the server's answer is printed, as the hook's output.
+# directory the session started in. Two hooks name their event as the first argument: the start
+# of a session, whose answer alone is printed, as the hook's output, and a prompt, which is sent
+# only where its person turned that on.
 #
 # Whatever goes wrong (no server, a token it refuses, no curl) nothing is printed and the hook
 # succeeds, so the session goes on as if the plugin were not installed. A server that does not
@@ -12,6 +13,15 @@ if [ -z "$url" ]; then exit 0; fi
 # A server on this machine that you alone use takes no token; any other is sent the one you gave.
 token=${CLAUDE_PLUGIN_OPTION_TOKEN:-}
 authorization=${token:+header = \"Authorization: Bearer $token\"}
+
+# What you ask is sent only where you turned on sending each turn (the plugin's `capture` option).
+# Without the option nothing of a prompt leaves this machine. With it, the server is told so with
+# everything sent, and keeps each turn for its language model alone.
+case ${CLAUDE_PLUGIN_OPTION_CAPTURE:-} in
+  true | True | TRUE | 1 | yes | on) capture=true ;;
+  *) capture= ;;
+esac
+if [ "${1:-}" = UserPromptSubmit ] && [ -z "$capture" ]; then exit 0; fi
 
 # The remote names the project, as `git remote get-url origin` does for the agent. A password
 # written into it stays here, and so does what a header cannot hold.
@@ -26,6 +36,7 @@ answer=$(
 $authorization
 header = "Content-Type: application/json"
 header = "X-Uketsugi-Origin: $origin"
+header = "X-Uketsugi-Capture: $capture"
 EOF
 )
 

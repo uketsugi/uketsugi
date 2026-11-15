@@ -1,8 +1,13 @@
 /** `ukt serve`: the server on this machine's data directory, until it is told to stop. */
 import { TOKEN_ENV } from "@uketsugi/contracts";
-import { RevokedTokenError } from "@uketsugi/core";
+import { RevokedTokenError, type DigestReport } from "@uketsugi/core";
 import { CATALOG, openLocalEmbedder, type LocalEmbedder } from "@uketsugi/embed";
-import { loopbackOfEvery, startLocalServer } from "@uketsugi/server";
+import {
+  DEFAULT_DAILY_TOKENS,
+  loopbackOfEvery,
+  modelName,
+  startLocalServer,
+} from "@uketsugi/server";
 import {
   ensureDataDir,
   ensureHostKey,
@@ -21,6 +26,7 @@ import {
   storePlace,
   type HostStore,
 } from "./host-store.ts";
+import { hostModel, llmOptions, sentLine, type LlmOptions } from "./llm.ts";
 import {
   onStore,
   serving,
@@ -34,9 +40,49 @@ import { servingNow } from "./server-client.ts";
 import { SERVICE_COMMANDS, serves, serviceState, UNIT } from "./service.ts";
 
 /** What `ukt serve` is told. How the server runs is what it is told here, else what `ukt setup` kept. */
-export interface ServeOptions extends Told, OnStore {
+export interface ServeOptions extends Told, OnStore, LlmOptions {
   readonly dataDir?: string;
   readonly json?: boolean;
+}
+
+const count = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/** What the model step did with one session, as the server's terminal shows it: counts and cost, never text. */
+export function digestLine(report: DigestReport): string {
+  const { refused, day } = report;
+  const left = refused.uncited + refused.repeat + refused.invalid;
+  const why = `${refused.uncited} without a source, ${refused.repeat} already held, ${refused.invalid} not valid`;
+  const budget = `${day.used} of ${day.limit} tokens used in the last day`;
+  if (report.waited)
+    return `language model: session ${report.session} waits, the day's budget is reached (${budget})`;
+  return [
+    `language model: read session ${report.session}`,
+    `wrote ${count(report.written, "fact")}`,
+    ...(left === 0 ? [] : [`left out ${left} (${why})`]),
+    ...(report.merged === 0 ? [] : [`merged ${report.merged}`]),
+    ...(report.flagged === 0 ? [] : [`raised ${count(report.flagged, "flag")}`]),
+    ...(report.chose ? ["chose the next brief's facts"] : []),
+    ...(report.unread === 0
+      ? []
+      : [
+          `${count(report.unread, "turn")} dropped unread, the session reached what a session may cost`,
+        ]),
+    `${report.tokens.input} tokens in, ${report.tokens.output} out`,
+    budget,
+  ].join(" · ");
+}
+
+/**
+ * Prints what each reading did. A session that waits for the budget is told once until a reading
+ * goes through again: every waiting session looks again twice an hour, and the line would repeat.
+ */
+function tellDigests(io: Io): (report: DigestReport) => void {
+  let waiting = false;
+  return (report) => {
+    if (report.waited && waiting) return;
+    waiting = report.waited;
+    io.out(digestLine(report));
+  };
 }
 
 /** A started server: what to print, and how to stop it. */
@@ -193,6 +239,7 @@ export async function serve(
   const told = await servingOf(home, options);
   const port = numberOf(told.port, "--port", 0, 65535);
   const taskLeaseMs = leaseMs(told.taskLeaseMinutes);
+  const llm = await hostModel(home, options, env);
   const store = await hostStore(home, options.databaseUrl);
   const other = await servingNow(home);
   if (other !== null) throw await alreadyServed(io, env, home, other.url);
@@ -213,6 +260,7 @@ export async function serve(
     hostKey: await ensureHostKey(home),
     taskLeaseMs,
     requireToken: told.requireToken,
+    ...(llm === null ? {} : { model: llm, onDigest: tellDigests(io) }),
   }).catch(async (error: unknown) => {
     await embedder?.close();
     throw startFailure(error, home, `Port ${port} on ${told.host}`);
@@ -228,6 +276,7 @@ export async function serve(
         mcp_url: `${server.url}/mcp`,
         data_dir: home.dataDir,
         model: embedder === null ? null : CATALOG.embedModel,
+        llm: llm === null ? null : modelName(llm),
       },
       lines: [
         `uketsugi is serving ${server.url}/mcp`,
@@ -236,6 +285,12 @@ export async function serve(
         tokenNeedLine(told, server.beyond),
         tokenLine(home, onFile !== null || server.issuedToken !== null),
         model.line,
+        ...(llm === null
+          ? []
+          : [
+              `language model: ${sentLine(modelName(llm))}`,
+              `language model: at most ${llm.dailyTokens ?? DEFAULT_DAILY_TOKENS} tokens a day; readings wait once it is reached, and \`ukt doctor\` shows what has been used.`,
+            ]),
         "Stop it with Ctrl-C.",
       ],
     },
@@ -256,14 +311,18 @@ function closeOnSignal(serving: Serving): void {
 
 /** Adds `serve` to the program. */
 export function serveVerb({ io, env, verb, run }: Program): void {
-  onStore(serving(verb("serve", "run the server until it is stopped"))).action(
-    async (options: ServeOptions) => {
-      let started: Serving | undefined;
-      await run("serve", options, async () => {
-        started = await serve(io, options, env);
-        return started.report;
-      });
-      if (started !== undefined) closeOnSignal(started);
-    },
-  );
+  const about =
+    "a language model to read sessions once they are over, for this run: its key is read from UKT_LLM_KEY. Left out, the one `ukt setup --llm` remembered is used";
+  llmOptions(
+    onStore(serving(verb("serve", "run the server until it is stopped"))),
+    about,
+    "environment",
+  ).action(async (options: ServeOptions) => {
+    let started: Serving | undefined;
+    await run("serve", options, async () => {
+      started = await serve(io, options, env);
+      return started.report;
+    });
+    if (started !== undefined) closeOnSignal(started);
+  });
 }

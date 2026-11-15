@@ -1,7 +1,7 @@
 import { scopeOf, type Caller, type NewFact, type Session, type Store } from "@uketsugi/core";
 import { expect, test } from "vitest";
 import { fakeUuid } from "../fakes.ts";
-import { event, targetOf } from "./support.ts";
+import { event, targetOf, UNREAD } from "./support.ts";
 
 /** What the Store suite lends its hosting cases: the store under test, two people and its builders. */
 export interface HostingFixture {
@@ -157,6 +157,7 @@ export function hostingCases(fixture: HostingFixture): void {
       calls: 1,
       briefedAt: null,
       note: null,
+      ...UNREAD,
     } satisfies Session;
     await store.sessions.open({ ...session, ...wider });
     expect(await store.sessions.byIds(owner.orgId, [session.id])).toEqual([session]);
@@ -175,6 +176,6 @@ export function hostingCases(fixture: HostingFixture): void {
     });
     const scope = scopeOf(owner);
     expect((await store.facts.get(scope, draft.id))?.id).toBe(draft.id);
-    await store.jobs.complete({ orgId: owner.orgId, id: job.id });
+    await store.jobs.complete({ orgId: owner.orgId, id: job.id, runAfter: at });
   });
 }

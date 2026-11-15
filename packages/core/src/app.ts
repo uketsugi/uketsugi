@@ -16,7 +16,8 @@ import {
   type ToolName,
   type ToolResults,
 } from "@uketsugi/contracts";
-import { sessionBrief, type ComposedBrief } from "./brief.ts";
+import { sessionBrief } from "./brief-sources.ts";
+import type { ComposedBrief } from "./brief.ts";
 import type { CallContext } from "./context.ts";
 import type { Caller, Session } from "./domain.ts";
 import { ToolFailure, internal } from "./failure.ts";
@@ -25,7 +26,13 @@ import { isPersonal, parseProject, projectRefusal, resolveProject } from "./proj
 import { createSessionInference, type ClientInfo, type SessionInference } from "./sessions.ts";
 import { standingOf } from "./sharing.ts";
 import { TOOL_TABLE, type Tool } from "./tools.ts";
-import { endSession, noteSession, type Conversation } from "./usecases/session-note.ts";
+import {
+  endSession,
+  keepTurn,
+  noteSession,
+  type Conversation,
+  type TurnSide,
+} from "./usecases/session-note.ts";
 import { validateInput } from "./validate.ts";
 
 /** A tool call's result, in the shape MCP carries it. */
@@ -72,6 +79,11 @@ export interface App {
    * message holds nothing to keep or there is no session to put it on.
    */
   noteSession(caller: Caller, of: Conversation, message: string): Promise<Session | null>;
+  /**
+   * Keeps one side of a conversation's turn for the language model that reads its person's
+   * sessions. False where no model reads them, or the side holds nothing to keep.
+   */
+  keepTurn(caller: Caller, of: Conversation, side: TurnSide): Promise<boolean>;
   /** Ends a conversation's session: what it last said is its last word. Null where it has none to end. */
   endSession(caller: Caller, of: Conversation): Promise<Session | null>;
 }
@@ -193,6 +205,8 @@ export function createApp(ports: AppPorts, options: AppOptions = {}): App {
     sessions: createSessionInference(ports),
     onError: (error) => options.onError?.(error),
   };
+  /** What a conversation's hook leaves on its session is recorded with the pipeline's one opener of sessions. */
+  const words = { ...ports, sessions: pipeline.sessions };
   return {
     tools: TOOLS,
     challenge: ports.identity.challenge,
@@ -211,9 +225,9 @@ export function createApp(ports: AppPorts, options: AppOptions = {}): App {
         throw error;
       }
     },
-    noteSession: (caller, of, message) =>
-      noteSession({ ...ports, sessions: pipeline.sessions }, caller, of, message),
-    endSession: (caller, of) => endSession({ ...ports, sessions: pipeline.sessions }, caller, of),
+    noteSession: (caller, of, message) => noteSession(words, caller, of, message),
+    keepTurn: (caller, of, side) => keepTurn(words, caller, of, side),
+    endSession: (caller, of) => endSession(words, caller, of),
     async callTool(caller, name, args, client) {
       if (!isToolName(name)) throw new UnknownToolError(name);
       try {

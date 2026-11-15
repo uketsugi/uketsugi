@@ -76,6 +76,23 @@ export interface Database {
     noteText: string | null;
     noteFinal: boolean | null;
     noteAt: Date | null;
+    digestedAt: Date | null;
+    modelInputTokens: Generated<number>;
+    modelOutputTokens: Generated<number>;
+    briefPicks: ColumnType<string[] | null, string | null, string | null>;
+  };
+  modelSpend: {
+    orgId: string;
+    at: Date;
+    tokens: number;
+  };
+  sessionTurns: {
+    orgId: string;
+    sessionId: string;
+    id: string;
+    request: string | null;
+    answer: string | null;
+    at: Date;
   };
   facts: {
     orgId: string;
@@ -96,6 +113,7 @@ export interface Database {
     createdAt: Date;
     updatedAt: Date;
     redactedAt: Date | null;
+    digestSession: string | null;
     searchText: GeneratedAlways<string>;
     tsv: GeneratedAlways<string>;
   };
@@ -148,7 +166,8 @@ export interface Database {
   outbox: {
     orgId: string;
     id: string;
-    audienceId: string;
+    /** Null for a job about a session, which has no audience. */
+    audienceId: string | null;
     kind: JobKind;
     subject: string;
     runAfter: Date;

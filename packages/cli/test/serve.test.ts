@@ -82,6 +82,11 @@ describe("ukt serve on a temporary data directory", () => {
         detail: "answers and accepts the token: 1 project, 1 fact",
       },
       expect.objectContaining({ check: "model", state: "warn", fix: "ukt setup" }),
+      {
+        check: "language model",
+        state: "ok",
+        detail: "none configured: no model reads a session, and nothing is sent to a provider",
+      },
       expect.objectContaining({ check: "harnesses", state: "ok" }),
     ]);
   });
@@ -92,7 +97,7 @@ describe("ukt serve on a temporary data directory", () => {
     const report = await doctor(fakeIo(), { dataDir }, {}).finally(() => chmod(dataDir, 0o700));
 
     expect(report.failure).toEqual({
-      what: "1 of 7 checks failed.",
+      what: "1 of 8 checks failed.",
       meaning:
         "Agents reach their memory all the same: what failed is how it is kept on this machine.",
       next: "Apply each fix above, then run `ukt doctor` again.",

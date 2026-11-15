@@ -15,7 +15,7 @@ const said: ClassedCitation = {
 
 function fact(id: string, changes: Partial<Fact> = {}): Fact {
   const at = new Date("2026-03-01T00:00:00.000Z");
-  const who = { author: "p1", supersededBy: null };
+  const who = { author: "p1", supersededBy: null, digestSession: null };
   const hashes = { contentHash: id, claimHash: id, embedded: false, redactedAt: null };
   const text = { claim: "Webhooks retry five times", detail: null, question: null };
   const where = { orgId: "o1", audienceId: "a1", project: "github.com/acme/api" };

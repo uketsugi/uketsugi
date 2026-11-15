@@ -1,8 +1,9 @@
 /**
  * The host's own files in the data directory, beside the store: the token a harness sends, the
  * host's own secret, which no harness is given, the record of the running server, how the server
- * is set to run, the embedding model and the backups. The directory is the person's alone (0700),
- * and so is every file here that holds a secret (0600).
+ * is set to run, the language model the host was given with its key, the embedding model and the
+ * backups. The directory is the person's alone (0700), and so is every file here that holds a
+ * secret (0600).
  */
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rm, stat } from "node:fs/promises";
@@ -25,6 +26,8 @@ export interface Home {
   readonly recordFile: string;
   /** How the server is set to run: what `ukt setup` was told, and where the store is when it is elsewhere. */
   readonly settingsFile: string;
+  /** Written by `ukt setup --llm`: the language model the host was given, with its provider's key. */
+  readonly llmFile: string;
   /** The runtime and model: `UKT_MODEL_DIR` when set, which is never written to, else `model/`. */
   readonly modelDir: string;
   readonly modelIsOurs: boolean;
@@ -87,6 +90,7 @@ export function resolveHome(dataDir: string | undefined, env: NodeJS.ProcessEnv)
     hostKeyFile: join(dir, "host.key"),
     recordFile: join(dir, "server.json"),
     settingsFile: join(dir, "settings.json"),
+    llmFile: join(dir, "llm.json"),
     modelDir: external ? resolve(given) : join(dir, "model"),
     modelIsOurs: !external,
     backupsDir: join(dir, BACKUPS_DIR),
@@ -251,6 +255,33 @@ export async function readRecord(home: Home): Promise<ServerRecord | null> {
   return typeof record?.url === "string" ? { url: record.url } : null;
 }
 
+/** The language model a host was given: `provider/model`, its provider's key, and its address where it has one of its own. */
+export interface LlmRecord {
+  readonly model: string;
+  /** The provider's key: it is why the file is the person's alone. */
+  readonly key: string;
+  readonly url?: string;
+  /** The most tokens the server may spend on the model in a day, where the person set one. */
+  readonly budget?: number;
+}
+
+export async function writeLlmRecord(home: Home, record: LlmRecord): Promise<void> {
+  await writePrivate(home.llmFile, `${JSON.stringify(record)}\n`);
+}
+
+export async function removeLlmRecord(home: Home): Promise<void> {
+  await rm(home.llmFile, { force: true });
+}
+
+/** The record of the language model this host was given, or null where it was given none. */
+export async function readLlmRecord(home: Home): Promise<LlmRecord | null> {
+  const record = (await readJson(home.llmFile)) as Partial<LlmRecord> | null;
+  if (typeof record?.model !== "string" || typeof record.key !== "string") return null;
+  const url = typeof record.url === "string" ? { url: record.url } : {};
+  const budget = typeof record.budget === "number" ? { budget: record.budget } : {};
+  return { model: record.model, key: record.key, ...url, ...budget };
+}
+
 /** A path that others on this machine can reach, with the mode it must be tightened to. */
 export interface LooseMode {
   readonly path: string;
@@ -266,6 +297,7 @@ export async function looseModes(home: Home): Promise<LooseMode[]> {
     [home.tokenFile, 0o600],
     [home.hostKeyFile, 0o600],
     [home.settingsFile, 0o600],
+    [home.llmFile, 0o600],
   ] as const) {
     const mode = await stat(path).then(
       (stats) => stats.mode & 0o777,

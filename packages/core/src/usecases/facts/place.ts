@@ -6,7 +6,7 @@
  * fact is in the person's own audience, before it is shared or after it has come home.
  */
 import { eventBy, eventOf, type CallContext } from "../../context.ts";
-import type { EventKind, Fact, Task } from "../../domain.ts";
+import type { EventKind, Fact, FlagKind, Task } from "../../domain.ts";
 import { citedBy } from "../../facts/citations.ts";
 import { isLive, type LiveFact } from "../../facts/duplicates.ts";
 import { changedMeanwhile, ToolFailure } from "../../failure.ts";
@@ -202,10 +202,14 @@ export async function settle(
   return moved;
 }
 
+/** The flags a correction clears: a judgement of what the fact said, which it no longer says. */
+const CLEARED_BY_A_CORRECTION: readonly FlagKind[] = ["possible_contradiction"];
+
 /**
  * The author's correction, inside a unit: the fact is rewritten in place and keeps its id, other
- * people's confirmations are cleared, and the facts that cite it are flagged. The old wording is
- * not kept; the event holds the hashes before and after.
+ * people's confirmations are cleared, a flag that it contradicts another fact is cleared with the
+ * wording it was raised on, and the facts that cite it are flagged. The old wording is not kept;
+ * the event holds the hashes before and after.
  */
 async function rewrite(
   ports: MovePorts,
@@ -221,6 +225,12 @@ async function rewrite(
   if (fact.status === "confirmed") await unit.facts.setStatus(fact.id, "unconfirmed");
   const hashes = { before: fact.contentHash, after: content.contentHash };
   await unit.append(eventOf(ctx, "FactRewritten", fact.id, hashes));
+  // What it was said to contradict was its old wording, which is gone.
+  const cleared = await unit.review.clearFlags(fact.id, CLEARED_BY_A_CORRECTION);
+  if (cleared > 0) {
+    const what = { factId: fact.id, kinds: CLEARED_BY_A_CORRECTION, count: cleared };
+    await unit.append(eventOf(ctx, "FlagCleared", fact.id, what));
+  }
   await flagCiting(ports, unit, ctx.session.id, fact.id);
   const embed = vector === null || (vector === "kept" && !fact.embedded);
   await enqueueFollowUps(ports, unit, fact.id, { embed, at });
@@ -285,6 +295,8 @@ export async function onFact(
       ? await correctWhereItBelongs(ports, place, ctx, { writes: held.writes, fact }, correction)
       : held.writes;
     await also(writes, fact);
+    // A check may be what lets a fact a model wrote be shown.
+    if (!changes && fact.digestSession !== null) await settle(ports, place, [fact.id]);
     return changes;
   });
 }

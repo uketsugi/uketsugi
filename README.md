@@ -277,12 +277,12 @@ link instead; it works once.)
 
 Everything is on your machine:
 
-| Path                                      | What it holds                                                                                                                                      |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `~/.local/share/uketsugi`                 | The store, the token, how the server is set to run (`settings.json`), the embedding model and `backups/`. `--data-dir` or `UKT_DATA_DIR` moves it. |
-| `~/.local/lib/uketsugi`                   | The installed release.                                                                                                                             |
-| `~/.local/bin/ukt`                        | The command.                                                                                                                                       |
-| `~/.config/systemd/user/uketsugi.service` | The service's unit, where set-up installed one. It names the release's launcher and the data directory, and nothing else.                          |
+| Path                                      | What it holds                                                                                                                                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/.local/share/uketsugi`                 | The store, the token, how the server is set to run (`settings.json`), the embedding model, `backups/` and, where you named a language model, its key. `--data-dir` or `UKT_DATA_DIR` moves it. |
+| `~/.local/lib/uketsugi`                   | The installed release.                                                                                                                                                                         |
+| `~/.local/bin/ukt`                        | The command.                                                                                                                                                                                   |
+| `~/.config/systemd/user/uketsugi.service` | The service's unit, where set-up installed one. It names the release's launcher and the data directory, and nothing else.                                                                      |
 
 A harness keeps what you add to it in its own configuration: `~/.claude` for Claude Code and
 `~/.gemini/config` for Antigravity. Set-up writes nothing there.
@@ -359,6 +359,89 @@ With the Claude Code plugin, what it sends goes to your server from every reposi
 works in: each one's origin remote, and the agent's last message of each turn. Nobody else on the
 server is shown them, but they rest in a database you run. Tell the people you invite. One who
 does not want that adds the server by its URL instead, without the plugin.
+
+## A language model, if you want one
+
+Uketsugi needs no language model. Everything above runs on rules, and nothing your agents say
+leaves your machine. You can give the server a model, and it then reads each session once the
+session is over:
+
+- **It writes down what the agent did not.** From what the session's agent said, it makes facts
+  the agent established and never published. Each one must cite a file, a commit or a URL that the
+  session itself named, and is stored the way a published fact is: scanned first, under your name,
+  and marked as written by a model from that session. Only you see it until you or your agent has
+  checked it and confirmed it, even in a project you share: a model's word is not put in front of
+  your teammates' agents unchecked.
+- **It judges what a rule cannot.** A fact that says in other words what one already held says is
+  merged into it, or not stored. Two facts that cannot both be true are flagged, for the next
+  agent to check against the code.
+- **It chooses what the next brief shows first**, when a project holds more facts than a brief has
+  room for.
+
+Name the model once, as `provider/model`:
+
+```sh
+ukt setup --llm google/gemini-3.8-flash
+```
+
+`ukt setup` asks for the provider's key without showing it, or takes it from `UKT_LLM_KEY` where
+nobody is at the terminal, and keeps both in the data directory, in a file only you can read. The
+server uses them from its next start. `ukt setup --llm none` forgets them. A container has no
+set-up step: there, give the server `UKT_LLM` and `UKT_LLM_KEY` in its environment.
+
+The providers are `google`, `openai` and `anthropic`, and `openai-compatible` for anything that
+serves OpenAI's chat API at a URL, such as a model on your own machine:
+`ukt setup --llm openai-compatible/<model> --llm-url http://127.0.0.1:11434/v1`. `ukt doctor` asks
+the model one small question and says whether it answers; `ukt doctor --no-llm` leaves the
+question out.
+
+The server spends on the model only within bounds you can see and set. A session's readings
+together cost at most 150,000 tokens, and a session that says more has the rest dropped. The
+server as a whole spends at most 1,000,000 tokens (in and out together) in any 24 hours unless you
+say otherwise, as `--llm-budget <tokens>` to `ukt setup` (remembered) or to `ukt serve`; once it is
+reached, readings wait, and the turns they would read are kept until there is room. `ukt doctor`
+shows what the last 24 hours cost against the budget. A reading that failed after it had cost
+tokens is not asked again.
+
+By default the model reads one thing of a session: the agent's last message, which the plugin
+sends as each turn ends. To have it read the whole conversation, turn on the plugin's `capture`
+option in Claude Code:
+
+```sh
+printf '{"capture":true}' | claude plugin configure uketsugi@uketsugi --values-stdin
+```
+
+The plugin then also sends what you ask and the agent's final answer of every turn. The server
+scans each like any write, keeps it for the model alone, and deletes it once the model has read
+it. A server with no model keeps none of it, but the plugin still sends it there, and it is
+dropped on arrival: where the server is on another machine, that text crosses the network. A
+session holds at most 100 turns, and a turn is cut to 4,000 characters of request and 16,000 of
+answer.
+
+The scanner removes what has the shape of a credential it knows. A secret with no known shape,
+such as a plain password typed into a prompt, is not caught, and with `capture` on it is sent to
+the provider. Leave `capture` off for work where that could happen.
+
+What is sent, and what it costs:
+
+- **Sent to the provider you named:** what a session's agent said (its last message, or with
+  `capture` on each turn's request and final answer), the one-line claims of the facts you
+  published in the session, and the claims of your own facts in that project that it is compared
+  with, and up to 60 more of them that it chooses among, private ones included. A session is read
+  once, after it has ended or gone quiet for ten minutes, or when you start the next session in
+  the project and it has been idle; a turn that has been asked and not answered is left alone
+  until it is.
+- **Never sent:** your files, what your tools printed, another person's facts or sessions, and
+  anything at all while no model is configured.
+- **The cost is yours to see.** `ukt serve` prints a line for every session it read, with the
+  tokens the model took in and gave out, and the dashboard's Activity page lists them.
+- **On a server shared by several people**, only the sessions of whoever runs it are read. Naming
+  a model is that person's choice, and it is not made for anyone else.
+
+A fact a model wrote says so wherever it is shown, to you and to an agent, with the session it
+came from. Nobody looked up its citations when it was written, so treat it as you would a
+colleague's note: your agent can confirm it once it has checked, or correct it, and you can
+redact it.
 
 ## From source
 

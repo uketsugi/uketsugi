@@ -1,8 +1,9 @@
 /**
  * Activity, as the dashboard reads it: per client name and version, how many of the person's
- * sessions searched, published and were refused for a missing project, and their recent sessions.
- * It is read from the directory, and only the person's own part of it: nobody sees another
- * person's sessions. Nothing here reads a fact's text.
+ * sessions searched, published and were refused for a missing project, and their recent sessions,
+ * each with what the model step spent on it where it read one. It is read from the directory, and
+ * only the person's own part of it: nobody sees another person's sessions. Nothing here reads a
+ * fact's text.
  */
 import type { ActivityParams, ActivityReport, ActivitySession } from "@uketsugi/contracts";
 import type { Caller, Session } from "../domain.ts";
@@ -13,6 +14,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_SESSIONS = 20;
 
 function sessionRow(session: Session): ActivitySession {
+  const { digestedAt, modelTokens } = session;
+  // A session no model was ever given anything of has no reading to show.
+  const unread = digestedAt === null && modelTokens.input + modelTokens.output === 0;
   return {
     session: session.displayId,
     client: session.clientName,
@@ -23,6 +27,13 @@ function sessionRow(session: Session): ActivitySession {
     last_search_at: session.lastSearchAt?.toISOString() ?? null,
     last_publish_at: session.lastPublishAt?.toISOString() ?? null,
     refused_calls: session.refusedCalls,
+    digest: unread
+      ? null
+      : {
+          at: digestedAt?.toISOString() ?? null,
+          input_tokens: modelTokens.input,
+          output_tokens: modelTokens.output,
+        },
   };
 }
 

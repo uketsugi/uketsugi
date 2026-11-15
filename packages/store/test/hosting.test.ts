@@ -14,6 +14,7 @@ import {
   type EmbeddedStore,
 } from "../src/index.ts";
 import { migrate, migrationState, MIGRATIONS } from "../src/migrations.ts";
+import { fakeUuid } from "@uketsugi/testkit";
 import { publishSample, sampleOwner } from "./support/sample.ts";
 
 const root = await mkdtemp(join(tmpdir(), "uketsugi-hosting-"));
@@ -193,9 +194,25 @@ describe("on an engine of its own, in memory", () => {
     await expect(migrate(engine.db)).rejects.toThrow(another);
   });
 
-  test("a store made by an earlier edit of the unreleased schema is refused by name, in words", async () => {
-    // The one migration is edited in place until the first release, under a new name each time: a
-    // store an earlier edit made is refused, not opened to fail later on a column it lacks.
+  test("a store that 0.1.0 made takes the model step's migration, and the facts it holds are an agent's", async () => {
+    const released = Object.entries(MIGRATIONS).filter(([name]) => name < "0002");
+    await migrate(engine.db, Object.fromEntries(released));
+    const id = fakeUuid(1, 1);
+    await sql`
+      insert into facts (org_id, id, audience_id, project, claim, status, author,
+                         content_hash, claim_hash, created_at, updated_at)
+      values (${fakeUuid(0, 1)}, ${id}, ${fakeUuid(0, 3)}, 'github.com/acme/api', 'Kept', 'unconfirmed',
+              ${fakeUuid(0, 2)}, '\\x00', '\\x00', now(), now())`.execute(engine.db);
+    await migrate(engine.db);
+    expect(await migrationState(engine.db)).toMatchObject({ pending: [] });
+    const facts = await engine.db.selectFrom("facts").select(["id", "digestSession"]).execute();
+    expect(facts).toEqual([{ id, digestSession: null }]);
+    expect(await engine.db.selectFrom("sessionTurns").selectAll().execute()).toEqual([]);
+  });
+
+  test("a store made by a build from before the first release is refused by name, in words", async () => {
+    // Before 0.1.0 the one migration was edited in place, under a new name each time. A store one
+    // of those edits made is refused, not opened to fail later on a column it lacks.
     await migrate(engine.db, { "0001_init": { up: () => Promise.resolve() } });
     await expect(migrate(engine.db)).rejects.toThrow(
       /^This store was made by another build of uketsugi, with a schema this build cannot read .+0001_init is missing.+ Nothing was changed/,

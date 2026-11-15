@@ -2,7 +2,7 @@
  * The small ports: everything core needs from outside except storage (see `store-port.ts`).
  * Every method that may reach a network or a disk is asynchronous.
  */
-import type { Caller, JobKind, RunnerKind } from "./domain.ts";
+import type { Caller, RunnerKind } from "./domain.ts";
 import type { Store } from "./store-port.ts";
 
 /** The only source of time. Core never reads the system clock. */
@@ -90,26 +90,60 @@ export interface Identity {
   readonly challenge: string;
 }
 
-/** One unit of work for a model: a prompt, and the shape its output must have. */
+/**
+ * One question for a model: what it is to do, the records it is to do it with, and the shape its
+ * answer must have. The instructions are ours; the material is text a session left, which may
+ * itself hold text aimed at a model, so a runner sends it as data and never as instructions.
+ */
 export interface Chore {
-  readonly job: JobKind;
-  readonly orgId: string;
-  /** A runner is sent only records of this audience. */
-  readonly audienceId: string;
-  readonly prompt: string;
-  /** A JSON Schema the output must satisfy. */
+  /** Which step asks, for example `digest.extract`: what a log names the call by. */
+  readonly step: string;
+  readonly instructions: string;
+  readonly material: string;
+  /** A JSON Schema of the answer. A runner passes it on where its provider takes one; the asker checks the answer either way. */
   readonly shape: Readonly<Record<string, unknown>>;
 }
 
-/** Who runs a job's model step. A job always has a rule step whose result stands when no model runs. */
-export interface ModelRunner {
-  readonly kind: RunnerKind;
-  /** The model's output for a chore, already parsed, or null when this runner runs no model. */
-  run(chore: Chore, signal?: AbortSignal): Promise<unknown>;
+/** A model's answer to a chore, parsed from JSON but not yet checked, and what it cost. */
+export interface ModelAnswer {
+  readonly output: unknown;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
 }
 
-/** The runner of every job in this build: nobody runs a prompt, and the rule step's result stands. */
-export const RULES_RUNNER: ModelRunner = { kind: "rules", run: () => Promise.resolve(null) };
+/**
+ * Who runs a job's model step: a provider the server's operator configured, or a hosted edition's
+ * own. What a chore holds leaves the machine with it. A server without one runs on rules alone and
+ * sends nothing anywhere.
+ */
+export interface ModelRunner {
+  readonly kind: Exclude<RunnerKind, "rules">;
+  /** What answers, as a person reads it: the provider and its model. */
+  readonly name: string;
+  /**
+   * Whether what a person's sessions said may be sent to this model. Only a person agrees to that
+   * for their own text, so whoever makes the runner says who has: a local server's model reads the
+   * sessions of the person who runs it and configured it, and nobody else's.
+   */
+  serves(person: Pick<Caller, "orgId" | "principalId">): boolean;
+  /** The most tokens, input and output together, the server may spend on this model in a day: what its operator set. Readings that would pass it wait. */
+  readonly dailyTokens: number;
+  /** Rejects with `ModelError`; aborts when `signal` does. */
+  run(chore: Chore, signal?: AbortSignal): Promise<ModelAnswer>;
+}
+
+/**
+ * A model call that failed. `retryable` says whether the same chore may succeed later. Its message
+ * names the provider's reason and never what was sent: a chore holds a session's text.
+ */
+export class ModelError extends Error {
+  readonly retryable: boolean;
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "ModelError";
+    this.retryable = retryable;
+  }
+}
 
 /** The ports a use case works with. */
 export interface CorePorts {
@@ -118,7 +152,7 @@ export interface CorePorts {
   readonly ids: IdGen;
   /** Null when no model is installed: search then runs on the lexical streams and says so. */
   readonly embedder: Embedder | null;
-  /** Who runs a job's model step. Absent means rules only. */
+  /** Who runs a job's model step. Absent, every job runs on rules and nothing is sent to a model. */
   readonly runner?: ModelRunner;
   /** How long a task's lease lasts, in milliseconds. Absent means fifteen minutes. */
   readonly taskLeaseMs?: number;

@@ -6,6 +6,7 @@ import type { Envelope } from "@uketsugi/contracts";
 import type {
   Actor,
   Caller,
+  ClaimedJob,
   EventDraft,
   EventKind,
   Fact,
@@ -32,6 +33,25 @@ export type Outcome<Result> = Omit<Result, keyof Envelope> & { readonly degraded
 /** The caller's visible set as a read scope. */
 export function scopeOf(caller: Caller): ReadScope {
   return { orgId: caller.orgId, audienceIds: caller.visibleAudienceIds };
+}
+
+/**
+ * The scope a job about a fact reads in: its fact's audience. A job about a session names no
+ * audience, and reads no fact by this.
+ */
+export function scopeOfJob(job: Pick<ClaimedJob, "orgId" | "audienceId">): ReadScope {
+  return { orgId: job.orgId, audienceIds: job.audienceId === null ? [] : [job.audienceId] };
+}
+
+/**
+ * Whether the model step may read a person's sessions: on a server with a model, and only for a
+ * person its runner serves, who agreed to what a provider is sent.
+ */
+export function servedByModel(
+  ports: Pick<CorePorts, "runner">,
+  person: Pick<Caller, "orgId" | "principalId">,
+): boolean {
+  return ports.runner?.serves(person) ?? false;
 }
 
 /** An id as a caller wrote it, in the spelling the store keeps: trimmed, in lower case. */

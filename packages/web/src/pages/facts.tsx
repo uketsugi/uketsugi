@@ -55,6 +55,7 @@ function FactCell({ fact }: { fact: ApiFact }) {
       </Link>
       <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-ink-muted">
         {count === 1 ? "1 citation" : `${count} citations`} · by {fact.author}
+        {fact.from_session === null ? "" : `, written by a model from session ${fact.from_session}`}
         {project === undefined ? ` · ${fact.project}` : ""}
         {sharing ? <Mark look={SEEN_BY[fact.audience]}>{fact.audience}</Mark> : null}
         {fact.flags.map((kind) => (

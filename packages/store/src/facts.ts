@@ -39,6 +39,7 @@ function factsIn(db: Db, scope: ReadScope) {
       "createdAt",
       "updatedAt",
       "redactedAt",
+      "digestSession",
       sql<boolean>`vector is not null`.as("embedded"),
     ])
     .where(scoped(scope));
@@ -197,6 +198,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
         author: fact.author,
         createdAt: at,
         updatedAt: at,
+        digestSession: fact.digestSession ?? null,
       })
       .execute();
     await writeIdents(this.db, orgId, fact.id, content.idents);
@@ -210,6 +212,8 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
         ...textColumns(content),
         ...(vector === "kept" ? {} : { vector: stored }),
         updatedAt: this.target.at,
+        // Its author's own words now: no model wrote what it says.
+        digestSession: null,
       })
       .executeTakeFirst();
     this.mustHold(id, rewritten);

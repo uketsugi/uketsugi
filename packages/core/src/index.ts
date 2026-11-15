@@ -5,7 +5,7 @@
 export * from "./domain.ts";
 export type * from "./store-port.ts";
 export type * from "./search-port.ts";
-export { AuthError, EmbedError, RULES_RUNNER } from "./ports.ts";
+export { AuthError, EmbedError, ModelError } from "./ports.ts";
 export type {
   AuthFailure,
   Chore,
@@ -14,14 +14,18 @@ export type {
   Embedder,
   IdGen,
   Identity,
+  ModelAnswer,
   ModelRunner,
 } from "./ports.ts";
 export { createApp, UnknownToolError } from "./app.ts";
 export type { App, AppPorts } from "./app.ts";
-export { scopeOf } from "./context.ts";
+export { scopeOf, servedByModel } from "./context.ts";
 export { ToolFailure } from "./failure.ts";
 export { validateRequest } from "./validate.ts";
 export { createWorker } from "./jobs/worker.ts";
+export { armDigest } from "./digest/arm.ts";
+export { MOST_TURNS_KEPT } from "./digest/record.ts";
+export type { DigestReport } from "./jobs/digest.ts";
 export {
   acceptToken,
   createTokenIdentity,
@@ -33,16 +37,17 @@ export {
   revokeToken,
   RevokedTokenError,
 } from "./identity.ts";
-export { SESSION_IDLE_MS, type ClientInfo } from "./sessions.ts";
+export { newSession, SESSION_IDLE_MS, type ClientInfo } from "./sessions.ts";
 export { createNamedProject, listProjects } from "./project.ts";
 export { listRulings, revertRuling } from "./facts/rulings.ts";
 export { isUuid } from "./facts/citations.ts";
 export { activityReport } from "./usecases/activity.ts";
+export { checkModel } from "./usecases/model-check.ts";
 export { exportMarkdown } from "./usecases/facts/export.ts";
 export { factDetail, listFacts } from "./usecases/facts/list.ts";
 export { redactFact } from "./usecases/facts/redact.ts";
 export { listTasks, taskDetail } from "./usecases/tasks/list.ts";
-export type { Conversation } from "./usecases/session-note.ts";
+export type { Conversation, TurnSide } from "./usecases/session-note.ts";
 export { chooseTreatment } from "./usecases/sharing.ts";
 export { toHex } from "./hash.ts";
 export { normalizeText } from "./text/analyze.ts";

@@ -15,6 +15,7 @@ export interface FakeIo extends Io {
 export interface FakeIoOptions {
   interactive?: boolean;
   answer?: boolean;
+  secret?: string;
   /**
    * The programs of the machine a verb runs on. Left out, there are none: no service manager and
    * no harness, so no test reaches the ones of whoever runs it.
@@ -35,6 +36,10 @@ export function fakeIo(options: FakeIoOptions = {}): FakeIo {
     confirm: (question) => {
       io.questions.push(question);
       return Promise.resolve(options.answer ?? false);
+    },
+    secret: (question) => {
+      io.questions.push(question);
+      return Promise.resolve(options.secret ?? null);
     },
     progress: () => ({ update: () => undefined, stop: () => undefined }),
     open: (url) => {

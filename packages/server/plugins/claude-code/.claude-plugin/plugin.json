@@ -16,6 +16,11 @@
       "description": "The token your harness sends: `ukt token` prints it on the server's host, or whoever runs the server gave you one. Leave it empty for a server on this machine that you alone use.",
       "required": false,
       "sensitive": true
+    },
+    "capture": {
+      "type": "boolean",
+      "title": "Send each turn",
+      "description": "Also send what you ask and the agent's final answer of every turn, for the server's language model to read once the session is over. Off unless you turn it on. A server with no language model keeps none of it."
     }
   },
   "mcpServers": {

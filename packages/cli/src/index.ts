@@ -4,7 +4,7 @@
  * program; each verb, with its options and its work, is in the file beside it.
  */
 import { readFileSync } from "node:fs";
-import { confirm, spinner } from "@clack/prompts";
+import { confirm, password, spinner } from "@clack/prompts";
 import { Command, CommanderError, Option } from "commander";
 import open from "open";
 import { doctorVerb } from "./doctor.ts";
@@ -27,6 +27,10 @@ export function terminal(): Io {
     err: (line) => console.error(line),
     confirm: async (question) =>
       (await confirm({ message: question, initialValue: false })) === true,
+    async secret(question) {
+      const typed = await password({ message: question });
+      return typeof typed === "string" && typed.trim() !== "" ? typed.trim() : null;
+    },
     progress(title) {
       console.error(title);
       if (!interactive) return { update: () => undefined, stop: (line) => console.error(line) };

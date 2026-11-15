@@ -132,6 +132,7 @@ describe("Facts", () => {
     expect(drawer.queryByText(/checkable/i)).toBeNull();
     expect(drawer.getByRole("link", { name: /wiki\.acme\.example/ })).toBeTruthy();
     expect(drawer.getByText("Author").nextElementSibling?.textContent).toBe("Dana's Claude Code");
+    expect(drawer.queryByText("Written by")).toBeNull();
     const check = drawer.getByText(/^Confirmed by Dana/).textContent;
     expect(check).toMatch(/^Confirmed by Dana, .+ ago at 9f3c2e1: read retry\.rs$/);
     const published = drawer.getByText("Fact published").textContent;
@@ -142,6 +143,29 @@ describe("Facts", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(document.activeElement).toBe(screen.getByRole("link", { name: CLAIM }));
+  });
+
+  it("says of a fact a language model wrote that one did, and from which session", async () => {
+    const written = { ...retries, author: "you", from_session: "s-41ab" };
+    api.use(
+      answer("/api/facts", { facts: [written, idempotency], next: null }),
+      answer(`/api/facts/${retries.id}`, { ...retriesDetail, fact: written }),
+    );
+    const user = open("/facts");
+    const row = (await screen.findByRole("link", { name: CLAIM })).closest("tr");
+    expect(row?.textContent).toContain("by you, written by a model from session s-41ab");
+    const other = screen.getByRole("link", { name: idempotency.claim ?? "" }).closest("tr");
+    expect(other?.textContent).not.toContain("written by a model");
+
+    await user.click(screen.getByRole("link", { name: CLAIM }));
+    const drawer = within(await screen.findByRole("dialog", { name: "Fact" }));
+    expect(
+      await drawer.findByText(/^A language model wrote this fact from what the session/),
+    ).toBeTruthy();
+    expect(drawer.getByText("Written by").nextElementSibling?.textContent).toBe(
+      "a language model, from session s-41ab",
+    );
+    expect(await violations()).toEqual([]);
   });
 
   it("calls the author's own check a check, and only another person's a confirmation", async () => {

@@ -243,6 +243,8 @@ function Text({ fact }: { fact: ApiFact }) {
  */
 const PRIVATE_BECAUSE: Record<NonNullable<FactDetail["private_because"]>, string> = {
   project: "Only you see this fact: its project is private.",
+  model_unchecked:
+    "Only you see this fact, though you share its project: a model wrote it and nobody has checked it. Confirm it once you have checked it against its source, and it is shared.",
   no_source:
     "Only you see this fact, though you share its project: none of its citations can be looked up. It is shared once one can.",
   // A redacted fact stays its author's alone whatever they choose, so the way out names both cases.
@@ -251,6 +253,13 @@ const PRIVATE_BECAUSE: Record<NonNullable<FactDetail["private_because"]>, string
   merged_word:
     "Only you see this fact, though you share its project: a duplicate merged into it has no citation that can be looked up, and would be shown with it. Redact that duplicate, or undo the merge on Activity, and this fact is shared.",
 };
+
+/**
+ * What a person is told of a fact no agent published: where it came from, and that its source was
+ * named by the session and looked up by nobody.
+ */
+const BY_A_MODEL =
+  "A language model wrote this fact from what the session’s agent said, after the session was over. The agent did not publish it, and nobody looked its citations up when it was written.";
 
 function FactBody({ id }: { id: string }) {
   const detail = useQuery(factQuery(id));
@@ -272,12 +281,19 @@ function FactBody({ id }: { id: string }) {
         ))}
       </div>
       {because === undefined ? null : <p className="text-ink-muted">{PRIVATE_BECAUSE[because]}</p>}
+      {fact.from_session === null ? null : <p className="text-ink-muted">{BY_A_MODEL}</p>}
       <Text fact={fact} />
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
         <dt className="text-ink-muted">Project</dt>
         <dd className="break-all">{fact.project}</dd>
         <dt className="text-ink-muted">Author</dt>
         <dd>{fact.author}</dd>
+        {fact.from_session === null ? null : (
+          <>
+            <dt className="text-ink-muted">Written by</dt>
+            <dd>a language model, from session {fact.from_session}</dd>
+          </>
+        )}
         <dt className="text-ink-muted">Published</dt>
         <dd>
           <Ago at={fact.created_at} />

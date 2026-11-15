@@ -275,7 +275,8 @@ export function capabilityDescriptor(
       tasks: tools.includes("claim_task"),
       brief: true,
       closing_note: true,
-      jobs: [...JOB_KINDS],
+      // The reading of sessions by a model is a job of a server that has one.
+      jobs: JOB_KINDS.filter((kind) => kind !== "digest" || runner !== "rules"),
     },
     model_runners: runner === "rules" ? [] : [runner],
     tools,

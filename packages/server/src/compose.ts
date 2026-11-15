@@ -22,6 +22,7 @@ import {
   validateRequest,
   type AppPorts,
   type ClaimedJob,
+  type DigestReport,
 } from "@uketsugi/core";
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
@@ -64,6 +65,8 @@ export interface ComposeOptions {
   readonly operator?: Operator;
   /** A copy of the whole store while it serves, for the operator's backup. Left out, the server offers none. */
   readonly snapshot?: () => Promise<Blob>;
+  /** Told of every session the model step has read, with what the reading did and cost: counts, never text. */
+  readonly onDigest?: (report: DigestReport) => void;
 }
 
 export interface Listening {
@@ -173,6 +176,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   // The outbox worker runs in this process. Its store wakes it when a unit leaves a job.
   const worker = createWorker(options.ports, {
     onFailure: (job, error, dead) => onError(jobFailure(job, error, dead)),
+    onDigest: options.onDigest,
   });
   const ports = { ...options.ports, store: worker.store };
   const app = createApp(ports, { onError });

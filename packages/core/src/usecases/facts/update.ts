@@ -22,8 +22,16 @@ const FLAG_KINDS: Readonly<Record<NonNullable<UpdateFactInput["flag"]>, FlagKind
   contradiction: "possible_contradiction",
 };
 
-/** The flags a newer confirmation clears: doubt about whether the fact still matches its source. */
-const CLEARED_BY_A_CHECK: readonly FlagKind[] = ["marked_stale", "source_changed"];
+/**
+ * The flags a newer confirmation clears: doubt about whether the fact still matches its source,
+ * and the doubt that it contradicts another fact, which a check against the source settles for
+ * the fact that was checked. The other fact keeps its flag until it is checked or corrected.
+ */
+const CLEARED_BY_A_CHECK: readonly FlagKind[] = [
+  "marked_stale",
+  "source_changed",
+  "possible_contradiction",
+];
 
 /**
  * The author's correction, read and scanned before the unit opens: the fields the call names
@@ -60,7 +68,8 @@ async function correction(
 }
 
 /**
- * A check of the fact. Another person's makes it confirmed; the author's own only refreshes it.
+ * A check of the fact. Another person's makes it confirmed; the author's own only refreshes it,
+ * unless a model wrote the fact: its person is then the first to check it, and that confirms it.
  * Either way it is newer than any doubt about the fact's source, which it clears.
  */
 async function confirm(
@@ -77,7 +86,8 @@ async function confirm(
     const what = { factId: fact.id, kinds: CLEARED_BY_A_CHECK, count: cleared };
     await unit.append(eventOf(ctx, "FlagCleared", fact.id, what));
   }
-  if (person === fact.author || fact.status !== "unconfirmed") return;
+  if ((person === fact.author && fact.digestSession === null) || fact.status !== "unconfirmed")
+    return;
   await unit.facts.setStatus(fact.id, "confirmed");
   await unit.append(eventOf(ctx, "FactConfirmed", fact.id, { id: fact.id, person }));
 }

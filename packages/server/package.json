@@ -16,14 +16,20 @@
     "generate": "node --conditions=@uketsugi/source scripts/generate-plugins.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.105",
+    "@ai-sdk/google": "4.0.121",
+    "@ai-sdk/openai": "4.0.118",
+    "@ai-sdk/openai-compatible": "3.0.92",
     "@hono/node-server": "2.1.6",
     "@modelcontextprotocol/server": "2.4.0",
     "@uketsugi/contracts": "workspace:*",
     "@uketsugi/core": "workspace:*",
     "@uketsugi/store": "workspace:*",
+    "ai": "7.0.173",
     "fflate": "0.8.3",
     "hono": "4.13.16",
-    "uuid": "14.0.3"
+    "uuid": "14.0.3",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@uketsugi/testkit": "workspace:*"

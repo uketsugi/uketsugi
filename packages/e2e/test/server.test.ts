@@ -68,7 +68,8 @@ describe("the server over /mcp: the contract, sessions and the brief", () => {
       edition: "community",
       contract_version: CONTRACT_VERSION,
       mcp_revisions: ["2025-11-25", "2026-07-28"],
-      features: { vector: false, brief: true, closing_note: true },
+      // With no language model, reading sessions is not a job this server runs.
+      features: { vector: false, brief: true, closing_note: true, jobs: ["embed", "consolidate"] },
       model_runners: [],
       tools: TOOLS.map((tool) => tool.name),
       prompts: ["activate", "setup"],

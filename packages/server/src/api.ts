@@ -20,6 +20,7 @@ import {
 } from "@uketsugi/contracts";
 import {
   activityReport,
+  checkModel,
   chooseTreatment,
   createNamedProject,
   exportMarkdown,
@@ -55,7 +56,7 @@ import {
 import { capabilityDescriptor, connectInfo } from "./connect.ts";
 import { errorHandler, failed, noRoute, noSnapshot, personOnly, unauthorized } from "./errors.ts";
 import { LOOPBACK_ADDRESSES, reachedAt } from "./guard.ts";
-import { answerClaudeCode, ORIGIN_HEADER } from "./hooks.ts";
+import { answerClaudeCode, CAPTURE_HEADER, isOn, ORIGIN_HEADER } from "./hooks.ts";
 import { pluginsFrom } from "./plugins.ts";
 import type { ToolUses } from "./tool-uses.ts";
 
@@ -136,8 +137,9 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
 }
 
 /**
- * The routes of whoever runs the server: what reaches every person's data, who may sign in, and
- * a sign-in code for the operator themselves. Each needs the host's own secret, from this
+ * The routes of whoever runs the server: what reaches every person's data, who may sign in,
+ * whether the language model they configured answers, and a sign-in code for the operator
+ * themselves. Each needs the host's own secret, from this
  * machine: a person's token is not it, the operator's own harness token included. A server with
  * no operator has none of these.
  */
@@ -162,6 +164,8 @@ function operatorRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
     c.header("Content-Type", "application/gzip");
     return c.body((await snapshot()).stream());
   });
+  // Asks the provider one small question, which costs its operator a few tokens: theirs to ask.
+  api.post("/model-check", fromOperator, async (c) => c.json(await checkModel(ports)));
   api.get("/people", fromOperator, async (c) => c.json(await listPeople(ports, c.get("caller"))));
   api.post("/people", fromOperator, body("InviteRequest"), async (c) =>
     c.json(await invitePerson(ports, c.get("caller"), c.req.valid("json")), 201),
@@ -206,8 +210,11 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
     return c.body(files.map((file) => file.content).join("\n"));
   });
   api.post("/hooks/claude-code", body("ClaudeCodeHook"), async (c) => {
-    const origin = c.req.header(ORIGIN_HEADER);
-    return c.json(await answerClaudeCode(deps, c.get("caller"), c.req.valid("json"), origin));
+    const sent = {
+      origin: c.req.header(ORIGIN_HEADER),
+      capture: isOn(c.req.header(CAPTURE_HEADER)),
+    };
+    return c.json(await answerClaudeCode(deps, c.get("caller"), c.req.valid("json"), sent));
   });
 }
 

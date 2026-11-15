@@ -29,7 +29,8 @@ export const CONTRACT_VERSION: string = document.contractVersion;
 
 /**
  * The limits a schema keyword cannot state. `citations_chars` bounds a call's whole `citations`
- * argument as sent; `closing_note_chars` is how much of a session's note is kept, from its start.
+ * argument as sent; `closing_note_chars` is how much of a session's note is kept, from its start;
+ * `turn_request_chars` and `turn_answer_chars` are how much of each side of a captured turn is.
  */
 export const LIMITS: Readonly<typeof document.limits> = document.limits;
 

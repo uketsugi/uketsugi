@@ -26,11 +26,24 @@ function audienceOf(reader: Caller, fact: Fact): "private" | "shared" {
   return fact.audienceId === reader.sharedAudienceId ? "shared" : "private";
 }
 
+/** The display id of each session a model wrote one of the facts from, by the session's id. */
+async function digestedFrom(
+  ports: ReadPorts,
+  reader: Caller,
+  facts: readonly Fact[],
+): Promise<ReadonlyMap<string, string>> {
+  const ids = facts.flatMap((fact) => (fact.digestSession === null ? [] : [fact.digestSession]));
+  if (ids.length === 0) return new Map();
+  const sessions = await ports.store.sessions.byIds(reader.orgId, [...new Set(ids)]);
+  return new Map(sessions.map((session) => [session.id, session.displayId]));
+}
+
 /**
  * Facts as a result carries them to one reader: with their trust label, open flags, newest
- * confirmation, who wrote them (`you` for the reader's own), on a server with several people who
- * can see them, and, for a superseded one, the live fact at the head of its chain. A stub has no view. `heads` is `liveHeads` of the facts, for a
- * caller that has read it already.
+ * confirmation, who wrote them (`you` for the reader's own), the session a model wrote them from
+ * where one did, on a server with several people who can see them, and, for a superseded one, the
+ * live fact at the head of its chain. A stub has no view. `heads` is `liveHeads` of the facts, for
+ * a caller that has read it already.
  */
 export async function factViews(
   ports: ReadPorts,
@@ -41,11 +54,12 @@ export async function factViews(
   const scope = scopeOf(reader);
   const ids = facts.map((fact) => fact.id);
   const authors = facts.map((fact) => fact.author);
-  const [confirmations, flags, names, successors] = await Promise.all([
+  const [confirmations, flags, names, successors, sessions] = await Promise.all([
     ports.store.review.confirmations(scope, ids),
     ports.store.review.openFlags(scope, ids),
     namesFor(ports, reader, authors),
     heads ?? liveHeads(ports, scope, facts),
+    digestedFrom(ports, reader, facts),
   ]);
   return facts.flatMap((fact) => {
     if (fact.claim === null) return [];
@@ -53,6 +67,7 @@ export async function factViews(
     const newest = Math.max(...checks.map((entry) => entry.at.getTime()));
     const kinds = flags.filter((entry) => entry.factId === fact.id).map((entry) => entry.kind);
     const head = successors.get(fact.id);
+    const from = fact.digestSession === null ? undefined : sessions.get(fact.digestSession);
     return [
       {
         id: fact.id,
@@ -64,6 +79,7 @@ export async function factViews(
         flags: [...new Set(kinds)],
         trust: fact.status === "confirmed" ? ("reviewed" as const) : ("unreviewed" as const),
         author: nameOf(names, fact.author),
+        ...(from === undefined ? {} : { from_session: from }),
         ...(reader.sharedAudienceId === null ? {} : { audience: audienceOf(reader, fact) }),
         updated_at: fact.updatedAt.toISOString(),
         ...(checks.length === 0 ? {} : { confirmed_at: new Date(newest).toISOString() }),
@@ -99,6 +115,7 @@ export async function apiFacts(
       flags: view?.flags ?? [],
       trust: view?.trust ?? "unreviewed",
       author: view?.author ?? nameOf(names, fact.author),
+      from_session: view?.from_session ?? null,
       own: fact.author === caller.principalId,
       redacted: fact.redactedAt !== null,
       created_at: fact.createdAt.toISOString(),
@@ -114,6 +131,17 @@ function citationLine(citation: Citation): string {
   return `${citation.ref} (${citation.class}${reason})`;
 }
 
+/**
+ * Who a fact is by, as a result says it. One a model wrote from a session says so: nobody checked
+ * it against its source when it was written, which is for its reader to weigh. No recorded run
+ * held such a fact, so the words every other fact is shown in are as they were measured.
+ */
+function byLine(fact: FactView): string {
+  const model =
+    fact.from_session === undefined ? "" : `, written by a model from session ${fact.from_session}`;
+  return `by ${fact.author}${model}`;
+}
+
 function factLines(fact: FactView): string[] {
   const flags = fact.flags.length === 0 ? "" : ` · flagged: ${fact.flags.join(", ")}`;
   const seen = fact.audience === undefined ? "" : ` · ${fact.audience}`;
@@ -121,7 +149,7 @@ function factLines(fact: FactView): string[] {
     `${fact.id} · ${fact.claim}`,
     ...(fact.detail === undefined ? [] : [`  ${fact.detail}`]),
     `  citations: ${fact.citations.map(citationLine).join("; ")}`,
-    `  ${fact.trust} · ${fact.status}${flags} · by ${fact.author}${seen} · ${fact.updated_at}`,
+    `  ${fact.trust} · ${fact.status}${flags} · ${byLine(fact)}${seen} · ${fact.updated_at}`,
   ];
 }
 
@@ -136,6 +164,7 @@ const SEEN: Record<"private" | "shared", string> = {
   private: "private · only your person sees it",
 };
 const HELD_BACK_BY: Record<HeldBack, string> = {
+  model_unchecked: "a model wrote it and nobody has checked it",
   no_source: "none of its citations is checkable",
   cites_private: "it cites a fact others cannot see",
   merged_word: "a duplicate merged into it has no checkable citation",

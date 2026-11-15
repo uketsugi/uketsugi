@@ -1,23 +1,22 @@
 /**
- * The plugins the server ships: that their files say what the server's own code says, that a
- * person gets them from the folder or from the server, and that the one script a hook runs sends
+ * The plugins the server ships: that their files say what the server's own code says (how a person
+ * gets them is `plugins-delivery.test.ts`), and that the one script a hook runs sends
  * what it is handed and stays out of the session's way when anything is wrong.
  */
 import { execFile, spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { BLOCK_TEXT, type ConnectInfo } from "@uketsugi/contracts";
+import { BLOCK_TEXT } from "@uketsugi/contracts";
 import { acceptToken } from "@uketsugi/core";
-import { strFromU8, unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { generatedRule } from "../scripts/generate-plugins.ts";
-import { connectInfo, PLUGIN_NAME, SERVER_NAME } from "../src/connect.ts";
-import { composeServer, openLocalPorts, type UketsugiServer } from "../src/index.ts";
+import { PLUGIN_NAME, SERVER_NAME } from "../src/connect.ts";
+import { composeServer, openLocalPorts } from "../src/index.ts";
 
 const PLUGINS = fileURLToPath(new URL("../plugins", import.meta.url));
 const SCRIPT = join(PLUGINS, "claude-code/hooks/to-server.sh");
@@ -58,7 +57,7 @@ describe("the plugins' files", () => {
       hooks: Record<string, { matcher?: string; hooks: { command: string; args: string[] }[] }[]>;
     };
     expect(new Set(Object.keys(hooks))).toEqual(
-      new Set(["SessionStart", "PreToolUse", "Stop", "SessionEnd"]),
+      new Set(["SessionStart", "PreToolUse", "UserPromptSubmit", "Stop", "SessionEnd"]),
     );
     const matcher = new RegExp(`^(?:${hooks.PreToolUse?.[0]?.matcher})$`);
     const tools = [
@@ -71,184 +70,19 @@ describe("the plugins' files", () => {
         matcher.test(tool),
       ),
     ).toEqual([]);
-    // Every hook runs the one script, and only the start of a session names itself to it: that
-    // is the one event whose answer the script prints.
+    // Every hook runs the one script, and two name themselves to it: the start of a session,
+    // the one event whose answer the script prints, and a prompt, the one thing it sends only
+    // where the person turned that on.
     const script = "${CLAUDE_PLUGIN_ROOT}/hooks/to-server.sh";
+    const named = new Set(["SessionStart", "UserPromptSubmit"]);
     for (const [event, [group]] of Object.entries(hooks)) {
-      const args = event === "SessionStart" ? [script, "SessionStart"] : [script];
-      expect(group?.hooks).toMatchObject([{ command: "sh", args }]);
+      const args = named.has(event) ? [script, event] : [script];
+      expect(group?.hooks, event).toMatchObject([{ command: "sh", args }]);
     }
-  });
-});
-
-describe("how a person gets the plugins", () => {
-  let local: Awaited<ReturnType<typeof openLocalPorts>>;
-  let server: UketsugiServer;
-  /** A request as it arrives under a name, as from a proxy that ended TLS where `tls` is set. */
-  const ask = (path: string, host: string, tls = false) =>
-    server.fetch(
-      new Request(`http://${host}${path}`, {
-        headers: {
-          host,
-          authorization: `Bearer ${TOKEN}`,
-          ...(tls ? { "x-forwarded-proto": "https" } : {}),
-        },
-      }),
-    );
-  const harnessesAt = async (host: string, tls = false) => {
-    const info = (await (await ask("/api/connect", host, tls)).json()) as ConnectInfo;
-    return Object.fromEntries(info.harnesses.map((harness) => [harness.id, harness]));
-  };
-
-  beforeAll(async () => {
-    local = await openLocalPorts({});
-    await acceptToken(local.ports, local.owner, TOKEN, "test");
-    server = composeServer({
-      ports: local.ports,
-      pluginsDir: PLUGINS,
-      allowedHosts: ["memory.example.com"],
-    });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    await local.close();
-  });
-
-  test("from another machine the server hands each plugin over as a zip, and Claude Code a marketplace file that names it", async () => {
-    const listed = await ask("/plugins/marketplace.json", "memory.example.com", true);
-    expect(listed.status).toBe(200);
-    const marketplace = (await listed.json()) as {
-      name: string;
-      plugins: { name: string; source: object }[];
-    };
-    expect(marketplace).toMatchObject({ name: PLUGIN_NAME, plugins: [{ name: PLUGIN_NAME }] });
-    expect(marketplace.plugins[0]?.source).toEqual({
-      source: "archive",
-      url: "https://memory.example.com/plugins/claude-code.zip",
-    });
-
-    const zip = async () => {
-      const fetched = await ask("/plugins/claude-code.zip", "memory.example.com");
-      expect(fetched.headers.get("content-type")).toBe("application/zip");
-      return new Uint8Array(await fetched.arrayBuffer());
-    };
-    const bytes = await zip();
-    // The same files make the same zip: Claude Code takes a changed one for a new version.
-    expect(await zip()).toEqual(bytes);
-    const files = unzipSync(bytes);
-    expect(Object.keys(files).toSorted()).toEqual([
-      ".claude-plugin/plugin.json",
-      "hooks/hooks.json",
-      "hooks/to-server.sh",
-    ]);
-    expect(strFromU8(files["hooks/to-server.sh"] ?? new Uint8Array())).toBe(
-      await readFile(SCRIPT, "utf8"),
-    );
-
-    const rule = new Uint8Array(
-      await (await ask("/plugins/antigravity.zip", "127.0.0.1")).arrayBuffer(),
-    );
-    expect(strFromU8(unzipSync(rule)["rules/AGENTS.md"] ?? new Uint8Array())).toBe(BLOCK_TEXT);
-    expect((await ask("/plugins/other.zip", "127.0.0.1")).status).toBe(404);
-  });
-
-  test("the Connect page gives the folder to someone on the host and the server's own address to anyone else", async () => {
-    const folder = await realpath(PLUGINS);
-    const here = await harnessesAt("127.0.0.1:7410");
-    expect(here["claude-code"]?.plugin).toEqual({
-      install: `claude plugin install uketsugi --marketplace ${folder} --config url=http://127.0.0.1:7410\nprintf '{"token":"%s"}' "$UKT_TOKEN" | claude plugin configure uketsugi@uketsugi --values-stdin`,
-      remove: "claude plugin marketplace remove uketsugi",
-      adds_server: true,
-    });
-    expect(here["antigravity"]).toMatchObject({
-      // Antigravity writes the file that holds the token for other accounts to read: the line after closes it.
-      add: 'agy mcp add --header "Authorization: Bearer $UKT_TOKEN" uketsugi http://127.0.0.1:7410/mcp\nchmod 600 ~/.gemini/config/mcp_config.json',
-      plugin: { install: `agy plugin install ${folder}/antigravity`, adds_server: false },
-    });
-    expect(here["other"]?.plugin).toBeUndefined();
-
-    const away = await harnessesAt("memory.example.com", true);
-    expect(away["claude-code"]?.plugin?.install).toContain(
-      "claude plugin install uketsugi --marketplace https://memory.example.com/plugins/marketplace.json --config url=https://memory.example.com\n",
-    );
-    expect(away["antigravity"]?.plugin?.install).toBe(
-      "curl -fsSL https://memory.example.com/plugins/antigravity.zip -o uketsugi-antigravity.zip\nunzip -o uketsugi-antigravity.zip -d uketsugi-antigravity\nagy plugin install uketsugi-antigravity",
-    );
-    // Claude Code fetches a plugin from a server over TLS only: without it, the person adds the server by its URL.
-    const plain = await harnessesAt("memory.example.com");
-    expect(plain["claude-code"]?.plugin).toBeUndefined();
-    expect(plain["claude-code"]?.add).toContain("claude mcp add --transport http");
-    expect(plain["antigravity"]?.plugin?.install).toContain(
-      "http://memory.example.com/plugins/antigravity.zip",
-    );
-  });
-
-  test("the lines carry a token only where the server needs one", async () => {
-    const folder = await realpath(PLUGINS);
-    const ORIGIN = "http://127.0.0.1:7410";
-    const without = connectInfo(ORIGIN, { folder }, false);
-    const withToken = connectInfo(ORIGIN, { folder }, true);
-
-    expect(without.needs_token).toBe(false);
-    expect(JSON.stringify(without.harnesses)).not.toMatch(/Authorization|UKT_TOKEN|configure/);
-    expect(without.harnesses.map(({ id, add }) => [id, add])).toEqual([
-      ["claude-code", `claude mcp add --transport http --scope user ${SERVER_NAME} ${ORIGIN}/mcp`],
-      ["antigravity", `agy mcp add ${SERVER_NAME} ${ORIGIN}/mcp`],
-      ["codex", `codex mcp add ${SERVER_NAME} --url ${ORIGIN}/mcp`],
-      ["vscode", `code --add-mcp '{"name":"${SERVER_NAME}","type":"http","url":"${ORIGIN}/mcp"}'`],
-      ["cursor", `${ORIGIN}/mcp`],
-      ["other", `${ORIGIN}/mcp`],
-    ]);
-    expect(withToken.needs_token).toBe(true);
-    // Each harness is given the token the way it takes one: a variable's name, or its value.
-    const tokenLines = Object.fromEntries(withToken.harnesses.map(({ id, add }) => [id, add]));
-    expect(tokenLines["codex"]).toBe(
-      `codex mcp add ${SERVER_NAME} --url ${ORIGIN}/mcp --bearer-token-env-var UKT_TOKEN`,
-    );
-    expect(tokenLines["vscode"]).toContain(String.raw`\"Authorization\":\"Bearer $UKT_TOKEN\"`);
-    expect(withToken.harnesses[0]?.add).toContain('--header "Authorization: Bearer $UKT_TOKEN"');
-    expect(withToken.harnesses[0]?.plugin?.install).toContain("claude plugin configure");
-    // The name a harness adds the server under, and so the commands it types, come from one constant.
-    expect(without.harnesses[0]?.activate).toBe(`/${SERVER_NAME}:activate`);
-    // Every row says how it is known.
-    expect(without.harnesses.every((harness) => harness.known !== "")).toBe(true);
-  });
-
-  test("a folder whose path a shell would split is quoted in the lines the Connect page gives", async () => {
-    const root = await mkdtemp(join(tmpdir(), "uketsugi plugins "));
-    await cp(PLUGINS, join(root, "plugins"), { recursive: true });
-    const spaced = composeServer({ ports: local.ports, pluginsDir: join(root, "plugins") });
-    try {
-      const asked = new Request("http://127.0.0.1/api/connect", {
-        headers: { host: "127.0.0.1", authorization: `Bearer ${TOKEN}` },
-      });
-      const info = (await (await spaced.fetch(asked)).json()) as ConnectInfo;
-      const folder = await realpath(join(root, "plugins"));
-      const [claude, antigravity] = info.harnesses;
-      expect(claude?.plugin?.install).toContain(` --marketplace '${folder}' --config `);
-      expect(antigravity?.plugin?.install).toBe(`agy plugin install '${folder}/antigravity'`);
-    } finally {
-      await spaced.close();
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("a server with no folder of plugins offers none and serves none", async () => {
-    const bare = composeServer({ ports: local.ports });
-    const asked = (path: string) =>
-      bare.fetch(
-        new Request(`http://127.0.0.1${path}`, {
-          headers: { host: "127.0.0.1", authorization: `Bearer ${TOKEN}` },
-        }),
-      );
-    try {
-      const info = (await (await asked("/api/connect")).json()) as ConnectInfo;
-      expect(info.harnesses.every((harness) => harness.plugin === undefined)).toBe(true);
-      expect((await asked("/plugins/marketplace.json")).status).toBe(404);
-    } finally {
-      await bare.close();
-    }
+    const options = (plugin as unknown as { userConfig: Record<string, { type: string }> })
+      .userConfig;
+    expect(options["capture"]).toMatchObject({ type: "boolean" });
+    expect(options["capture"]).not.toHaveProperty("default");
   });
 });
 
@@ -278,7 +112,10 @@ describe("the script a hook runs", () => {
    * Runs the script as Claude Code runs a hook: its input on standard input, the plugin's options
    * in the environment, and the event's name as its argument where the hook gives one.
    */
-  function hook(input: string, options: { event?: string; url?: string; token?: string } = {}) {
+  function hook(
+    input: string,
+    options: { event?: string; url?: string; token?: string; capture?: string } = {},
+  ) {
     return new Promise<{ code: number | null; out: string }>((resolve, reject) => {
       const child = spawn("sh", [SCRIPT, ...(options.event === undefined ? [] : [options.event])], {
         env: {
@@ -287,6 +124,10 @@ describe("the script a hook runs", () => {
           CLAUDE_PROJECT_DIR: work,
           CLAUDE_PLUGIN_OPTION_URL: options.url ?? `${url}/`,
           CLAUDE_PLUGIN_OPTION_TOKEN: options.token ?? TOKEN,
+          // Claude Code hands a hook only the options its person set.
+          ...(options.capture === undefined
+            ? {}
+            : { CLAUDE_PLUGIN_OPTION_CAPTURE: options.capture }),
         },
         stdio: ["pipe", "pipe", "inherit"],
       });
@@ -346,6 +187,38 @@ describe("the script a hook runs", () => {
         // The remote's password stays on the person's machine.
         "x-uketsugi-origin": "https://github.com/acme/billing-service.git",
       },
+    });
+  });
+
+  test("sends what the person asked only where they turned that on, and then says so with everything it sends", async () => {
+    const prompt = JSON.stringify({
+      hook_event_name: "UserPromptSubmit",
+      session_id: "c-1",
+      prompt: "Why do webhooks arrive twice?",
+    });
+    const stop = JSON.stringify({ hook_event_name: "Stop", session_id: "c-1" });
+    answer = { status: 200, body: "{}" };
+    const before = received.length;
+    for (const capture of [undefined, "false", ""]) {
+      expect(await hook(prompt, { event: "UserPromptSubmit", capture })).toEqual({
+        code: 0,
+        out: "",
+      });
+    }
+    expect(received).toHaveLength(before);
+    // Every other event is sent as before, and says nothing of turns.
+    await hook(stop);
+    expect(received.at(-1)?.headers["x-uketsugi-capture"] ?? "").toBe("");
+
+    await hook(prompt, { event: "UserPromptSubmit", capture: "true" });
+    expect(received.at(-1)).toMatchObject({
+      body: prompt,
+      headers: { "x-uketsugi-capture": "true" },
+    });
+    await hook(stop, { capture: "true" });
+    expect(received.at(-1)).toMatchObject({
+      body: stop,
+      headers: { "x-uketsugi-capture": "true" },
     });
   });
 
