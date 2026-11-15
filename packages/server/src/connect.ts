@@ -71,9 +71,14 @@ interface Harness {
   plugin(origin: string, from: PluginsFrom): Plugin | null;
 }
 
+/** A word of a shell line: as it is where a shell reads it as one word, else in single quotes. */
+function word(text: string): string {
+  return /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
+}
+
 /** A harness's plugin folder on the person's machine, and the lines that put it there first, if any. */
 function folderOf(from: PluginsFrom, plugin: string): { folder: string; fetch: string } {
-  if ("folder" in from) return { folder: `${from.folder}/${plugin}`, fetch: "" };
+  if ("folder" in from) return { folder: word(`${from.folder}/${plugin}`), fetch: "" };
   const folder = `${PLUGIN_NAME}-${plugin}`;
   const zip = `${folder}.zip`;
   return {
@@ -105,7 +110,7 @@ const HARNESSES: readonly Harness[] = [
     // on a command line every user of the machine could read it.
     plugin: (origin, from) => {
       if ("url" in from && !from.url.startsWith("https://")) return null;
-      const marketplace = "folder" in from ? from.folder : `${from.url}/marketplace.json`;
+      const marketplace = "folder" in from ? word(from.folder) : `${from.url}/marketplace.json`;
       const id = `${PLUGIN_NAME}@${PLUGIN_NAME}`;
       return {
         install: [
@@ -154,10 +159,26 @@ export const CONVERSATION_ID_KEYS = HARNESSES.flatMap((harness) =>
   harness.conversationIdKey === undefined ? [] : [harness.conversationIdKey],
 );
 
-/** Where the id of a tool call may arrive in a request's `_meta`: each harness's key. */
-export const TOOL_USE_ID_KEYS = HARNESSES.flatMap((harness) =>
-  harness.toolUseIdKey === undefined ? [] : [harness.toolUseIdKey],
+/** The harnesses whose hooks say which conversation each of their calls belongs to. */
+const SPOKEN_FOR = HARNESSES.flatMap((harness) =>
+  harness.toolUseIdKey === undefined ? [] : [{ id: harness.id, key: harness.toolUseIdKey }],
 );
+
+/**
+ * What a tool call gives a hook's word to be found by: the call's own id, where the request
+ * carries one under a harness's key, whatever the client calls itself; null for a call that
+ * carries none from a harness whose hooks speak for its calls; undefined for any other call, which
+ * no hook speaks for.
+ */
+export function toolUseOf(
+  clientName: string,
+  meta: Readonly<Record<string, unknown>>,
+): string | null | undefined {
+  const ids = SPOKEN_FOR.map(({ key }) => meta[key]);
+  const id = ids.find((value) => typeof value === "string" && value !== "");
+  if (typeof id === "string") return id;
+  return SPOKEN_FOR.some((harness) => harness.id === clientName) ? null : undefined;
+}
 
 /**
  * How the instruction file of the harness whose client gives this name is named to its agent: by

@@ -30,12 +30,7 @@ import {
   type McpHttpHandler,
   type ServerContext,
 } from "@modelcontextprotocol/server";
-import {
-  CONVERSATION_ID_KEYS,
-  instructionFileOf,
-  SERVER_NAME,
-  TOOL_USE_ID_KEYS,
-} from "./connect.ts";
+import { CONVERSATION_ID_KEYS, instructionFileOf, SERVER_NAME, toolUseOf } from "./connect.ts";
 import { createConnections, type Connections } from "./connections.ts";
 import type { ToolUses } from "./tool-uses.ts";
 
@@ -75,7 +70,8 @@ interface Asked {
 
 /**
  * The client of a request, with the conversation the request belongs to: the client's own id
- * where it sends one; else the conversation its hook said this call belongs to; else the
+ * where it sends one; else, for a tool call, the conversation its harness's hook said the call
+ * belongs to (`tool-uses.ts`), under the name the hook's sessions are keyed by; else the
  * connection the request came on. Every request is read with this, the lists a client opens with
  * among them, since a connection is known from its beginning. `call` is given for a tool call:
  * its arguments, which name its project.
@@ -96,10 +92,10 @@ function clientOf(
     call: call !== undefined,
     project: typeof project === "string" ? project : null,
   });
-  const meta: Record<string, unknown> = ctx.mcpReq._meta ?? {};
-  const toolUse = TOOL_USE_ID_KEYS.map((key) => textOf(meta[key])).find((id) => id !== null);
-  const told = toolUse === undefined ? null : toolUses.of(caller.principalId, toolUse);
-  return { ...said, conversationId: told ?? connection };
+  const toolUse = call === undefined ? undefined : toolUseOf(said.name, ctx.mcpReq._meta ?? {});
+  const told = toolUse === undefined ? null : toolUses.of(caller.principalId, toolUse, connection);
+  if (told === null) return { ...said, conversationId: connection };
+  return { ...said, name: told.client, conversationId: told.conversation };
 }
 
 function isPromptName(name: string): name is PromptName {

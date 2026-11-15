@@ -18,13 +18,14 @@ import {
 } from "@uketsugi/contracts";
 import { sessionBrief, type ComposedBrief } from "./brief.ts";
 import type { CallContext } from "./context.ts";
-import type { Caller } from "./domain.ts";
+import type { Caller, Session } from "./domain.ts";
 import { ToolFailure, internal } from "./failure.ts";
 import type { CorePorts, Identity } from "./ports.ts";
 import { isPersonal, parseProject, projectRefusal, resolveProject } from "./project.ts";
 import { createSessionInference, type ClientInfo, type SessionInference } from "./sessions.ts";
 import { standingOf } from "./sharing.ts";
 import { TOOL_TABLE, type Tool } from "./tools.ts";
+import { endSession, noteSession, type Conversation } from "./usecases/session-note.ts";
 import { validateInput } from "./validate.ts";
 
 /** A tool call's result, in the shape MCP carries it. */
@@ -66,6 +67,13 @@ export interface App {
    * names no project of the caller's: the brief then rides on the first call, as without a hook.
    */
   beginSession(caller: Caller, client: ClientInfo, project: unknown): Promise<string | null>;
+  /**
+   * Records where a conversation's session stands, in the agent's last message. Null where the
+   * message holds nothing to keep or there is no session to put it on.
+   */
+  noteSession(caller: Caller, of: Conversation, message: string): Promise<Session | null>;
+  /** Ends a conversation's session: what it last said is its last word. Null where it has none to end. */
+  endSession(caller: Caller, of: Conversation): Promise<Session | null>;
 }
 
 export interface AppPorts extends CorePorts {
@@ -203,6 +211,9 @@ export function createApp(ports: AppPorts, options: AppOptions = {}): App {
         throw error;
       }
     },
+    noteSession: (caller, of, message) =>
+      noteSession({ ...ports, sessions: pipeline.sessions }, caller, of, message),
+    endSession: (caller, of) => endSession({ ...ports, sessions: pipeline.sessions }, caller, of),
     async callTool(caller, name, args, client) {
       if (!isToolName(name)) throw new UnknownToolError(name);
       try {

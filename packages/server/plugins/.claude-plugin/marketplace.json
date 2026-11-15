@@ -7,8 +7,7 @@
   "plugins": [
     {
       "name": "uketsugi",
-      "source": "./claude-code",
-      "description": "Memory and task handoff for this project's agents: the server's tools, a brief before the first prompt, and a note of where each session stopped."
+      "source": "./claude-code"
     }
   ]
 }

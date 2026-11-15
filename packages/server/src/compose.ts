@@ -23,6 +23,7 @@ import {
   type ClaimedJob,
 } from "@uketsugi/core";
 import { Hono } from "hono";
+import { getPath } from "hono/utils/url";
 import { bodyLimit } from "hono/body-limit";
 import { validator } from "hono/validator";
 import { apiRoutes } from "./api.ts";
@@ -160,7 +161,11 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   const mcp = createMcpEndpoint(app, ports, toolUses, onError);
   const plugins = pluginsFolder(options.pluginsDir);
   const signIn = createSignIn(ports, app);
-  const http = new Hono<AuthEnv>();
+  // An address given with a slash at its end makes `//mcp` of `/mcp`: a path is read with its
+  // repeated slashes as one, so a person who types the address that way is still served.
+  const http = new Hono<AuthEnv>({
+    getPath: (request) => getPath(request).replace(/\/{2,}/g, "/"),
+  });
   const listeners: Listening[] = [];
 
   http.onError(errorHandler(onError));

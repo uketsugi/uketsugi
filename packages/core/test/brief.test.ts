@@ -169,6 +169,23 @@ describe("the session brief", () => {
     });
   });
 
+  test("a session that closed without a word is told of as closed, and one that left a note and made no call has no last call", () => {
+    const wordless = previous({ note: noted("", minutes(-230)) });
+    const quit = composeBrief(sources({ previous: { session: wordless, published: [] } }));
+    expect(quit.text).toContain(
+      "Your previous session here (s-0800, claude-code) closed at 2026-11-13T08:10Z: 9 calls, the last at 2026-11-13T08:00Z. It left no note.",
+    );
+    expect(quit.brief.last_session).toMatchObject({ closed: true, open: false });
+    expect(quit.brief.last_session).not.toHaveProperty("note");
+
+    const checkpoint = noted("Read the config; nothing looked up.", minutes(-230), false);
+    const callless = previous({ calls: 0, note: checkpoint });
+    const killed = composeBrief(sources({ previous: { session: callless, published: [] } }));
+    expect(killed.text).toContain(
+      "Your previous session here (s-0800, claude-code) never closed: no calls. Its latest note, from 2026-11-13T08:10Z:",
+    );
+  });
+
   test("a final note older than the session's last call is its latest note, not its closing", () => {
     const session = previous({ note: noted("First turn done.", minutes(-280)) });
     const { brief, text } = composeBrief(sources({ previous: { session, published: [] } }));

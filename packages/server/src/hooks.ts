@@ -17,7 +17,7 @@
  */
 import type { ClaudeCodeHook, ClaudeCodeHookOutput } from "@uketsugi/contracts";
 import { BLOCK_TEXT } from "@uketsugi/contracts";
-import { endSession, noteSession, type App, type AppPorts, type Caller } from "@uketsugi/core";
+import type { App, Caller } from "@uketsugi/core";
 import { CLAUDE_CODE } from "./connect.ts";
 import type { ToolUses } from "./tool-uses.ts";
 
@@ -26,13 +26,14 @@ export const ORIGIN_HEADER = "x-uketsugi-origin";
 
 export interface HookDeps {
   readonly app: App;
-  readonly ports: AppPorts;
   readonly toolUses: ToolUses;
+  /** Told of an error no caller could act on. */
+  readonly onError: (error: unknown) => void;
 }
 
 /** Answers one hook of Claude Code's, for the person its token belongs to. */
 export async function answerClaudeCode(
-  { app, ports, toolUses }: HookDeps,
+  { app, toolUses, onError }: HookDeps,
   caller: Caller,
   hook: ClaudeCodeHook,
   origin: string | undefined,
@@ -41,22 +42,28 @@ export async function answerClaudeCode(
   switch (hook.hook_event_name) {
     case "SessionStart": {
       const client = { name: CLAUDE_CODE, version: null, conversationId: hook.session_id };
-      const brief = await app.beginSession(caller, client, origin);
+      // The block is what has the agent use memory at all: a brief that cannot be made is
+      // reported and left out, and the session starts with the block alone.
+      const brief = await app.beginSession(caller, client, origin).catch((error: unknown) => {
+        onError(error);
+        return null;
+      });
       const context = brief === null ? BLOCK_TEXT : `${BLOCK_TEXT}\n${brief}`;
       return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } };
     }
     case "PreToolUse":
       if (hook.tool_use_id !== undefined) {
-        toolUses.expect(caller.principalId, hook.tool_use_id, hook.session_id);
+        const word = { client: CLAUDE_CODE, conversation: hook.session_id };
+        toolUses.expect(caller.principalId, hook.tool_use_id, word);
       }
       return {};
     case "Stop":
       if (hook.last_assistant_message !== undefined) {
-        await noteSession(ports, caller, conversation, hook.last_assistant_message);
+        await app.noteSession(caller, conversation, hook.last_assistant_message);
       }
       return {};
     case "SessionEnd":
-      await endSession(ports, caller, conversation);
+      await app.endSession(caller, conversation);
       return {};
     default:
       return {};

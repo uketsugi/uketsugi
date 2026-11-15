@@ -8,6 +8,7 @@ import {
   type Brief,
   type ClaudeCodeHookOutput,
   type Invitation,
+  type ProjectList,
 } from "@uketsugi/contracts";
 import { SESSION_IDLE_MS } from "@uketsugi/core";
 import type { McpCallResult, McpTestClient } from "@uketsugi/testkit";
@@ -39,8 +40,18 @@ describe("a harness whose hooks speak for its sessions", () => {
     });
   }
 
-  /** A conversation of Claude Code's, in a directory whose origin remote is `origin`. */
-  function conversation(id: string, origin: string | null) {
+  /** A process of Claude Code's own: a connection the server follows from the lists it opens with. */
+  async function processOf(): Promise<McpTestClient> {
+    const client = await server.connect("claude-code");
+    await client.listTools();
+    return client;
+  }
+
+  /**
+   * A conversation of Claude Code's, in a directory whose origin remote is `origin`, calling on
+   * the connection `on`.
+   */
+  function conversation(id: string, origin: string | null, on: McpTestClient = claude) {
     let calls = 0;
     const hook = async (event: string, more: object = {}): Promise<ClaudeCodeHookOutput> => {
       const response = await send(id, origin, event, more);
@@ -53,14 +64,20 @@ describe("a harness whose hooks speak for its sessions", () => {
         const { hookSpecificOutput } = await hook("SessionStart", { source });
         return hookSpecificOutput?.additionalContext ?? "";
       },
-      /** A call of one of the server's tools: the hook before it, then the call under the same id. */
-      async call(tool: string, args: Record<string, unknown>): Promise<McpCallResult> {
-        const use = `toolu_${id}_${(calls += 1)}`;
-        await hook("PreToolUse", {
-          tool_name: `mcp__plugin_uketsugi_uketsugi__${tool}`,
-          tool_use_id: use,
-        });
-        return claude.callTool(tool, args, { "claudecode/toolUseId": use });
+      /**
+       * A call of one of the server's tools: the hook before it, then the call under the same id,
+       * which is as long as the contract lets one be. `lost` leaves out the hook's word, or the id
+       * the call carries.
+       */
+      async call(
+        tool: string,
+        args: Record<string, unknown>,
+        lost?: "word" | "id",
+      ): Promise<McpCallResult> {
+        const use = `toolu_${id}_${(calls += 1)}`.padEnd(200, "x");
+        const tool_name = `mcp__plugin_uketsugi_uketsugi__${tool}`;
+        if (lost !== "word") await hook("PreToolUse", { tool_name, tool_use_id: use });
+        return on.callTool(tool, args, lost === "id" ? undefined : { "claudecode/toolUseId": use });
       },
       stop: (message: string) => hook("Stop", { last_assistant_message: message }),
       end: () => hook("SessionEnd", { reason: "prompt_input_exit" }),
@@ -216,6 +233,94 @@ describe("a harness whose hooks speak for its sessions", () => {
     const context = await conversation("c-later", `https://${project}`).start();
     expect(context).toContain("closed at");
     expect(context).toContain("The quiet hours are read from config/hours.toml.");
+  });
+
+  test("a call that carries no id goes on the session its hook's word named, and one whose word was lost goes where its connection's last did", async () => {
+    const project = "github.com/acme/bare";
+    const session = conversation("c-bare", `https://${project}`, await processOf());
+    await session.start();
+    const search = { project, query: "retries" };
+    const bare = await session.call("search_facts", search, "id");
+    expect(briefOf(bare)).toBeUndefined();
+    const unheard = await session.call("search_facts", search, "word");
+    expect(sessionOf(unheard)).toBe(sessionOf(bare));
+    await session.stop("The retry budget is read in retry.ts.");
+    await session.end();
+
+    server.clock.advance(60_000);
+    const context = await conversation("c-bare-next", `https://${project}`).start();
+    expect(context).toContain(
+      `Your previous session here (${sessionOf(bare)}, claude-code) closed at`,
+    );
+    expect(context).toContain("The retry budget is read in retry.ts.");
+  });
+
+  test("with no word and no id a call goes on its connection's session with a second brief, and the note is still the next brief's", async () => {
+    const project = "github.com/acme/unplaced";
+    const process = await processOf();
+    const session = conversation("c-unplaced", `https://${project}`, process);
+    await session.start();
+    const call = await process.callTool("search_facts", { project, query: "parser" });
+    expect(briefOf(call)).toBeDefined();
+    server.clock.advance(30_000);
+    await session.stop("The parser is half rewritten.");
+    await session.end();
+
+    server.clock.advance(2 * 60_000);
+    const context = await conversation("c-unplaced-next", `https://${project}`).start();
+    expect(context).toContain("closed at");
+    expect(context).toContain("The parser is half rewritten.");
+    expect(context).not.toContain("It left no note");
+  });
+
+  test("the previous session is the one that spoke last, not the one that called last", async () => {
+    const project = "github.com/acme/two-terminals";
+    const [long, short] = ["c-long", "c-short"].map((id) => conversation(id, `https://${project}`));
+    const search = { project, query: "queue" };
+    await long!.start();
+    const worked = await long!.call("search_facts", search);
+    server.clock.advance(30 * 60_000);
+    await short!.start();
+    await short!.call("search_facts", search);
+    await short!.stop("A look at the queue; nothing changed.");
+    // The first goes on for hours without a call, says where it stands, and is quit.
+    server.clock.advance(3 * 3_600_000);
+    await long!.stop("The queue drains in order now; the retry test is next.");
+    await long!.end();
+
+    server.clock.advance(3_600_000);
+    const context = await conversation("c-third-terminal", `https://${project}`).start();
+    expect(context).toContain(
+      `Your previous session here (${sessionOf(worked)}, claude-code) closed at`,
+    );
+    expect(context).toContain("The queue drains in order now; the retry test is next.");
+    expect(context).not.toContain("nothing changed");
+  });
+
+  test("a session that is quit before a turn finished has closed without a word, and the next brief says so", async () => {
+    const project = "github.com/acme/quit-early";
+    const quit = conversation("c-quit", `https://${project}`);
+    await quit.start();
+    const only = await quit.call("search_facts", { project, query: "tides" });
+    await quit.end();
+
+    server.clock.advance(60_000);
+    const context = await conversation("c-quit-next", `https://${project}`).start();
+    expect(context).toMatch(
+      new RegExp(
+        `Your previous session here \\(${sessionOf(only)}, claude-code\\) closed at \\S+: 1 call, the last at \\S+\\. It left no note\\.`,
+      ),
+    );
+    expect(context).not.toContain("still open");
+  });
+
+  test("a session that only began is no activity and puts no project on the person's list", async () => {
+    const project = "github.com/someone-else/unrelated";
+    await conversation("c-passing", `https://${project}`).start();
+    const activity = (await (await server.api("/api/activity")).json()) as ActivityReport;
+    expect(activity.recent.map((session) => session.project)).not.toContain(project);
+    const listed = (await (await server.api("/api/projects")).json()) as ProjectList;
+    expect(listed.projects.map((listing) => listing.key)).not.toContain(project);
   });
 
   test("a hook that cannot name the project is answered with the block alone, and its note goes on the session its agent's call opened", async () => {

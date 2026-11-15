@@ -40,6 +40,14 @@ NODE_ENV=production pnpm -C "$root" build
 echo "build.sh: collecting the command line and its production dependencies"
 pnpm -C "$root" --filter @uketsugi/cli deploy --prod "$stage/app" >/dev/null
 
+# The plugins harnesses install are the server package's own files. A person points a harness at
+# them, so they sit at the top of the release, where the path is short and stays the same from
+# one release to the next, and the server finds them through a link. They are moved before
+# anything is stripped: what a plugin's folders are called is the plugin's own business.
+server_package=$(cd "$stage/app/node_modules/@uketsugi/server" && pwd -P)
+mv "$server_package/plugins" "$stage/plugins"
+ln -s "$(realpath --relative-to="$server_package" "$stage/plugins")" "$server_package/plugins"
+
 # What a running server never reads: sources and tests of our own packages, and the source maps
 # and type declarations of everyone's.
 find "$stage/app" -type d \( -name src -o -name test -o -name scripts \) -path '*@uketsugi*' -prune -exec rm -rf {} +
@@ -48,15 +56,8 @@ find "$stage/app" -type f \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' 
   -o -name 'tsconfig*.json' -o -name '*.tsbuildinfo' \) -delete
 
 # The server serves the dashboard from the `web` package's dist beside its own package.
-server_package=$(cd "$stage/app/node_modules/@uketsugi/server" && pwd -P)
 mkdir -p "$server_package/../web"
 cp -R "$root/packages/web/dist" "$server_package/../web/dist"
-
-# The plugins harnesses install are the server package's own files. A person points a harness at
-# them, so they sit at the top of the release, where the path is short and stays the same from
-# one release to the next, and the server finds them through a link.
-mv "$server_package/plugins" "$stage/plugins"
-ln -s "$(realpath --relative-to="$server_package" "$stage/plugins")" "$server_package/plugins"
 
 cp "$node_bin" "$stage/node/bin/node"
 node_license="$(dirname "$node_bin")/../LICENSE"

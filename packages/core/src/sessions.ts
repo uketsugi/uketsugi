@@ -10,6 +10,7 @@
 import AsyncLock from "async-lock";
 import type { Caller, Session, SessionKey, SessionMark } from "./domain.ts";
 import type { CorePorts } from "./ports.ts";
+import type { SessionsRepo } from "./store-port.ts";
 
 /** A session whose last call is older than this is over: the next call opens a new one. */
 export const SESSION_IDLE_MS = 10 * 60 * 1000;
@@ -68,17 +69,18 @@ export interface SessionInference {
    * call is stamped on it. Whoever asks is handed its brief, so it owes none to its first call.
    */
   begin(caller: Caller, client: ClientInfo, project: string): Promise<Session>;
+  /**
+   * The session a conversation's word goes on, where its hook names the project: the
+   * conversation's latest there that has not closed, however long since its last call, or a new
+   * one. No call is stamped on it, and a new one still owes its first call the brief.
+   */
+  continued(caller: Caller, client: ClientInfo, project: string): Promise<Session>;
   /** Gives the brief back when the result that was to carry it failed: the next call owes it. */
   releaseBrief(session: Session): Promise<void>;
 }
 
 /** A session that begins at `now` and has made no call yet. */
-export function newSession(
-  key: SessionKey,
-  id: string,
-  version: string | null,
-  now: Date,
-): Session {
+function newSession(key: SessionKey, id: string, version: string | null, now: Date): Session {
   return {
     ...key,
     id,
@@ -96,6 +98,24 @@ export function newSession(
 }
 
 /**
+ * The open session a call goes on in, if there is one. A call of no known conversation goes on
+ * in its client's open session in the project, whichever conversation opened that: the server
+ * was restarted while the client's connection lived on, and the conversation is the same one.
+ */
+async function openSessionOf(
+  sessions: SessionsRepo,
+  key: SessionKey,
+  now: Date,
+): Promise<Session | null> {
+  const open = (session: Session | null) =>
+    session !== null && sessionState(session, now) === "open" ? session : null;
+  const own = open(await sessions.latestOf(key));
+  if (own !== null || key.conversationId !== null || key.project === null) return own;
+  const last = open(await sessions.latest(key.orgId, key.principalId, key.project));
+  return last?.clientName === key.clientName ? last : null;
+}
+
+/**
  * Session inference over the store. Two calls of one key are taken one at a time within this
  * process, so two first calls sent at once open one session and one of them owes the brief. The
  * embedded store has one owning process; a deployment of several needs the same guarantee from
@@ -107,20 +127,6 @@ export function createSessionInference(
   const turns = new AsyncLock();
   const { sessions } = ports.store;
 
-  /**
-   * The open session a call goes on in, if there is one. A call of no known conversation goes on
-   * in its client's open session in the project, whichever conversation opened that: the server
-   * was restarted while the client's connection lived on, and the conversation is the same one.
-   */
-  async function openSessionOf(key: SessionKey, now: Date): Promise<Session | null> {
-    const open = (session: Session | null) =>
-      session !== null && sessionState(session, now) === "open" ? session : null;
-    const own = open(await sessions.latestOf(key));
-    if (own !== null || key.conversationId !== null || key.project === null) return own;
-    const last = open(await sessions.latest(key.orgId, key.principalId, key.project));
-    return last?.clientName === key.clientName ? last : null;
-  }
-
   async function enterNow(
     key: SessionKey,
     client: ClientInfo,
@@ -128,7 +134,7 @@ export function createSessionInference(
   ): Promise<Entered> {
     const now = ports.clock.now();
     const refused = mark === "refused";
-    const latest = await openSessionOf(key, now);
+    const latest = await openSessionOf(sessions, key, now);
     if (latest !== null) {
       await sessions.touch(key.orgId, latest.id, now, mark, client.version);
       const owesBrief = !refused && latest.briefedAt === null;
@@ -147,19 +153,34 @@ export function createSessionInference(
     return { session, owesBrief: !refused };
   }
 
-  async function beginNow(key: SessionKey, client: ClientInfo): Promise<Session> {
-    const now = ports.clock.now();
-    const open = await openSessionOf(key, now);
-    if (open !== null) {
-      await sessions.setBriefed(key.orgId, open.id, now);
-      return open;
-    }
-    const session = { ...newSession(key, ports.ids.uuid(), client.version, now), briefedAt: now };
+  /** Opens a session that has made no call: every session a harness's hook opens is opened here. */
+  async function openQuiet(
+    key: SessionKey,
+    client: ClientInfo,
+    now: Date,
+    briefedAt: Date | null,
+  ): Promise<Session> {
+    const session = { ...newSession(key, ports.ids.uuid(), client.version, now), briefedAt };
     await sessions.open(session);
     return session;
   }
 
-  /** One key's calls and beginnings, one at a time. */
+  async function beginNow(key: SessionKey, client: ClientInfo): Promise<Session> {
+    const now = ports.clock.now();
+    const open = await openSessionOf(sessions, key, now);
+    if (open === null) return openQuiet(key, client, now, now);
+    await sessions.setBriefed(key.orgId, open.id, now);
+    return open;
+  }
+
+  async function continuedNow(key: SessionKey, client: ClientInfo): Promise<Session> {
+    const now = ports.clock.now();
+    const latest = await sessions.latestOf(key);
+    if (latest !== null && sessionState(latest, now) !== "closed") return latest;
+    return openQuiet(key, client, now, null);
+  }
+
+  /** One key's calls, beginnings and words, one at a time. */
   function inTurn<T>(
     caller: Caller,
     client: ClientInfo,
@@ -181,6 +202,8 @@ export function createSessionInference(
       inTurn(caller, client, project, (key) => enterNow(key, client, mark)),
     begin: (caller, client, project) =>
       inTurn(caller, client, project, (key) => beginNow(key, client)),
+    continued: (caller, client, project) =>
+      inTurn(caller, client, project, (key) => continuedNow(key, client)),
     releaseBrief: (session) => sessions.setBriefed(session.orgId, session.id, null),
   };
 }

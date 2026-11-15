@@ -60,7 +60,7 @@ export function sessionCases(fixture: SessionFixture): void {
     expect((await sessions.latest(...who))?.note).toEqual(note);
 
     // A session its harness began, which has called nothing and left no word: it is its
-    // conversation's and its project's latest, and no brief tells of it.
+    // conversation's and its project's latest, no brief tells of it and Activity counts none of it.
     clock.advance(60_000);
     const begun = {
       ...session,
@@ -81,13 +81,15 @@ export function sessionCases(fixture: SessionFixture): void {
     const next = ids.uuid();
     expect((await sessions.previous(...who, next))?.id).toBe(session.id);
     expect(await sessions.previous(...who, session.id)).toBeNull();
+    expect((await sessions.recent(...mine, 5)).map((recent) => recent.id)).toEqual([session.id]);
+    expect(await sessions.activity(...mine, opened)).toMatchObject([{ sessions: 1 }]);
     await sessions.touch(person.orgId, begun.id, clock.now(), "other", "2.2");
     expect(await sessions.previous(...who, next)).toMatchObject({
       id: begun.id,
       calls: 1,
       clientVersion: "2.2",
     });
-    const activity = await sessions.activity(person.orgId, person.principalId, opened);
+    const activity = await sessions.activity(...mine, opened);
     expect(activity).toEqual([
       {
         clientName: "claude-code",
@@ -106,6 +108,11 @@ export function sessionCases(fixture: SessionFixture): void {
         refused: 0,
       },
     ]);
+    // The previous session is the one that spoke last: a note is written long after the last call.
+    clock.advance(60_000);
+    const later = { text: "The queue tests pass.", final: false, at: clock.now() };
+    await sessions.setNote(person.orgId, session.id, later);
+    expect(await sessions.previous(...who, next)).toMatchObject({ id: session.id, note: later });
     const known = await sessions.byIds(person.orgId, [session.id, ids.uuid()]);
     expect(known.map((entry) => entry.clientName)).toEqual(["claude-code"]);
   });

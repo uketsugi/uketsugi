@@ -155,18 +155,29 @@ function previousHead(previous: Previous, now: Date) {
   const { note } = session;
   const state = sessionState(session, now);
   const closed = note !== null && state === "closed";
+  // A session can close without a word: its harness said it ended, and no turn had finished.
+  const said = note !== null && note.text !== "";
   const open = state === "open";
   const named = `(${session.displayId}, ${session.clientName})`;
   const who = `${open ? "Another session of yours" : "Your previous session"} here ${named}`;
   const { calls } = session;
-  const last = `${calls} call${calls === 1 ? "" : "s"}, the last at ${minute(session.lastCallAt)}`;
-  const stands = open ? `is still open: ${last}.` : `never closed: ${last}.`;
-  const line = closed
-    ? `${who} closed at ${minute(note.at)} with this note:`
-    : note === null
-      ? `${who} ${stands}${open ? "" : " It left no note."}`
-      : `${who} ${stands} Its latest note, from ${minute(note.at)}:`;
-  return { closed, open, calls, line };
+  // A session its harness began may have left a note and made no call: it has no last call to date.
+  const last =
+    calls === 0
+      ? "no calls"
+      : `${calls} call${calls === 1 ? "" : "s"}, the last at ${minute(session.lastCallAt)}`;
+  const stands = closed
+    ? `closed at ${minute(note.at)}: ${last}.`
+    : open
+      ? `is still open: ${last}.`
+      : `never closed: ${last}.`;
+  const line =
+    closed && said
+      ? `${who} closed at ${minute(note.at)} with this note:`
+      : said
+        ? `${who} ${stands} Its latest note, from ${minute(note.at)}:`
+        : `${who} ${stands}${open ? "" : " It left no note."}`;
+  return { closed, open, calls, said, line };
 }
 
 /** How the previous session ended: with a final note, or without one and what it left instead. */
@@ -177,8 +188,8 @@ function previousSection(
   if (sources.previous === null) return { lines: [], view: undefined };
   const { session } = sources.previous;
   const { note } = session;
-  const { closed, open, calls, line } = previousHead(sources.previous, sources.now);
-  const text = note === null ? [] : [clip(note.text, LIMITS.closingNote)];
+  const { closed, open, calls, said, line } = previousHead(sources.previous, sources.now);
+  const text = note !== null && said ? [clip(note.text, LIMITS.closingNote)] : [];
   const published = sources.previous.published.slice(0, LIMITS.published);
   const wrote = published.length === 0 ? [] : ["Facts published while it ran:"];
   const all = [
@@ -190,7 +201,7 @@ function previousSection(
   const lines = fitting(all, budget);
   if (lines.at(-1) === wrote[0]) lines.pop();
   if (lines.length === 0) return { lines, view: undefined };
-  const noted = note !== null && lines.length > 1;
+  const noted = note !== null && said && lines.length > 1;
   return {
     lines,
     view: {

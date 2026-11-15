@@ -22,6 +22,8 @@ const CALLER: Caller = {
 const API = "github.com/acme/api";
 const WEB = "github.com/acme/web";
 const claude: ClientInfo = { name: "claude-code", version: "2.1.323", conversationId: null };
+/** A conversation as its harness's hook names it: the hook does not know its client's version. */
+const hook: ClientInfo = { name: "claude-code", version: null, conversationId: "conversation-1" };
 const antigravity = (conversationId: string): ClientInfo => ({
   name: "antigravity",
   version: "1.5.8",
@@ -212,12 +214,6 @@ describe("session inference", () => {
 
   test("a session its harness begins has made no call and owes its first call no brief", async () => {
     const { sessions, rows, advance } = world();
-    // The hook that says a conversation starts does not know its client's version.
-    const hook: ClientInfo = {
-      name: "claude-code",
-      version: null,
-      conversationId: "conversation-1",
-    };
     const begun = await sessions.begin(CALLER, hook, API);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -241,17 +237,35 @@ describe("session inference", () => {
 
   test("a conversation begun again after its session ended, or went quiet, begins a new one", async () => {
     const { sessions, note, advance } = world();
-    const hook: ClientInfo = {
-      name: "claude-code",
-      version: null,
-      conversationId: "conversation-1",
-    };
     const first = await sessions.begin(CALLER, hook, API);
     await note(first.id, true);
     const resumed = await sessions.begin(CALLER, hook, API);
     expect(resumed.id).not.toBe(first.id);
     advance(SESSION_IDLE_MS + 1);
     expect((await sessions.begin(CALLER, hook, API)).id).not.toBe(resumed.id);
+  });
+});
+
+describe("the session a conversation's word goes on", () => {
+  test("is its latest that has not closed, however long since its last call", async () => {
+    const { sessions, rows, advance } = world();
+    const begun = await sessions.begin(CALLER, hook, API);
+    advance(18 * SESSION_IDLE_MS);
+    expect((await sessions.continued(CALLER, hook, API)).id).toBe(begun.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ calls: 0 });
+  });
+
+  test("is a new one where it has none or its last has closed, and that one still owes its first call the brief", async () => {
+    const { sessions, rows, note, advance } = world();
+    const first = await sessions.continued(CALLER, hook, API);
+    expect(rows).toEqual([expect.objectContaining({ id: first.id, calls: 0, briefedAt: null })]);
+    await note(first.id, true);
+    advance(60_000);
+    const second = await sessions.continued(CALLER, hook, API);
+    expect(second.id).not.toBe(first.id);
+    const called = await sessions.enter(CALLER, hook, API, "search");
+    expect(called).toMatchObject({ session: { id: second.id }, owesBrief: true });
   });
 });
 

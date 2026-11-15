@@ -124,8 +124,13 @@ and from the next session on:
   private to you. A session you quit, or one that is killed, still tells the next one where it
   stopped.
 
-The plugin talks to the server from Claude Code's hooks. A hook that cannot reach the server
-does nothing, and the session goes on without it.
+The plugin talks to the server from Claude Code's hooks, which need `sh`, `curl` and `git`. A
+hook that cannot reach the server does nothing, and the session goes on without it.
+
+The plugin is installed for your user, so this holds for every Claude Code session under that
+configuration, in every repository. When a session starts, the server is sent the repository's
+origin remote. When a turn ends, it is sent the agent's last message, and keeps the first 4,000
+characters the scan leaves. On your own machine that goes no further than your own server.
 
 <details>
 <summary>Without the plugin</summary>
@@ -265,8 +270,8 @@ To reach it from other machines, start it with `ukt serve --host 0.0.0.0 --allow
 It answers only to the names it is given, and it speaks plain HTTP, so put it behind a proxy that
 terminates TLS.
 
-A person you invited needs nothing installed but their harness: the server hands out its own
-plugins. With the server at `https://memory.example.com` and their token in `UKT_TOKEN`, Claude
+A person you invited installs nothing of Uketsugi's but a plugin for their harness, which the
+server hands out. With the server at `https://memory.example.com` and their token in `UKT_TOKEN`, Claude
 Code is connected by:
 
 ```sh
@@ -278,6 +283,11 @@ printf '{"token":"%s"}' "$UKT_TOKEN" | claude plugin configure uketsugi@uketsugi
 The dashboard's Connect page shows these lines with the server's own address in them, and the
 ones for Antigravity. After the server is upgraded, `claude plugin update uketsugi@uketsugi`
 fetches the plugin that goes with it.
+
+With the Claude Code plugin, what it sends goes to your server from every repository that person
+works in: each one's origin remote, and the agent's last message of each turn. Nobody else on the
+server is shown them, but they rest in a database you run. Tell the people you invite. One who
+does not want that adds the server by its URL instead, without the plugin.
 
 ## From source
 

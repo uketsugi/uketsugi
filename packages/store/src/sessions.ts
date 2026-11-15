@@ -15,6 +15,17 @@ import { sql, type Selectable } from "kysely";
 import { inByteOrder, Repo, uuidsOf } from "./codec.ts";
 import type { Database } from "./schema.ts";
 
+/**
+ * Whether a session has anything to show for itself: a call, one refused, or a note. A session
+ * its harness began and nothing more came of has none: no brief tells of it, Activity does not
+ * count it, and it puts no project on its person's list. `table` is the name a statement knows
+ * `sessions` by.
+ */
+export function didSomething(table: "sessions" | "s") {
+  const of = sql.raw(table);
+  return sql<boolean>`(${of}.calls > 0 or ${of}.refused_calls > 0 or ${of}.note_text is not null)`;
+}
+
 /** A note as its three columns hold it; they are set together or not at all (`sessions_note_whole`). */
 function noteColumns(note: SessionNote | null) {
   return {
@@ -120,6 +131,7 @@ export class SqlSessions extends Repo implements SessionsRepo {
       .where("orgId", "=", orgId)
       .where("principalId", "=", principalId)
       .where("lastCallAt", ">=", since)
+      .where(didSomething("sessions"))
       .groupBy(["clientName", "clientVersion"])
       .orderBy(inByteOrder("clientName"))
       .orderBy(inByteOrder("clientVersion"))
@@ -136,18 +148,21 @@ export class SqlSessions extends Repo implements SessionsRepo {
     return this.newest(this.of(orgId, principalId).where("project", "=", project));
   }
 
-  previous(
+  async previous(
     orgId: string,
     principalId: string,
     project: string,
     session: string,
   ): Promise<Session | null> {
-    return this.newest(
-      this.of(orgId, principalId)
-        .where("project", "=", project)
-        .where("id", "<>", session)
-        .where((eb) => eb.or([eb("calls", ">", 0), eb("noteText", "is not", null)])),
-    );
+    // By its last word: a note is written as each turn ends, long after the session's last call.
+    const row = await this.of(orgId, principalId)
+      .where("project", "=", project)
+      .where("id", "<>", session)
+      .where(didSomething("sessions"))
+      .orderBy(sql`greatest(last_call_at, note_at)`, "desc")
+      .orderBy("id", "desc")
+      .executeTakeFirst();
+    return row === undefined ? null : toSession(row);
   }
 
   latestIn(
@@ -166,6 +181,7 @@ export class SqlSessions extends Repo implements SessionsRepo {
 
   async recent(orgId: string, principalId: string, limit: number): Promise<Session[]> {
     const rows = await this.of(orgId, principalId)
+      .where(didSomething("sessions"))
       .orderBy("lastCallAt", "desc")
       .orderBy("id", "desc")
       .limit(limit)

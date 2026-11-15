@@ -1,6 +1,6 @@
 /** The write use cases: a publish, a correction, the limits, a session's note and the follow-up jobs. */
 import { LIMITS } from "@uketsugi/contracts";
-import { createWorker, noteSession } from "@uketsugi/core";
+import { createWorker } from "@uketsugi/core";
 import { targetOf } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { CLIENT, describeUseCases, PROJECT } from "./use-case-world.ts";
@@ -228,7 +228,7 @@ describeUseCases("the write use cases", (w) => {
 
   test("a session's note is cut to its beginning after the scan, so a secret across the cut goes whole", async () => {
     const text = `${"word ".repeat(798)}${SECRET} is the deploy token. ${"word ".repeat(2_000)}`;
-    const noted = await noteSession(portsWith(null), w.owner, conversation("c-cut"), text);
+    const noted = await w.app.noteSession(w.owner, conversation("c-cut"), text);
     const kept = noted?.note?.text ?? "";
     expect(kept).toHaveLength(LIMITS.closing_note_chars);
     expect(kept.slice(3_990)).toBe("[redacted:");
@@ -239,12 +239,7 @@ describeUseCases("the write use cases", (w) => {
   test("of a message longer than is read, nothing is kept that could be the beginning of a secret cut where the reading stops", async () => {
     const read = 16 * LIMITS.closing_note_chars;
     // Read whole, a long message keeps its beginning.
-    const long = await noteSession(
-      portsWith(null),
-      w.owner,
-      conversation("c-long"),
-      "word ".repeat(30_000),
-    );
+    const long = await w.app.noteSession(w.owner, conversation("c-long"), "word ".repeat(30_000));
     expect(long?.note?.text).toBe("word ".repeat(800).trim());
 
     // A key the scanner replaces with a few characters, then a token that the end of the reading
@@ -253,7 +248,7 @@ describeUseCases("the write use cases", (w) => {
     const key = `-----BEGIN RSA PRIVATE KEY-----\n${"MIIEvQIBADANBgkqhkiG9w0BAQEFAASC".repeat(1_900)}\n-----END RSA PRIVATE KEY-----\n`;
     const head = `${key}${"word ".repeat(1_000)}`.slice(0, read - 25);
     const cut = `${head}${SECRET} is the deploy token. ${"word ".repeat(2_000)}`;
-    const noted = await noteSession(portsWith(null), w.owner, conversation("c-key"), cut);
+    const noted = await w.app.noteSession(w.owner, conversation("c-key"), cut);
     expect(noted?.note?.text ?? "").not.toContain("ghp_");
   });
 });

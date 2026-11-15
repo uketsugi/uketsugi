@@ -15,6 +15,7 @@ import type {
 import type { Selectable } from "kysely";
 import { inByteOrder, Repo, toBytes, uuidsOf, type Db } from "./codec.ts";
 import type { Database } from "./schema.ts";
+import { didSomething } from "./sessions.ts";
 
 type PrincipalRow = Pick<Selectable<Database["principals"]>, "orgId" | "id" | "displayName">;
 
@@ -300,7 +301,8 @@ export class SqlProjects extends Repo implements ProjectsRepo {
               .select("s.id")
               .whereRef("s.orgId", "=", "p.orgId")
               .whereRef("s.project", "=", "p.key")
-              .where("s.principalId", "=", principalId),
+              .where("s.principalId", "=", principalId)
+              .where(didSomething("s")),
           ),
         ]),
       )

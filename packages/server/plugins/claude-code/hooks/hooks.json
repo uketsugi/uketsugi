@@ -1,5 +1,5 @@
 {
-  "description": "Tells the uketsugi server when a session starts, which session each of its calls belongs to, and where each turn ended. The server answers the start with the session's brief.",
+  "description": "Tells the uketsugi server when a session starts, which session each of its calls belongs to, and where each turn ended. Only the start is answered with anything: the session's brief.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "sh",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/to-server.sh"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/to-server.sh", "SessionStart"],
             "timeout": 5
           }
         ]

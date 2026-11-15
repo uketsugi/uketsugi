@@ -10,13 +10,16 @@
  * keep their own.
  */
 import { LIMITS } from "@uketsugi/contracts";
-import type { Caller, Project, Session } from "../domain.ts";
+import type { Caller, Session } from "../domain.ts";
 import type { CorePorts } from "../ports.ts";
 import { parseProject, resolveProject } from "../project.ts";
 import { scanText } from "../scan/scanner.ts";
-import { newSession, sessionState } from "../sessions.ts";
+import { sessionState, type ClientInfo, type SessionInference } from "../sessions.ts";
 
-type NotePorts = Pick<CorePorts, "store" | "clock" | "ids">;
+/** What a session's word is recorded with: the store and the clock, and the one opener of sessions. */
+export interface NotePorts extends Pick<CorePorts, "store" | "clock"> {
+  readonly sessions: SessionInference;
+}
 
 /** The conversation a hook speaks for. */
 export interface Conversation {
@@ -51,33 +54,43 @@ function keptOf(message: string): string {
 }
 
 /**
- * The session a conversation's word goes on, and the project its hook named. Where the hook names
- * the project, that is the conversation's latest session there; where it cannot (a directory with
- * no origin remote), the conversation's latest session, which a call of its agent opened.
+ * The session a conversation's word goes on, if it is to go anywhere. Where the hook names the
+ * project, that is the conversation's session there, opened if `opening` and it has none that
+ * has not closed: a conversation that made no call and was never begun has none, and one that
+ * goes on after its session closed has none open. Where the hook cannot name the project (a
+ * directory with no origin remote), it is the conversation's latest session, which a call of its
+ * agent opened, and nothing is opened.
  */
 async function sessionOf(
   ports: NotePorts,
   caller: Caller,
   of: Conversation,
-): Promise<{ latest: Session | null; project: Project | null }> {
+  opening: boolean,
+): Promise<Session | null> {
   const { orgId, principalId } = caller;
   const { sessions } = ports.store;
   const ref = parseProject(of.project);
   const project = ref === null ? null : await resolveProject(ports, caller, ref);
-  if (project === null) {
-    return { latest: await sessions.latestIn(orgId, principalId, of.client, of.id), project };
-  }
-  const key = { orgId, principalId, clientName: of.client, conversationId: of.id };
-  return { latest: await sessions.latestOf({ ...key, project: project.key }), project };
+  const client: ClientInfo = { name: of.client, version: null, conversationId: of.id };
+  if (project !== null && opening) return ports.sessions.continued(caller, client, project.key);
+  const latest =
+    project === null
+      ? await sessions.latestIn(orgId, principalId, of.client, of.id)
+      : await sessions.latestOf({
+          orgId,
+          principalId,
+          clientName: of.client,
+          conversationId: of.id,
+          project: project.key,
+        });
+  const going = latest !== null && sessionState(latest, ports.clock.now()) !== "closed";
+  return going ? latest : null;
 }
 
 /**
  * Records where a conversation's session stands: the beginning of the agent's last message,
  * scanned like any write and kept private to the person. Returns the session it was put on; null
  * where the message holds nothing to keep or there is no session to put it on.
- *
- * A conversation that made no call and was never begun has no session, and one that goes on after
- * its session closed has none open: where its project is known a session is opened for its word.
  */
 export async function noteSession(
   ports: NotePorts,
@@ -87,37 +100,27 @@ export async function noteSession(
 ): Promise<Session | null> {
   const text = keptOf(message);
   if (text === "") return null;
-  const { latest, project } = await sessionOf(ports, caller, of);
-  const now = ports.clock.now();
-  let session = latest !== null && sessionState(latest, now) !== "closed" ? latest : null;
-  if (session === null && project !== null) {
-    const { orgId, principalId } = caller;
-    const key = { orgId, principalId, clientName: of.client, conversationId: of.id };
-    session = newSession({ ...key, project: project.key }, ports.ids.uuid(), null, now);
-    await ports.store.sessions.open(session);
-  }
+  const session = await sessionOf(ports, caller, of, true);
   if (session === null) return null;
-  const note = { text, final: false, at: now };
+  const note = { text, final: false, at: ports.clock.now() };
   await ports.store.sessions.setNote(caller.orgId, session.id, note);
   return { ...session, note };
 }
 
 /**
- * Ends a conversation's session: the note it left becomes its last word, as of now. Returns the
- * session; null where the conversation has none open, or it left no note to end on. Such a
- * session is told of as one that never closed.
+ * Ends a conversation's session, as of now: the note it left becomes its last word. A session
+ * that made calls and finished no turn has no note, and closes without a word. One that only
+ * began (no call, no note) is left as it is: it says nothing of how work stands, and no brief
+ * tells of it. Returns the session it closed; null where there is none to close.
  */
 export async function endSession(
   ports: NotePorts,
   caller: Caller,
   of: Conversation,
 ): Promise<Session | null> {
-  const { latest } = await sessionOf(ports, caller, of);
-  const now = ports.clock.now();
-  if (latest === null || latest.note === null || sessionState(latest, now) === "closed") {
-    return null;
-  }
-  const note = { ...latest.note, final: true, at: now };
-  await ports.store.sessions.setNote(caller.orgId, latest.id, note);
-  return { ...latest, note };
+  const session = await sessionOf(ports, caller, of, false);
+  if (session === null || (session.note === null && session.calls === 0)) return null;
+  const note = { text: session.note?.text ?? "", final: true, at: ports.clock.now() };
+  await ports.store.sessions.setNote(caller.orgId, session.id, note);
+  return { ...session, note };
 }

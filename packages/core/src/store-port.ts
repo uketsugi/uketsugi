@@ -355,7 +355,10 @@ export interface SessionsRepo {
     mark: SessionMark,
     version: string | null,
   ): Promise<void>;
-  /** One person's sessions whose last call is at or after `since`, counted per client name and version. */
+  /**
+   * One person's sessions whose last call is at or after `since`, counted per client name and
+   * version. A session that only began (no call, none refused, no note) is not counted.
+   */
   activity(orgId: string, principalId: string, since: Date): Promise<ActivityRow[]>;
   /** Records that a result carries the session's brief (`at`), or that it did not after all (null). */
   setBriefed(orgId: string, id: string, at: Date | null): Promise<void>;
@@ -364,9 +367,9 @@ export interface SessionsRepo {
   /** The person's session in a project with the most recent call. */
   latest(orgId: string, principalId: string, project: string): Promise<Session | null>;
   /**
-   * The person's session in a project before `session`, as a brief tells of it: the one with the
-   * most recent call that made a call or left a note. A session that only began says nothing of
-   * how work stands, and is passed over.
+   * The person's session in a project before `session`, as a brief tells of it: of those that
+   * made a call or left a note, the one heard from last, by its last call or its note, whichever
+   * is later. A session that only began says nothing of how work stands, and is passed over.
    */
   previous(
     orgId: string,
@@ -385,7 +388,7 @@ export interface SessionsRepo {
     clientName: string,
     conversationId: string,
   ): Promise<Session | null>;
-  /** The person's sessions, most recent call first. */
+  /** The person's sessions, most recent call first, those that only began left out. */
   recent(orgId: string, principalId: string, limit: number): Promise<Session[]>;
   /** The sessions found among `ids`: where a task's lease, note or step reads its client's name. */
   byIds(orgId: string, ids: readonly string[]): Promise<Session[]>;
@@ -397,8 +400,9 @@ export interface ProjectsRepo {
   /** The project with this key, created if it does not exist yet. */
   ensure(orgId: string, ref: ProjectRef, at: Date): Promise<Project>;
   /**
-   * The projects one person works in, by key: those a session of theirs named or they made a
-   * choice for. Another person's projects are not among them.
+   * The projects one person works in, by key: those a session of theirs made a call in or left a
+   * note in, and those they made a choice for. A project where a session only began is not one
+   * yet. Another person's projects are not among them.
    */
   listOf(orgId: string, principalId: string): Promise<PersonProject[]>;
   /** The person's choice for a project; null while they have made none. */

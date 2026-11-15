@@ -309,6 +309,7 @@ export interface Session extends SessionKey {
  * the session's last word and ends it; any other is a note at a checkpoint, and the session goes on.
  */
 export interface SessionNote {
+  /** Empty for a session that ended having made calls and finished no turn: it closed without a word. */
   readonly text: string;
   readonly final: boolean;
   readonly at: Date;
