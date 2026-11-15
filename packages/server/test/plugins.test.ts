@@ -195,9 +195,18 @@ describe("how a person gets the plugins", () => {
     expect(without.harnesses.map(({ id, add }) => [id, add])).toEqual([
       ["claude-code", `claude mcp add --transport http --scope user ${SERVER_NAME} ${ORIGIN}/mcp`],
       ["antigravity", `agy mcp add ${SERVER_NAME} ${ORIGIN}/mcp`],
+      ["codex", `codex mcp add ${SERVER_NAME} --url ${ORIGIN}/mcp`],
+      ["vscode", `code --add-mcp '{"name":"${SERVER_NAME}","type":"http","url":"${ORIGIN}/mcp"}'`],
+      ["cursor", `${ORIGIN}/mcp`],
       ["other", `${ORIGIN}/mcp`],
     ]);
     expect(withToken.needs_token).toBe(true);
+    // Each harness is given the token the way it takes one: a variable's name, or its value.
+    const tokenLines = Object.fromEntries(withToken.harnesses.map(({ id, add }) => [id, add]));
+    expect(tokenLines["codex"]).toBe(
+      `codex mcp add ${SERVER_NAME} --url ${ORIGIN}/mcp --bearer-token-env-var UKT_TOKEN`,
+    );
+    expect(tokenLines["vscode"]).toContain(String.raw`\"Authorization\":\"Bearer $UKT_TOKEN\"`);
     expect(withToken.harnesses[0]?.add).toContain('--header "Authorization: Bearer $UKT_TOKEN"');
     expect(withToken.harnesses[0]?.plugin?.install).toContain("claude plugin configure");
     // The name a harness adds the server under, and so the commands it types, come from one constant.
@@ -235,11 +244,7 @@ describe("how a person gets the plugins", () => {
       );
     try {
       const info = (await (await asked("/api/connect")).json()) as ConnectInfo;
-      expect(info.harnesses.map((harness) => harness.plugin)).toEqual([
-        undefined,
-        undefined,
-        undefined,
-      ]);
+      expect(info.harnesses.every((harness) => harness.plugin === undefined)).toBe(true);
       expect((await asked("/plugins/marketplace.json")).status).toBe(404);
     } finally {
       await bare.close();

@@ -167,6 +167,18 @@ agy mcp add uketsugi http://127.0.0.1:7410/mcp
 Antigravity offers no server commands, so put the block that the dashboard's Connect page shows at
 the top of `~/.gemini/GEMINI.md`.
 
+Codex and VS Code:
+
+```sh
+codex mcp add uketsugi --url http://127.0.0.1:7410/mcp
+code --add-mcp '{"name":"uketsugi","type":"http","url":"http://127.0.0.1:7410/mcp"}'
+```
+
+Cursor has no command for it: in `~/.cursor/mcp.json`, under `"mcpServers"`, add
+`"uketsugi": {"url": "http://127.0.0.1:7410/mcp"}`, and approve the server when its agent asks.
+For these three, the lines were run and no session was: put the block at the top of the
+instruction file the harness reads.
+
 `ukt setup` and `ukt doctor` print these lines for the server as it runs, and the Connect page
 shows the same, with the lines that carry a token where the server asks for one. A session gets
 its brief with the first answer it gets from Uketsugi.

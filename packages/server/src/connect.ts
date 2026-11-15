@@ -43,7 +43,10 @@ interface Harness {
   readonly name: string;
   /** What adds the server where it takes no token: a shell command, or the URL itself. Slots: `{name}`, `{url}`. */
   readonly add: string;
-  /** What adds it where every caller must send a token. Slots as `add`, and `{token}`: the variable that holds it. */
+  /**
+   * What adds it where every caller must send a token. Slots as `add`, and the variable that
+   * holds the token: `{token}` where a shell reads it, `{tokenVar}` its name alone.
+   */
   readonly addWithToken: string;
   readonly addKind: "command" | "url";
   /** What takes the server out again, for a command. */
@@ -83,7 +86,8 @@ function filled(line: string, mcpUrl: string): string {
   return line
     .replaceAll("{name}", SERVER_NAME)
     .replaceAll("{url}", mcpUrl)
-    .replaceAll("{token}", `$${TOKEN_ENV}`);
+    .replaceAll("{token}", `$${TOKEN_ENV}`)
+    .replaceAll("{tokenVar}", TOKEN_ENV);
 }
 
 /** A word of a shell line: as it is where a shell reads it as one word, else in single quotes. */
@@ -167,6 +171,42 @@ const HARNESSES: readonly Harness[] = [
         adds_server: false,
       };
     },
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    add: "codex mcp add {name} --url {url}",
+    // Codex is told the name of the variable and reads the token from it each time it starts.
+    addWithToken: "codex mcp add {name} --url {url} --bearer-token-env-var {tokenVar}",
+    addKind: "command",
+    remove: "codex mcp remove {name}",
+    known:
+      "run here: Codex 0.166.0 stores the address with `codex mcp add` and lists a server that needs no token as enabled; no session was started, so whether it offers the server's commands and which file it reads are not established",
+    plugin: () => null,
+  },
+  {
+    id: "vscode",
+    name: "VS Code",
+    add: `code --add-mcp '{"name":"{name}","type":"http","url":"{url}"}'`,
+    // In double quotes, so that the shell puts the token in.
+    addWithToken: String.raw`code --add-mcp "{\"name\":\"{name}\",\"type\":\"http\",\"url\":\"{url}\",\"headers\":{\"Authorization\":\"Bearer {token}\"}}"`,
+    addKind: "command",
+    known:
+      "run here: VS Code 1.146.0 adds the server to its user profile with `code --add-mcp`; the line that carries a token was not run, and no session was started",
+    plugin: () => null,
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    add: "{url}",
+    addWithToken: "{url}",
+    addKind: "url",
+    note: 'Cursor has no command that adds a server: in ~/.cursor/mcp.json, under "mcpServers", add "{name}": {"url": "{url}"}. Its agent asks you to approve the server before it uses it.',
+    tokenNote:
+      'Beside "url", add "headers": {"Authorization": "Bearer <your token>"}; that was not run here.',
+    known:
+      "run here: Cursor's agent 2025.11.25 reads the server from ~/.cursor/mcp.json and asks for it to be approved; no session was started",
+    plugin: () => null,
   },
   {
     id: "other",

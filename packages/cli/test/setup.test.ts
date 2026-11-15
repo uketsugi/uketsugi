@@ -267,6 +267,7 @@ describe("ukt uninstall", () => {
       "A harness you added the server to keeps it, and set-up never touched it. To take it out:",
       `  Claude Code: claude mcp remove ${SERVER_NAME} -s user`,
       `  Antigravity: agy mcp remove ${SERVER_NAME}`,
+      `  Codex: codex mcp remove ${SERVER_NAME}`,
       "Your data and the program are as they were. To delete them as well:",
       `  rm -rf ${dataDir} /opt/uketsugi`,
       "and the `ukt` command the install script made: ~/.local/bin/ukt, unless it was told another place.",
