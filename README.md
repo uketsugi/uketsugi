@@ -21,7 +21,7 @@ It is a small server that agents reach over [MCP](https://modelcontextprotocol.i
 yourself. One install on your own machine needs nothing else set up; the same server can be shared
 by several people.
 
-> **Pre-release (0.1.0).** Uketsugi runs on Linux x86-64 today. It has been run end to end with
+> **Pre-release (0.2.0).** Uketsugi runs on Linux x86-64 today. It has been run end to end with
 > two harnesses, Claude Code and Antigravity: each found what the other had recorded, and each
 > finished a task the other had left. It is built for any harness that can add an MCP server by
 > its URL, and [connecting one](#another-mcp-client) takes its URL. Commands, and what
@@ -64,7 +64,7 @@ you have alone.
 **1. Install**
 
 ```sh
-curl -fsSL https://github.com/uketsugi/uketsugi/releases/download/v0.1.0/install.sh | sh
+curl -fsSL https://github.com/uketsugi/uketsugi/releases/download/v0.2.0/install.sh | sh
 ```
 
 The script downloads one archive of 56 MB from the same release, checks it against the SHA-256 it
