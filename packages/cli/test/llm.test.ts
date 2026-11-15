@@ -228,7 +228,7 @@ describe("the line ukt serve prints for a session a model read", () => {
       "3 turns dropped unread, the session reached what a session may cost",
     );
     expect(digestLine({ ...report, waited: true })).toBe(
-      "language model: session s-41ab waits, the day's budget is reached (6000 of 1000000 tokens used in the last day)",
+      "language model: session s-41ab waits, the day's budget has no room for it yet (6000 of 1000000 tokens used in the last day)",
     );
   });
 
@@ -323,6 +323,8 @@ describe("the language model a host is given", () => {
     expect(await llmOf(dataDir, {})).toEqual({ ...remembered, dailyTokens: 250_000 });
     expect(await llmOf(dataDir, { llmBudget: "40000" })).toMatchObject({ dailyTokens: 40_000 });
     expect(await refusalOf(llmOf(dataDir, { llmBudget: "lots" }))).toMatch(/not a budget/);
+    // Below what one reading costs, nothing would ever be read: it is refused, not accepted and then waited on.
+    expect(await refusalOf(llmOf(dataDir, { llmBudget: "4000" }))).toMatch(/not a budget/);
     await setup(fakeIo(), { ...base, llmBudget: "1000000" }, {});
 
     // What a run names itself comes first: the same model takes the remembered key, another needs its own.

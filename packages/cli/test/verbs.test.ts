@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG } from "@uketsugi/embed";
@@ -399,5 +401,44 @@ describe("the ukt program", () => {
     expect(missing).toBe(1);
     expect(io.errLines.join("\n")).toContain("--markdown <folder>");
     expect(unknown).toBe(1);
+  });
+});
+
+describe("ukt doctor names what keeps the server from running", () => {
+  const serverOf = (report: Report) =>
+    (report.data["findings"] as Finding[]).find((finding) => finding.check === "server");
+
+  test("another program on the port, with no service: that is the cause, and starting the server is not the fix", async () => {
+    const dataDir = await tempDir();
+    const taken = createServer((_request, response) => response.end("not uketsugi"));
+    await new Promise<void>((listening) => taken.listen(0, "127.0.0.1", listening));
+    const { port } = taken.address() as AddressInfo;
+    await writeFile(join(dataDir, "settings.json"), JSON.stringify({ port: String(port) }));
+
+    const report = await doctor(fakeIo(), { dataDir }, {});
+    taken.close();
+
+    expect(serverOf(report)).toEqual({
+      check: "server",
+      state: "fail",
+      detail: `not running: something that is not this data directory's server answers at http://127.0.0.1:${port}, the address it listens on`,
+      fix: "stop that program, or choose another port: ukt setup --port <a free port>",
+    });
+  });
+
+  test("a store folder this user cannot read: the data directory fails with the chown that opens it", async () => {
+    const dataDir = await tempDir();
+    await mkdir(join(dataDir, "pg"), { mode: 0o000 });
+
+    const report = await doctor(fakeIo(), { dataDir }, {});
+    await chmod(join(dataDir, "pg"), 0o700);
+
+    expect(
+      (report.data["findings"] as Finding[]).find((finding) => finding.check === "data directory"),
+    ).toMatchObject({
+      state: "fail",
+      detail: expect.stringContaining("cannot be read and written by this user") as string,
+      fix: `give this user access: chown -R $USER ${dataDir}`,
+    });
   });
 });

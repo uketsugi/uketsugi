@@ -5,9 +5,11 @@
  * finding with its fix. It changes nothing.
  */
 import { access } from "node:fs/promises";
+import { join } from "node:path";
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { CATALOG, openLocalEmbedder } from "@uketsugi/embed";
 import { localUrl } from "@uketsugi/server";
+import { ENGINE_DIR, usable } from "@uketsugi/store";
 import { connectLines } from "./harness-lines.ts";
 import {
   looseModes,
@@ -76,6 +78,17 @@ async function checkDataDir(home: Home): Promise<Finding[]> {
   );
   if (!there)
     return [{ check, state: "fail", detail: `${home.dataDir} does not exist`, fix: "ukt setup" }];
+  // The server cannot start on a store this user may not read and write, and says little of it.
+  const engine = join(home.dataDir, ENGINE_DIR);
+  if (!(await usable(engine)))
+    return [
+      {
+        check,
+        state: "fail",
+        detail: `${engine} cannot be read and written by this user, so the server cannot open the store`,
+        fix: `give this user access: chown -R $USER ${home.dataDir}`,
+      },
+    ];
   const loose = await looseModes(home);
   if (loose.length === 0) return [{ check, state: "ok", detail: home.dataDir }];
   return loose.map(({ path, mode, allowed }) => ({
@@ -141,6 +154,13 @@ async function checkLanguageModel(home: Home, configured: boolean, ask: boolean)
   }
 }
 
+/** Where something that is not this data directory's server answers, at the address this one would listen on; null where nothing does. */
+async function foreignAnswer(home: Home): Promise<string | null> {
+  const runs = await servingOf(home, {});
+  const origin = localUrl(runs.host, Number(runs.port));
+  return (await whoAnswers(home, origin)) === "other" ? origin : null;
+}
+
 /**
  * Whether the server runs as its person's service: installed, enabled and running, with the
  * commands that stop it, start it and show what it printed. For one that is not running, the
@@ -173,9 +193,8 @@ async function checkService(
   ];
   if (!service.running) {
     const detail = `${UNIT} is installed and not running: ${service.standing}`;
-    const runs = await servingOf(home, {});
-    const origin = localUrl(runs.host, Number(runs.port));
-    if ((await whoAnswers(home, origin)) === "other")
+    const origin = await foreignAnswer(home);
+    if (origin !== null)
       return {
         check,
         state: "fail",
@@ -185,15 +204,13 @@ async function checkService(
       };
     const start = startCommand(service, home);
     const why = (await lastWords(io, env, home)).trim().split("\n");
-    return {
-      check,
-      state: "fail",
-      detail,
-      fix: start.includes("reset-failed")
+    // A unit set-up turned off after its server did not come up starts again only to fail again.
+    const fix = !service.enabled
+      ? "put right what the lines below say, then run `ukt setup`"
+      : start.includes("reset-failed")
         ? `${start}, once what the lines below say is put right`
-        : start,
-      notes: [...notes, ...why],
-    };
+        : start;
+    return { check, state: "fail", detail, fix, notes: [...notes, ...why] };
   }
   return service.enabled
     ? { check, state: "ok", detail: `${UNIT} is enabled and running`, notes }
@@ -225,7 +242,17 @@ async function checkServer(
       state: "ok",
       detail: "not checked: the store is checked through the running server",
     };
-    const stopped: Finding = { check, state: "fail", detail, fix: start };
+    // A program that holds the port is the cause, and starting the server again does not move it.
+    const origin = await foreignAnswer(home);
+    const stopped: Finding =
+      origin === null
+        ? { check, state: "fail", detail, fix: start }
+        : {
+            check,
+            state: "fail",
+            detail: `not running: something that is not this data directory's server answers at ${origin}, the address it listens on`,
+            fix: "stop that program, or choose another port: ukt setup --port <a free port>",
+          };
     return { findings: [stopped, store, notChecked("language model")], vector: null };
   }
   try {

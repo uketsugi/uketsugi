@@ -54,7 +54,7 @@ export function digestLine(report: DigestReport): string {
   const why = `${refused.uncited} without a source, ${refused.repeat} already held, ${refused.invalid} not valid`;
   const budget = `${day.used} of ${day.limit} tokens used in the last day`;
   if (report.waited)
-    return `language model: session ${report.session} waits, the day's budget is reached (${budget})`;
+    return `language model: session ${report.session} waits, the day's budget has no room for it yet (${budget})`;
   return [
     `language model: read session ${report.session}`,
     `wrote ${count(report.written, "fact")}`,

@@ -76,7 +76,7 @@ export async function uninstall(
     ],
     options,
   );
-  const failed = await removeService(io, env, service);
+  const failed = await removeService(io, env, home, service);
   return {
     data: { data_dir: home.dataDir, removed: failed === null ? ["the service"] : [] },
     lines: [

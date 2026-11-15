@@ -2,4 +2,12 @@
 export { openEmbeddedStore, type EmbeddedStore } from "./embedded.ts";
 export { openServerStore, serverStoreName, StoreUnavailableError } from "./server-postgres.ts";
 export { backupEmbeddedStore, restoreEmbeddedStore } from "./backup.ts";
-export { BACKUPS_DIR, holdsEmbeddedStore, StoreInUseError, writeSnapshot } from "./data-dir.ts";
+export {
+  BACKUPS_DIR,
+  ENGINE_DIR,
+  holdsEmbeddedStore,
+  StoreInUseError,
+  StoreUnreadableError,
+  usable,
+  writeSnapshot,
+} from "./data-dir.ts";

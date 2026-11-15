@@ -26,10 +26,24 @@ describeUseCases("the write use cases", (w) => {
 
   test("a repeated publish returns the same fact and writes nothing", async () => {
     const first = await publish("Handlers are idempotent on the event id");
-    const again = await publish("handlers are  idempotent on the EVENT id", "src/other.ts:3");
+    const again = await publish("handlers are  idempotent on the EVENT id", "src/retry.ts:10-20");
     expect(again).toMatchObject({ id: first.id, created: false });
     expect(await eventsOf(first.id)).toHaveLength(1);
     expect((await factOf(first.id)).citations).toHaveLength(1);
+  });
+
+  test("the same claim published again with a citation the fact lacks keeps that citation", async () => {
+    const first = await publish("Handlers are retried on the event id");
+    await w.plain("update_fact", { id: first.id, confirm: { checked: "read the handler" } });
+    const again = await publish("handlers are retried on the EVENT id", "src/other.ts:3");
+    expect(again).toMatchObject({ id: first.id, created: false, status: "unconfirmed" });
+    expect(again.citations).toHaveLength(2);
+    expect((await factOf(first.id)).citations).toHaveLength(2);
+    expect((await eventsOf(first.id)).at(-1)).toMatchObject({ kind: "FactRewritten" });
+    // The same two again bring nothing, and change nothing.
+    const events = (await eventsOf(first.id)).length;
+    await publish("Handlers are retried on the event id", "src/other.ts:3");
+    expect(await eventsOf(first.id)).toHaveLength(events);
   });
 
   test("one claim published in two projects is two facts", async () => {

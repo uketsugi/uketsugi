@@ -1,4 +1,4 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -261,8 +261,20 @@ describe("ukt setup where there is no service manager", () => {
 });
 
 describe("ukt uninstall", () => {
+  test("removes no folder that was there before set-up, empty or not", async () => {
+    const { home, dataDir, machine, env, io, options } = await account(MANAGED);
+    await mkdir(join(home, ".config", "systemd"), { recursive: true });
+
+    await setup(io(), { ...options, yes: true }, env);
+    await uninstall(io(), { dataDir, yes: true }, env);
+
+    expect(await exists(machine.unitFile)).toBe(false);
+    expect(await exists(join(home, ".config", "systemd"))).toBe(true);
+    expect(await exists(join(home, ".config", "systemd", "user"))).toBe(false);
+  });
+
   test("shows what it will undo, asks, and leaves the data directory, naming how a harness takes the server out", async () => {
-    const { dataDir, machine, env, io, options } = await account(MANAGED);
+    const { home, dataDir, machine, env, io, options } = await account(MANAGED);
     await setup(io(), { ...options, yes: true }, env);
 
     const unasked = await uninstall(io(), { dataDir }, env).catch((error: unknown) => error);
@@ -292,6 +304,8 @@ describe("ukt uninstall", () => {
     expect(await exists(machine.unitFile)).toBe(false);
     // The directories set-up made for it go too, once empty.
     expect(await exists(dirname(machine.unitFile))).toBe(false);
+    // All of them: it made ~/.config too, and nothing of it is left.
+    expect(await exists(join(home, ".config"))).toBe(false);
     expect(machine).toMatchObject({ enabled: false, running: false });
     expect(await exists(join(dataDir, "token"))).toBe(true);
     expect(again.lines[0]).toBe("Nothing to undo: no service runs this data directory.");

@@ -19,6 +19,7 @@ import { CONTRACT_VERSION, SIGN_IN_PATH } from "@uketsugi/contracts";
 import {
   createApp,
   createWorker,
+  ModelError,
   validateRequest,
   type AppPorts,
   type ClaimedJob,
@@ -162,8 +163,16 @@ function serveDashboard(http: Hono<AuthEnv>, webDir: string): void {
  */
 function jobFailure(job: ClaimedJob, error: unknown, dead: boolean): Error {
   const next = dead ? "it will not be tried again" : "it will be tried again";
-  const what = `The ${job.kind} job about ${job.subject} failed on attempt ${job.attempts}; ${next}.`;
-  return new Error(what, { cause: error });
+  const what = `The ${job.kind} job about ${job.subject} failed on attempt ${job.attempts}; ${next}`;
+  // A model that answers badly is told in the reason it gave, which names no text of a session.
+  return error instanceof ModelError
+    ? new Error(`${what}: ${error.message}.`, { cause: error })
+    : new Error(`${what}.`, { cause: error });
+}
+
+/** What the server's terminal gets of an error: a model's fault in its one line, anything else with its trace. */
+function printed(error: unknown): unknown {
+  return error instanceof Error && error.cause instanceof ModelError ? error.message : error;
 }
 
 /** The largest body the sign-in page may send: one key. */
@@ -172,7 +181,7 @@ const SIGN_IN_BODY_BYTES = 4096;
 /** Builds the server from its ports. */
 export function composeServer(options: ComposeOptions): UketsugiServer {
   const { webDir, snapshot, operator } = options;
-  const onError = options.onError ?? ((error: unknown) => console.error(error));
+  const onError = options.onError ?? ((error: unknown) => console.error(printed(error)));
   // The outbox worker runs in this process. Its store wakes it when a unit leaves a job.
   const worker = createWorker(options.ports, {
     onFailure: (job, error, dead) => onError(jobFailure(job, error, dead)),

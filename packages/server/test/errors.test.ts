@@ -74,9 +74,10 @@ describe("every failure the server answers with has the one error shape", () => 
     // Given a token that has been replaced, or another server's.
     const unknown = await mcp("Bearer ukt_a_token_this_server_never_issued");
     expect(unknown.status).toBe(401);
-    expect((await whatOf(unknown)).what).toBe(
-      "This server does not know the token this harness sent.",
-    );
+    const refusedUnknown = await whatOf(unknown);
+    expect(refusedUnknown.what).toBe("This server does not know the token this harness sent.");
+    // A person who does not run the server cannot run `ukt token`: they are told to ask.
+    expect(refusedUnknown.next).toContain("if someone else runs it, ask them for your token");
     // None of them is sent to the dashboard's sign-in: that is the answer /api gives.
     for (const refused of [await mcp(), await mcp("Bearer"), await mcp("Bearer ukt_unknown")]) {
       expect(refused.headers.get("www-authenticate")).toBe("Bearer");

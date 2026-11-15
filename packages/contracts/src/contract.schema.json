@@ -1834,12 +1834,16 @@
         },
         "add": {
           "type": "string",
-          "description": "What adds the server to the harness: a shell command, or the URL itself. It carries the token where `needs_token` is true."
+          "description": "What adds the server to the harness: a shell command, the URL itself, or the text to put in a file. It carries the token where `needs_token` is true."
         },
         "add_kind": {
           "type": "string",
-          "enum": ["command", "url"],
+          "enum": ["command", "url", "file"],
           "description": "What kind of text `add` is."
+        },
+        "add_where": {
+          "type": "string",
+          "description": "For `file`: the sentence that says which file `add` goes in and where in it, ending in a colon, after which `add` follows, such as `In ~/.cursor/mcp.json, under \"mcpServers\", add:`."
         },
         "remove": {
           "type": "string",

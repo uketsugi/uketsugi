@@ -94,6 +94,13 @@ describe("Connect", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("tells Cursor's person which file to edit and what to put in it", async () => {
+    open("/connect?harness=cursor");
+    const panel = within(await screen.findByRole("tabpanel"));
+    expect(panel.getByText(/In ~\/\.cursor\/mcp\.json, under "mcpServers", add:/)).toBeTruthy();
+    expect(panel.getByText(codeOf(`"uketsugi": {"url": "${connect.mcp_url}"}`))).toBeTruthy();
+  });
+
   it("gives a client that is neither its URL, and the block to place", async () => {
     open("/connect?harness=other");
     const panel = within(await screen.findByRole("tabpanel"));

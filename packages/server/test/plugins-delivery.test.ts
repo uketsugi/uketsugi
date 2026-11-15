@@ -133,7 +133,7 @@ describe("how a person gets the plugins", () => {
       ["antigravity", `agy mcp add ${SERVER_NAME} ${ORIGIN}/mcp`],
       ["codex", `codex mcp add ${SERVER_NAME} --url ${ORIGIN}/mcp`],
       ["vscode", `code --add-mcp '{"name":"${SERVER_NAME}","type":"http","url":"${ORIGIN}/mcp"}'`],
-      ["cursor", `${ORIGIN}/mcp`],
+      ["cursor", `"${SERVER_NAME}": {"url": "${ORIGIN}/mcp"}`],
       ["other", `${ORIGIN}/mcp`],
     ]);
     expect(withToken.needs_token).toBe(true);

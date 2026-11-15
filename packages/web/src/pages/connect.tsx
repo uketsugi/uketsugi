@@ -91,6 +91,7 @@ function ShellLines({ lines, label, info }: { lines: string; label: string; info
 /** How the server is added to a harness by its URL: a command to run, or the URL to give the client. */
 function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
   const typed = harness.add_kind === "command";
+  const filed = harness.add_kind === "file";
   return (
     <Step title={`Add the server to ${harness.name}`}>
       <ServerAndToken info={info} />
@@ -109,6 +110,11 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
               above again.
             </p>
           )}
+        </>
+      ) : filed ? (
+        <>
+          <p>{harness.add_where}</p>
+          <CodeBlock text={harness.add} label={`what adds the server to ${harness.name}`} />
         </>
       ) : (
         <>

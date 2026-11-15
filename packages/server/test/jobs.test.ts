@@ -1,4 +1,4 @@
-import { acceptToken } from "@uketsugi/core";
+import { acceptToken, ModelError } from "@uketsugi/core";
 import { connectMcp } from "@uketsugi/testkit";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { composeServer, openLocalPorts, type UketsugiServer } from "../src/index.ts";
@@ -38,4 +38,29 @@ test("a job that fails and will be tried again leaves its reason in the server's
     `The embed job about ${id} failed on attempt 1; it will be tried again.`,
   );
   expect(failure.cause).toMatchObject({ message: "the model is down" });
+});
+
+test("a model that answers badly is one line in the terminal, not a stack", async () => {
+  const embed = () => Promise.reject(new ModelError("the model's answer holds no list", false));
+  const bad = await openLocalPorts({ embedder: { model: "bad", dims: 384, embed } });
+  await acceptToken(bad.ports, bad.owner, TOKEN, "test");
+  const printed = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const quiet = composeServer({ ports: bad.ports });
+  const { url: at } = await quiet.listen({ port: 0 });
+  const client = await connectMcp({ url: `${at}/mcp`, token: TOKEN });
+  await client.callTool("publish_fact", {
+    project: "github.com/acme/api",
+    claim: "The gateway times out after three seconds",
+    citations: "src/gateway.ts:9",
+  });
+  await client.close();
+  await vi.waitFor(() => expect(printed).toHaveBeenCalledTimes(1));
+  const line: unknown = printed.mock.calls[0]?.[0];
+  printed.mockRestore();
+  await quiet.close();
+  await bad.close();
+
+  expect(line).toMatch(
+    /^The embed job about \S+ failed on attempt 1; it .*: the model's answer holds no list\.$/,
+  );
 });

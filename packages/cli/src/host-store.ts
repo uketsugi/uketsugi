@@ -10,6 +10,7 @@ import {
   holdsEmbeddedStore,
   serverStoreName,
   StoreInUseError,
+  StoreUnreadableError,
   StoreUnavailableError,
 } from "@uketsugi/store";
 import { keepSettings, readSettings, type Home } from "./home.ts";
@@ -97,6 +98,12 @@ export function storeFailure(error: unknown, meaning: string): CliFailure | null
     new CliFailure({ what: describe(error), meaning, next });
   if (error instanceof StoreInUseError)
     return failed("Use the server that is running, or stop it, then run this again.");
+  if (error instanceof StoreUnreadableError)
+    return failed(
+      error.permission
+        ? "Run the command as the user who owns that folder, or give this user read and write access to it (for instance `chown -R $USER` on the data directory), then run this again."
+        : "If the folder was copied or damaged, restore a snapshot with `ukt restore <file>`; if it is not a store, point --data-dir at another folder.",
+    );
   // A database that answered says what it lacks; one that did not is looked for.
   if (error instanceof StoreUnavailableError)
     return failed(

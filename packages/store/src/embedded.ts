@@ -21,7 +21,14 @@ import type { Store } from "@uketsugi/core";
 import { PGliteDialect, type KyselyPlugin } from "kysely";
 import type { Migration } from "kysely/migration";
 import { connect, type Db } from "./codec.ts";
-import { ENGINE_DIR, keepUpgradeSnapshot, lockDataDir, settleRestore } from "./data-dir.ts";
+import {
+  ENGINE_DIR,
+  keepUpgradeSnapshot,
+  lockDataDir,
+  settleRestore,
+  StoreUnreadableError,
+  usable,
+} from "./data-dir.ts";
 import { migrate, migrationState, MIGRATIONS } from "./migrations.ts";
 import { createStore } from "./store.ts";
 
@@ -158,7 +165,12 @@ export async function openEmbeddedStore(
       : await lockDataDir(dataDir, options.lockStaleMs);
   try {
     if (dataDir !== undefined) await settleRestore(dataDir);
-    const engine = await startEngine(dataDir === undefined ? undefined : join(dataDir, ENGINE_DIR));
+    const engine = await startEngine(
+      dataDir === undefined ? undefined : join(dataDir, ENGINE_DIR),
+    ).catch(async (error: unknown) => {
+      if (dataDir === undefined) throw error;
+      throw new StoreUnreadableError(dataDir, error, !(await usable(join(dataDir, ENGINE_DIR))));
+    });
     try {
       await (dataDir === undefined ? migrate(engine.db) : upgrade(engine, dataDir));
     } catch (error) {

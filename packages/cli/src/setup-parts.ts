@@ -119,16 +119,24 @@ async function prepareModel(io: Io, home: Home): Promise<Done> {
 export async function modelPart(io: Io, home: Home, wanted: boolean): Promise<Part> {
   const part = { id: "model", label: "model", outside: false, state: SKIPPED };
   if (!wanted) return { ...part, plan: [LEFT_OUT], pending: false, apply: null };
-  const there = !home.modelIsOurs || (await verifyModel(home.modelDir)).ok;
+  // A directory the person names is checked by the part, which says what is wrong with it.
+  if (home.modelIsOurs && (await verifyModel(home.modelDir)).ok)
+    return {
+      ...part,
+      state: "present",
+      plan: [`in place, in ${home.modelDir}`],
+      pending: false,
+      apply: null,
+    };
   return {
     ...part,
-    plan: there
-      ? [`in place, in ${home.modelDir}`]
-      : [
+    plan: home.modelIsOurs
+      ? [
           `a download of about 170 MB into ${home.modelDir}, from the npm registry and Hugging Face,`,
           "each file checked against a pinned hash. It lets search match meaning.",
-        ],
-    pending: !there,
+        ]
+      : [`in place, in ${home.modelDir}`],
+    pending: home.modelIsOurs,
     apply: () => prepareModel(io, home),
   };
 }

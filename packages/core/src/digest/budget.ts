@@ -15,6 +15,8 @@ import type { Chore } from "../ports.ts";
 export const SESSION_TOKENS = 150_000;
 /** What a reading keeps back for the two small questions that follow the big ones (judge, choose). */
 export const RESERVE_TOKENS = 8_000;
+/** The least a daily budget can be and still read anything: one reading's reserve and its answers, with room for what it reads. */
+export const MIN_DAILY_TOKENS = 20_000;
 /** What an answer may cost: a list of candidate facts is a few hundred tokens, and a model may think first. */
 const ANSWER_TOKENS = 2_000;
 /** How far back the operator's daily budget looks. */

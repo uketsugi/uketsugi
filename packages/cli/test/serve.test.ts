@@ -316,3 +316,28 @@ describe("with the server stopped", () => {
     expect([withOld.status, withNew.status]).toEqual([401, 200]);
   });
 });
+
+describe("ukt serve on a store it cannot open", () => {
+  test("says what is wrong and what to do, not what the engine threw", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ukt-unreadable-"));
+    const dataDir = join(root, "data");
+    const options = { dataDir, host: "127.0.0.1", port: "0" };
+    await (await serve(fakeIo(), options, {})).close();
+    // A copy made as another user leaves the engine's folder closed to this one.
+    await chmod(join(dataDir, "pg"), 0o000);
+    const failed = await serve(fakeIo(), options, {}).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await chmod(join(dataDir, "pg"), 0o755);
+    await rm(root, { recursive: true, force: true });
+
+    expect(failed).toMatchObject({
+      failure: {
+        what: `The store in ${dataDir} cannot be read and written by this user.`,
+        meaning: "The server did not start.",
+        next: expect.stringContaining("give this user read and write access") as string,
+      },
+    });
+  });
+});

@@ -41,14 +41,16 @@ interface Harness {
   /** The name its MCP client gives on a call, and its key on the Connect page. */
   readonly id: string;
   readonly name: string;
-  /** What adds the server where it takes no token: a shell command, or the URL itself. Slots: `{name}`, `{url}`. */
+  /** What adds the server where it takes no token: a shell command, the URL itself, or the text of a file. Slots: `{name}`, `{url}`. */
   readonly add: string;
   /**
    * What adds it where every caller must send a token. Slots as `add`, and the variable that
    * holds the token: `{token}` where a shell reads it, `{tokenVar}` its name alone.
    */
   readonly addWithToken: string;
-  readonly addKind: "command" | "url";
+  readonly addKind: "command" | "url" | "file";
+  /** For a file: which file the text goes in and where in it, as a sentence that `add` follows. */
+  readonly addWhere?: string;
   /** What takes the server out again, for a command. */
   readonly remove?: string;
   /** What its person types to run set-up and to use memory in one session; absent where it offers no server commands. */
@@ -198,12 +200,13 @@ const HARNESSES: readonly Harness[] = [
   {
     id: "cursor",
     name: "Cursor",
-    add: "{url}",
-    addWithToken: "{url}",
-    addKind: "url",
-    note: 'Cursor has no command that adds a server: in ~/.cursor/mcp.json, under "mcpServers", add "{name}": {"url": "{url}"}. Its agent asks you to approve the server before it uses it.',
-    tokenNote:
-      'Beside "url", add "headers": {"Authorization": "Bearer <your token>"}; that was not run here.',
+    add: '"{name}": {"url": "{url}"}',
+    addWithToken: '"{name}": {"url": "{url}", "headers": {"Authorization": "Bearer <your token>"}}',
+    addKind: "file",
+    addWhere:
+      'Cursor has no command that adds a server. In ~/.cursor/mcp.json, under "mcpServers", add:',
+    note: "Its agent asks you to approve the server before it uses it.",
+    tokenNote: "Put your token in place of <your token>; that line was not run here.",
     known:
       "run here: Cursor's agent 2025.11.25 reads the server from ~/.cursor/mcp.json and asks for it to be approved; no session was started",
     plugin: () => null,
@@ -314,6 +317,7 @@ export function connectInfo(
       plugin: (plugins === null ? null : harness.plugin(origin, plugins, needsToken)) ?? undefined,
       add: filled(needsToken ? harness.addWithToken : harness.add, mcpUrl),
       add_kind: harness.addKind,
+      add_where: harness.addWhere,
       remove: line(harness.remove),
       setup: line(harness.setup),
       activate: line(harness.activate),

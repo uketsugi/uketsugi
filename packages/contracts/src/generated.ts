@@ -1041,13 +1041,17 @@ export interface ConnectHarness {
     adds_server: boolean;
   };
   /**
-   * What adds the server to the harness: a shell command, or the URL itself. It carries the token where `needs_token` is true.
+   * What adds the server to the harness: a shell command, the URL itself, or the text to put in a file. It carries the token where `needs_token` is true.
    */
   add: string;
   /**
    * What kind of text `add` is.
    */
-  add_kind: "command" | "url";
+  add_kind: "command" | "url" | "file";
+  /**
+   * For `file`: the sentence that says which file `add` goes in and where in it, ending in a colon, after which `add` follows, such as `In ~/.cursor/mcp.json, under "mcpServers", add:`.
+   */
+  add_where?: string;
   /**
    * For `command`: what takes the server out of the harness again. A harness keeps the token it was added with, so this comes before adding it with another.
    */

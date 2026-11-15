@@ -12,6 +12,7 @@ import {
   modelName,
   type ModelConfig,
 } from "@uketsugi/server";
+import { MIN_DAILY_TOKENS } from "@uketsugi/core";
 import { Option, type Command } from "commander";
 import { readLlmRecord, removeLlmRecord, writeLlmRecord, type Home } from "./home.ts";
 import { CliFailure, type Io } from "./report.ts";
@@ -40,7 +41,7 @@ export function llmOptions(command: Command, llm: string, from: "flag" | "enviro
   const url = new Option("--llm-url <url>", "where that model's provider is reached");
   const budget = new Option(
     "--llm-budget <tokens>",
-    `the most tokens, in and out, the server may spend on the model in a day: readings wait once it is reached (${DEFAULT_DAILY_TOKENS} if left out)`,
+    `the most tokens, in and out, the server may spend on the model in a day: readings wait once it is reached (${DEFAULT_DAILY_TOKENS} if left out, at least ${MIN_DAILY_TOKENS})`,
   );
   return from === "flag"
     ? command.addOption(model).addOption(url).addOption(budget)
@@ -54,15 +55,15 @@ function refused(what: string, next: string): CliFailure {
   return new CliFailure({ what, meaning: "Nothing was started or changed.", next });
 }
 
-/** The budget a run names, or the one on file, or none: a whole number of tokens of at least a thousand. */
+/** The budget a run names, or the one on file, or none: a whole number of tokens of at least `MIN_DAILY_TOKENS`. */
 function budgetOf(told: string | undefined, onFile: number | undefined): number | undefined {
   const text = told?.trim() ?? "";
   if (text === "") return onFile;
   const tokens = Number(text);
-  if (Number.isInteger(tokens) && tokens >= 1000) return tokens;
+  if (Number.isInteger(tokens) && tokens >= MIN_DAILY_TOKENS) return tokens;
   throw refused(
     `"${text}" is not a budget --llm-budget takes.`,
-    "Pass a whole number of tokens from 1000 up, for the most the server may spend on the model in a day.",
+    `Pass a whole number of tokens from ${MIN_DAILY_TOKENS} up, for the most the server may spend on the model in a day. A smaller one cannot pay for a single reading.`,
   );
 }
 

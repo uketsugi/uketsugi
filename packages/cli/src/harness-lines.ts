@@ -12,11 +12,15 @@ function harnessLines(harness: ConnectHarness): string[] {
   const indented = (text: string): string[] => text.split("\n").map((line) => `${INDENT}${line}`);
   if (harness.add_kind === "url")
     return [harness.name, ...indented(`Give the client the address ${harness.add}`)];
+  const how =
+    harness.add_kind === "file"
+      ? [harness.add_where ?? "Put this in its configuration file:", harness.add]
+      : [harness.add];
   const then =
     harness.activate !== undefined
       ? `then type ${harness.activate} in a session`
       : `then put the block in ${harness.instruction_file ?? "its instruction file"}: \`ukt ui\` shows it`;
-  return [harness.name, ...indented(harness.add), ...indented(then)];
+  return [harness.name, ...how.flatMap(indented), ...indented(then)];
 }
 
 /**

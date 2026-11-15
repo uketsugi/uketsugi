@@ -166,7 +166,7 @@ describe("the dashboard's side of the server: sign-in, the guard, the files and 
       ["antigravity", "command"],
       ["codex", "command"],
       ["vscode", "command"],
-      ["cursor", "url"],
+      ["cursor", "file"],
       ["other", "url"],
     ]);
     expect(connect.harnesses.at(-1)).toMatchObject({ add: `${url}/mcp` });

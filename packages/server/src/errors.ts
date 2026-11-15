@@ -16,7 +16,7 @@ export function unauthorized(): ToolFailure {
   return new ToolFailure("unauthorized", {
     what: "Nobody is signed in on this request.",
     meaning: "The dashboard's session has ended, or the request carried no token the server knows.",
-    next: "Sign in with your dashboard key on the sign-in page, or on the host run `ukt ui` and open the link it prints. A script sends a harness token as a bearer token.",
+    next: "Sign in with your dashboard key on the sign-in page; if you run this server, you can also run `ukt ui` on its host and open the link it prints, and if someone else runs it, ask them for a key. A script sends a harness token as a bearer token.",
   });
 }
 
@@ -27,7 +27,7 @@ export function unauthorized(): ToolFailure {
 export type TokenNeed = "reached" | "asks";
 
 /** How a person puts the token where a harness reads it, and adds the server again. */
-const ADD_AGAIN = `set ${TOKEN_ENV} in the shell (on the server's host: export ${TOKEN_ENV}="$(ukt token)"), remove the server from the harness and add it again with the command on the dashboard's Connect page`;
+const ADD_AGAIN = `set ${TOKEN_ENV} in the shell (if you run this server, on its host: export ${TOKEN_ENV}="$(ukt token)"; if someone else runs it, ask them for your token), remove the server from the harness and add it again with the command on the dashboard's Connect page`;
 
 /**
  * What a harness is told when `/mcp` does not accept it, one for each way that happens. A harness

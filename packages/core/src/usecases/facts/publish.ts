@@ -1,8 +1,15 @@
 import type { PublishFactInput, PublishFactResult } from "@uketsugi/contracts";
 import { eventBy, personActor, scopeOf, type CallContext, type Outcome } from "../../context.ts";
-import type { Actor, Caller, Fact, FactContent, ProjectRef } from "../../domain.ts";
+import type {
+  Actor,
+  Caller,
+  ClassedCitation,
+  Fact,
+  FactContent,
+  ProjectRef,
+} from "../../domain.ts";
 import { citationView, parseCitations } from "../../facts/citations.ts";
-import { nearFacts } from "../../facts/duplicates.ts";
+import { isLive, nearFacts, takeCitations } from "../../facts/duplicates.ts";
 import { forbidden, invalidInput } from "../../failure.ts";
 import { armDigest } from "../../digest/arm.ts";
 import type { CorePorts } from "../../ports.ts";
@@ -158,12 +165,32 @@ export function writeFact(
 }
 
 /**
+ * A claim published again is the fact already stored, and a citation it did not have yet is a
+ * second source for it: the fact takes it, as a correction by its author, which is why the fact
+ * is unconfirmed again. A repeat that brings nothing new changes nothing.
+ */
+async function withNewCitations(
+  ports: CorePorts,
+  ctx: CallContext,
+  fact: Fact,
+  offered: readonly ClassedCitation[],
+): Promise<{ status: Fact["status"]; citations: readonly ClassedCitation[] }> {
+  const same = { status: fact.status, citations: fact.citations };
+  if (!isLive(fact)) return same;
+  const { citations, taken } = takeCitations(fact.citations, { citations: offered }, new Set());
+  if (taken.length === 0) return same;
+  const correction = await correctionOf(ports, fact, { ...fact, citations });
+  const changed = await onFact(ports, ctx, { before: fact, correction, at: ports.clock.now() });
+  return { status: changed ? "unconfirmed" : fact.status, citations };
+}
+
+/**
  * Publishes one fact (flow F2). The scanner runs first; then the citations are classed, the text
  * analysed and the fact embedded. One unit, on the caller's own audience, then decides where it
  * lands and writes it there with its event and its follow-up jobs: in the shared audience when
  * the caller's person shares the project at that moment and other people can check the fact, and
  * otherwise in the person's own. A repeated publish of the caller's same claim returns the fact
- * already stored, wherever it is. Facts already visible whose text all but holds the claim are
+ * already stored, wherever it is, with the citations of the repeat that it did not hold. Facts already visible whose text all but holds the claim are
  * named as `similar`.
  */
 export async function publishFact(
@@ -191,12 +218,15 @@ export async function publishFact(
   if (stored.created) await armDigest(ports, ctx.session, "quiet");
 
   const fact = stored.fact;
+  const held = stored.created
+    ? { status: fact.status, citations: fact.citations }
+    : await withNewCitations(ports, ctx, fact, citations);
   const similar = near.filter((other) => other.id !== fact.id).slice(0, SIMILAR_LIMIT);
   return {
     id: fact.id,
-    status: fact.status,
+    status: held.status,
     created: stored.created,
-    citations: fact.citations.map(citationView),
+    citations: held.citations.map(citationView),
     ...(similar.length === 0
       ? {}
       : { similar: similar.map((other) => ({ id: other.id, claim: other.claim })) }),

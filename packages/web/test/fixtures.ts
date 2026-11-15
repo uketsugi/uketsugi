@@ -84,6 +84,15 @@ export const connect: ConnectInfo = {
       instruction_file: "~/.gemini/GEMINI.md",
     },
     {
+      id: "cursor",
+      name: "Cursor",
+      add: `"uketsugi": {"url": "${MCP_URL}"}`,
+      add_kind: "file",
+      add_where:
+        'Cursor has no command that adds a server. In ~/.cursor/mcp.json, under "mcpServers", add:',
+      known: "run here: Cursor's agent 2025.11.25",
+    },
+    {
       id: "other",
       name: "Another client",
       add: MCP_URL,
@@ -378,7 +387,7 @@ export const unauthorized: ApiError = {
     code: "unauthorized",
     what: "Nobody is signed in on this request.",
     meaning: "The dashboard's session has ended, or the request carried no token the server knows.",
-    next: "Sign in with your dashboard key on the sign-in page, or on the host run `ukt ui` and open the link it prints. A script sends a harness token as a bearer token.",
+    next: "Sign in with your dashboard key on the sign-in page, ; if you run this server, you can also run `ukt ui` on its host and open the link it prints, and if someone else runs it, ask them for a key. A script sends a harness token as a bearer token.",
     retry: false,
   },
 };

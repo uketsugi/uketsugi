@@ -112,7 +112,7 @@ export function citationHash(entry: ClassedCitation): Promise<string> {
  */
 export function takeCitations(
   held: readonly ClassedCitation[],
-  member: Fact,
+  member: Pick<Fact, "citations">,
   group: ReadonlySet<string>,
 ): { citations: ClassedCitation[]; taken: ClassedCitation[] } {
   const seen = new Set(held.map((entry) => canonicalJson(entry.citation)));

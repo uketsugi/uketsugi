@@ -229,7 +229,7 @@ export async function installService(
 ): Promise<string | null> {
   const text = unitText(ownCommand(env), home);
   if (state.text !== text) {
-    await mkdir(dirname(state.unitFile), { recursive: true });
+    await rememberMade(home, await mkdir(dirname(state.unitFile), { recursive: true }), state);
     await writeFileAtomic(state.unitFile, text, { mode: 0o644 });
   }
   const failed =
@@ -239,21 +239,42 @@ export async function installService(
   return failed;
 }
 
+/** Where set-up notes the folders it had to make for the unit, so that uninstall removes those and no others. */
+const madeFile = (home: Home): string => join(home.dataDir, "made-folders");
+
+/** Notes the folders `mkdir` made, from the first it made down to the unit's own; it made none where it returns nothing. */
+async function rememberMade(home: Home, first: string | undefined, state: Managed): Promise<void> {
+  if (first === undefined) return;
+  const made: string[] = [];
+  for (let dir = dirname(state.unitFile); dir.length >= first.length; dir = dirname(dir))
+    made.push(dir);
+  await mkdir(home.dataDir, { recursive: true, mode: 0o700 });
+  await writeFileAtomic(madeFile(home), `${[...made, ...(await madeBefore(home))].join("\n")}\n`);
+}
+
+/** The folders set-up noted, deepest first. */
+async function madeBefore(home: Home): Promise<string[]> {
+  const text = await readFile(madeFile(home), "utf8").catch(() => "");
+  return text.split("\n").filter((line) => line !== "");
+}
+
 /** Stops the service, takes it out of the manager and deletes the unit. What went wrong, or null. */
 export async function removeService(
   io: Io,
   env: NodeJS.ProcessEnv,
+  home: Home,
   state: Managed,
 ): Promise<string | null> {
   const failed = await systemctl(io, env, ["disable", "--now", UNIT]);
   if (failed !== null) return failed;
   await rm(state.unitFile, { force: true });
-  // What `enable` and the first write made, once nothing else of the person's is in them.
+  // What `enable` made, and the folders set-up made for the unit, once nothing else of the person's is in them.
   for (const dir of [
     join(dirname(state.unitFile), "default.target.wants"),
-    dirname(state.unitFile),
+    ...(await madeBefore(home)),
   ])
     await rmdir(dir).catch(() => undefined);
+  await rm(madeFile(home), { force: true });
   return systemctl(io, env, ["daemon-reload"]);
 }
 

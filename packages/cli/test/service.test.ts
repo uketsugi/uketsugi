@@ -93,6 +93,20 @@ describe("a server that runs as the service", { timeout: 60_000 }, () => {
     expect(service?.notes?.join("\n")).toContain("Run `ukt serve --data-dir");
   });
 
+  test("is, once set-up turned it off for a server that did not come up, fixed by its cause and set-up, not by starting it", async () => {
+    const { dataDir, machine, env, io } = await served();
+    await machine.onStop?.();
+    machine.running = false;
+    machine.enabled = false;
+
+    const [service] = findingsOf(await doctor(io(), { dataDir }, env), "service");
+
+    expect(service).toMatchObject({
+      state: "fail",
+      fix: "put right what the lines below say, then run `ukt setup`",
+    });
+  });
+
   test("tells whoever starts a second one by hand what is running and how to stop it", async () => {
     const { dataDir, env, io } = await served();
 

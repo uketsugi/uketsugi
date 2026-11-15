@@ -8,8 +8,17 @@
  * A holder that finds its lock taken over throws from a timer, which ends the process: it must not
  * write beside the new owner.
  */
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import {
+  access,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
@@ -62,6 +71,41 @@ export class StoreInUseError extends Error {
     super(message, options);
     this.name = "StoreInUseError";
   }
+}
+
+/**
+ * Thrown when the engine cannot start on a data directory's files. The engine throws things that
+ * are not errors (an `ErrnoError` is a plain object), so the cause is put in words here: that the
+ * files cannot be read and written by this user, which is the common one, else what it said.
+ */
+export class StoreUnreadableError extends Error {
+  /** Whether the files could not be read and written by this user. */
+  readonly permission: boolean;
+  constructor(directory: string, cause: unknown, permission: boolean) {
+    const said =
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === "object" && cause !== null && "name" in cause
+          ? `${String(cause.name)}${"errno" in cause ? ` ${String(cause.errno)}` : ""}`
+          : String(cause);
+    super(
+      permission
+        ? `The store in ${directory} cannot be read and written by this user.`
+        : `The store in ${directory} could not be opened: ${said}.`,
+      { cause },
+    );
+    this.name = "StoreUnreadableError";
+    this.permission = permission;
+  }
+}
+
+/** Whether this user may read, write and enter the directory; true where it is not there yet. */
+export async function usable(directory: string): Promise<boolean> {
+  const code = await access(directory, constants.R_OK | constants.W_OK | constants.X_OK).then(
+    () => null,
+    (error: NodeJS.ErrnoException) => error.code,
+  );
+  return code !== "EACCES" && code !== "EPERM";
 }
 
 /** Whether a data directory holds an embedded store: its engine's directory is there. */

@@ -309,7 +309,7 @@ rm -rf ~/.local/share/uketsugi ~/.local/lib/uketsugi ~/.local/bin/ukt
 ```
 
 The first command undoes what set-up did outside the data directory: it stops and removes the
-service. It shows what it will do and asks first, and it leaves your data and the program, which
+service, and the folders set-up made for it. It shows what it will do and asks first, and it leaves your data and the program, which
 the second line deletes. It does not touch a harness, since set-up did not: it prints the
 command that takes the server out of each, such as `claude mcp remove uketsugi -s user`. If you
 used `/uketsugi:setup` or the plugin, the block between `<!-- uketsugi:start -->` and
@@ -393,13 +393,15 @@ The providers are `google`, `openai` and `anthropic`, and `openai-compatible` fo
 serves OpenAI's chat API at a URL, such as a model on your own machine:
 `ukt setup --llm openai-compatible/<model> --llm-url http://127.0.0.1:11434/v1`. `ukt doctor` asks
 the model one small question and says whether it answers; `ukt doctor --no-llm` leaves the
-question out.
+question out. Doctor also says when none is configured; set-up and `ukt serve` mention a model
+only where one is.
 
 The server spends on the model only within bounds you can see and set. A session's readings
 together cost at most 150,000 tokens, and a session that says more has the rest dropped. The
 server as a whole spends at most 1,000,000 tokens (in and out together) in any 24 hours unless you
-say otherwise, as `--llm-budget <tokens>` to `ukt setup` (remembered) or to `ukt serve`; once it is
-reached, readings wait, and the turns they would read are kept until there is room. `ukt doctor`
+say otherwise, as `--llm-budget <tokens>` to `ukt setup` (remembered) or to `ukt serve`, and not
+less than 20,000, which is about what one reading needs; a smaller number is refused. Once the
+budget is reached, readings wait, and the turns they would read are kept until there is room. `ukt doctor`
 shows what the last 24 hours cost against the budget. A reading that failed after it had cost
 tokens is not asked again.
 
