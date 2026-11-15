@@ -8,8 +8,10 @@
 # answer is waited on for three seconds and no longer.
 
 url=${CLAUDE_PLUGIN_OPTION_URL%/}
+if [ -z "$url" ]; then exit 0; fi
+# A server on this machine that you alone use takes no token; any other is sent the one you gave.
 token=${CLAUDE_PLUGIN_OPTION_TOKEN:-}
-if [ -z "$url" ] || [ -z "$token" ]; then exit 0; fi
+authorization=${token:+header = \"Authorization: Bearer $token\"}
 
 # The remote names the project, as `git remote get-url origin` does for the agent. A password
 # written into it stays here, and so does what a header cannot hold.
@@ -21,7 +23,7 @@ origin=$(git -C "${CLAUDE_PROJECT_DIR:-.}" remote get-url origin 2>/dev/null |
 answer=$(
   curl -q --silent --fail --connect-timeout 1 --max-time 3 --config /dev/fd/3 \
     --data-binary @- "$url/api/hooks/claude-code" 3<<EOF
-header = "Authorization: Bearer $token"
+$authorization
 header = "Content-Type: application/json"
 header = "X-Uketsugi-Origin: $origin"
 EOF

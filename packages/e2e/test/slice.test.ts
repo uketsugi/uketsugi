@@ -15,7 +15,7 @@ describe("the slice: publish, search and update over /mcp on a real server", () 
   let client: McpTestClient;
   let factId: string;
 
-  const start = () => startLocalServer({ dataDir, port: 0, token: TOKEN });
+  const start = () => startLocalServer({ dataDir, port: 0, token: TOKEN, requireToken: true });
   const connect = () => connectMcp({ url: `${server.url}/mcp`, token: TOKEN });
 
   beforeAll(async () => {
@@ -37,7 +37,7 @@ describe("the slice: publish, search and update over /mcp on a real server", () 
     ).toEqual(TOOLS);
   });
 
-  test("a call without a bearer token is refused with 401", async () => {
+  test("a call without a bearer token is refused with 401, by a server told to ask for one", async () => {
     const response = await fetch(`${server.url}/mcp`, { method: "POST", body: "{}" });
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toBe("Bearer");

@@ -172,7 +172,8 @@ gets its brief with its first answer from Uketsugi.
 Any client that takes a remote MCP server by its URL can use the same server:
 
 - **URL:** `http://127.0.0.1:7410/mcp`, over Streamable HTTP.
-- **Header:** `Authorization: Bearer <token>`. `ukt token` prints the token.
+- **Header:** `Authorization: Bearer <token>`. `ukt token` prints the token. On the server's own
+  machine, while you are its only person, the header can be left out.
 - **Tools it will find:** `search_facts`, `publish_fact`, `update_fact`, `search_tasks`,
   `publish_task`, `claim_task` and `update_task`.
 
@@ -265,6 +266,12 @@ agents publish is private to that person until they share the project, which the
 on the dashboard's Projects page. Sharing shows the others their facts there that carry a citation
 that can be looked up, and their tasks, under their name. `ukt people` lists who is on the server and
 `ukt revoke <id>` ends one token or key.
+
+A server that listens only on its own machine takes its one person's harnesses there by its
+address alone. From the first person you add, every harness sends a token, yours included, and
+the same holds for a server that listens beyond its machine. A proxy or a tunnel on the same
+machine looks like a local program to the server, so before you put one in front of a server
+that you alone use, start it with `ukt serve --require-token`.
 
 To reach it from other machines, start it with `ukt serve --host 0.0.0.0 --allowed-host <name>`.
 It answers only to the names it is given, and it speaks plain HTTP, so put it behind a proxy that

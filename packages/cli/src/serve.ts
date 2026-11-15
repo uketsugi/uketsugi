@@ -32,6 +32,8 @@ export interface ServeOptions extends Listen, OnStore {
   readonly allowedHost?: readonly string[];
   /** How long a task's lease lasts, in minutes: `--task-lease-minutes` or `UKT_TASK_LEASE_MINUTES`. */
   readonly taskLeaseMinutes?: string;
+  /** Every caller sends a token, this machine's own harnesses included: `--require-token` or `UKT_REQUIRE_TOKEN`. */
+  readonly requireToken?: boolean;
   readonly json?: boolean;
 }
 
@@ -130,6 +132,18 @@ function sharedLines(options: ServeOptions, port: number): string[] {
   );
 }
 
+/**
+ * Who must send a token. A server that only this machine reaches takes its one person's harnesses
+ * by its address alone; the line says what ends that, since a harness added that way is refused
+ * from then on.
+ */
+function tokenNeedLine(options: ServeOptions, beyond: boolean): string {
+  if (options.requireToken === true) return "harnesses: each sends a token (--require-token).";
+  return beyond
+    ? "harnesses: each sends a token, because this server listens beyond this machine."
+    : "harnesses: on this machine they need no token while you are this server's only person. Behind a proxy or a tunnel, start it with --require-token.";
+}
+
 function tokenLine(home: Home, onFile: boolean): string {
   if (onFile) return `token: ${home.tokenFile} (print it with \`ukt token\`)`;
   return home.givenToken === undefined
@@ -172,6 +186,7 @@ export async function serve(
     token: held ?? undefined,
     hostKey: await ensureHostKey(home),
     taskLeaseMs,
+    requireToken: options.requireToken,
   }).catch(async (error: unknown) => {
     await embedder?.close();
     throw startFailure(error, home, `Port ${port} on ${options.host}`);
@@ -192,6 +207,7 @@ export async function serve(
         `uketsugi is serving ${server.url}/mcp`,
         ...sharedLines(options, server.port),
         storeLine(home, store),
+        tokenNeedLine(options, server.beyond),
         tokenLine(home, onFile !== null || server.issuedToken !== null),
         model.line,
         "Stop it with Ctrl-C.",
@@ -229,6 +245,12 @@ export function serveVerb({ io, env, verb, run }: Program): void {
   onStore(listening(verb("serve", "run the server until it is stopped")))
     .addOption(hosts)
     .addOption(lease)
+    .addOption(
+      new Option(
+        "--require-token",
+        "take no harness without a token, this machine's own included",
+      ).env("UKT_REQUIRE_TOKEN"),
+    )
     .action(async (options: ServeOptions) => {
       let serving: Serving | undefined;
       await run("serve", options, async () => {

@@ -359,8 +359,16 @@ describe("the script a hook runs", () => {
     expect(await hook("{}", start)).toEqual({ code: 0, out: "" });
     const before = received.length;
     expect(await hook("{}", { ...start, url: "http://127.0.0.1:9" })).toEqual({ code: 0, out: "" });
-    expect(await hook("{}", { ...start, token: "" })).toEqual({ code: 0, out: "" });
+    expect(await hook("{}", { ...start, url: "" })).toEqual({ code: 0, out: "" });
     expect(received).toHaveLength(before);
+  });
+
+  test("sends no Authorization header where it was given no token: a server its person alone uses takes none", async () => {
+    answer = { status: 200, body: context("The block.") };
+    const { out } = await hook("{}", { event: "SessionStart", token: "" });
+    expect(out).toBe(`${answer.body}\n`);
+    expect(received.at(-1)?.headers).not.toHaveProperty("authorization");
+    expect(received.at(-1)?.headers).toMatchObject({ "content-type": "application/json" });
   });
 
   test("prints what the server itself answers a session's start with, reached by an address typed with a slash at its end", async () => {

@@ -3,6 +3,7 @@
  * a folder of dashboard files and a token, and the few ways a test reaches it.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { request, type IncomingHttpHeaders } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acceptToken, ensureOwner } from "@uketsugi/core";
@@ -15,6 +16,36 @@ export const TOKEN = "ukt_test_token_for_the_server";
 export const PROJECT = "github.com/acme/billing-service";
 export const CLAIM = "Invoice webhooks retry five times with exponential backoff";
 export const CITATION = "services/billing/webhooks/retry.ts:41-88@a41d07c";
+
+/**
+ * One HTTP exchange with headers a `fetch` will not send: Host, Origin and fetch metadata, as a
+ * browser or a proxy sets them.
+ */
+export function exchange(
+  url: string,
+  sent: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<{ status: number; headers: IncomingHttpHeaders; text: string }> {
+  return new Promise((resolve, reject) => {
+    const asked = request(
+      url,
+      { method: sent.method ?? "GET", headers: sent.headers },
+      (answer) => {
+        const chunks: Buffer[] = [];
+        answer.on("data", (chunk: Buffer) => chunks.push(chunk));
+        answer.once("error", reject);
+        answer.once("end", () =>
+          resolve({
+            status: answer.statusCode ?? 0,
+            headers: answer.headers,
+            text: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
+      },
+    );
+    asked.once("error", reject);
+    asked.end(sent.body);
+  });
+}
 
 export interface RunningServer {
   readonly clock: FakeClock;

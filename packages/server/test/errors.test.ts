@@ -25,7 +25,8 @@ describe("every failure the server answers with has the one error shape", () => 
   }
 
   beforeAll(async () => {
-    local = await openLocalPorts({});
+    // Told to ask every caller for a token: else its one person's own machine would need none.
+    local = await openLocalPorts({ requireToken: true });
     await acceptToken(local.ports, local.owner, TOKEN, "test");
     // A store whose projects cannot be listed stands in for any fault inside the server.
     const projects = {
@@ -57,7 +58,9 @@ describe("every failure the server answers with has the one error shape", () => 
     // Added by its URL alone.
     const none = await mcp();
     expect(none.status).toBe(401);
-    expect((await whatOf(none)).what).toBe("This harness sent no token.");
+    expect((await whatOf(none)).what).toBe(
+      "This harness sent no token, and this server asks every caller for one.",
+    );
     // Added while the variable its command reads was unset: `Bearer` and nothing after it.
     for (const header of ["Bearer", "Bearer ", "Bearer    "]) {
       const empty = await mcp(header);

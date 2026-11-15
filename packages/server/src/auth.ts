@@ -1,7 +1,9 @@
 /**
  * Who a request acts as, by three kinds of credential that never stand in for one another.
  * - A harness, a script and most of the command line send an agent token as a bearer, which the
- *   Identity port resolves: it calls the tools and reads.
+ *   Identity port resolves: it calls the tools and reads. On a server that only its own machine
+ *   reaches, a program of that machine may send none, and is whoever the identity says: the
+ *   server's one person, while there is one.
  * - A person signs a browser in to the dashboard, which ends in a cookie session: from their own
  *   machine with the key they were given for it, which no harness holds, or on the host with a
  *   one-time code a terminal mints (`ukt ui`). What only a person may do needs that session.
@@ -35,7 +37,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
-import { failed, foreign, notOperator, unauthorized } from "./errors.ts";
+import { failed, foreign, notOperator, unauthorized, type TokenNeed } from "./errors.ts";
 import { overTls } from "./guard.ts";
 
 /** How long a one-time code can be exchanged. */
@@ -55,8 +57,8 @@ function sameSecret(a: string, b: string): boolean {
 
 /** What a request is told for each way its bearer token can fail it. */
 export interface TokenRefusals {
-  /** No Authorization header. */
-  readonly none: () => ToolFailure;
+  /** No token at all. */
+  readonly none: (why: TokenNeed) => ToolFailure;
   /** An Authorization header that holds no token. */
   readonly empty: () => ToolFailure;
   /** A token the server does not know. */
@@ -70,32 +72,47 @@ const NOT_SIGNED_IN: TokenRefusals = {
   unknown: unauthorized,
 };
 
+/** Whether a request carries no token: no Authorization header, or `Bearer` and nothing after it. */
+function sentNoToken(c: Context): boolean {
+  return /^\s*(Bearer\s*)?$/i.test(c.req.header("authorization") ?? "");
+}
+
 /**
  * Lets a request through as the person its bearer token belongs to, and sets `caller`. A request
- * that is not let through is told what `refusals` says for the way it failed.
+ * that carries no token is let through as whoever the identity says it is, where `alone` says it
+ * came from the server's own machine and can have come from nowhere else. A request that is not
+ * let through is told what `refusals` says for the way it failed. A token the server does not
+ * know is refused wherever it came from, never read as none.
  */
 export function tokenAuth(
   app: Pick<App, "authenticate" | "challenge">,
   refusals: TokenRefusals = NOT_SIGNED_IN,
+  alone: (c: Context) => boolean = () => false,
 ): MiddlewareHandler<AuthEnv> {
-  const refused = (failure: ToolFailure) => ({
+  const refused = (failure: (c: Context) => ToolFailure) => ({
     wwwAuthenticateHeader: app.challenge,
-    message: failure.toToolError(),
+    message: (c: Context) => failure(c).toToolError(),
   });
-  return bearerAuth<AuthEnv>({
-    async verifyToken(token, c) {
-      try {
-        c.set("caller", await app.authenticate(token));
-        return true;
-      } catch (error) {
-        if (error instanceof AuthError) return false;
-        throw error;
-      }
-    },
-    noAuthenticationHeader: refused(refusals.none()),
-    invalidAuthenticationHeader: refused(refusals.empty()),
-    invalidToken: refused(refusals.unknown()),
+  const accept = async (c: Context<AuthEnv>, token: string | undefined): Promise<boolean> => {
+    try {
+      c.set("caller", await app.authenticate(token));
+      return true;
+    } catch (error) {
+      if (error instanceof AuthError) return false;
+      throw error;
+    }
+  };
+  const bearer = bearerAuth<AuthEnv>({
+    verifyToken: (token, c) => accept(c, token),
+    // Reached with no token only once the identity, if it was asked, has said no.
+    noAuthenticationHeader: refused((c) => refusals.none(alone(c) ? "asks" : "reached")),
+    invalidAuthenticationHeader: refused(() => refusals.empty()),
+    invalidToken: refused(() => refusals.unknown()),
   });
+  return async (c, next) => {
+    if (sentNoToken(c) && alone(c) && (await accept(c, undefined))) return next();
+    return bearer(c, next);
+  };
 }
 
 /** A signed-in browser: who it acts as, and the value its changing requests must send back. */

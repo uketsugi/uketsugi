@@ -2,7 +2,7 @@
  * `/api`: the dashboard's routes, the ones the host's command line calls and the one a harness's
  * hooks call (`hooks.ts`). The shapes are the contract's; every query and body is checked against
  * its schema by core, and every decision is a use case of core's. A request is a person's by its
- * bearer token or by the dashboard's cookie session.
+ * bearer token, by the dashboard's cookie session, or as `/mcp` takes one that carries neither.
  *
  * Two kinds of route are narrower than that. What reaches every person's data or administers
  * the server (a snapshot of the store, people and their credentials, a sign-in code for the
@@ -38,7 +38,7 @@ import {
   type App,
   type AppPorts,
 } from "@uketsugi/core";
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { every, some } from "hono/combine";
 import { ipRestriction } from "hono/ip-restriction";
@@ -71,6 +71,8 @@ export interface ApiDeps {
   readonly plugins: string | null;
   /** A copy of the whole store while it serves, where the store's host can make one. */
   readonly snapshot?: () => Promise<Blob>;
+  /** Whether a request can only have come from the server's own machine: one that may carry no token. */
+  readonly alone: (c: Context) => boolean;
 }
 
 /** The largest request body `/api` reads: what a hook sends holds an agent's last message, not a file. */
@@ -216,7 +218,7 @@ export function apiRoutes(deps: ApiDeps): Hono<AuthEnv> {
   signInRoutes(api, deps);
   inPersonRoutes(api, deps);
   operatorRoutes(api, deps);
-  api.use("*", some(tokenAuth(deps.app), deps.signIn.cookieAuth));
+  api.use("*", some(tokenAuth(deps.app, undefined, deps.alone), deps.signIn.cookieAuth));
   personRoutes(api, deps);
   api.all("*", (c) => failed(c, noRoute(c.req.method, c.req.path)));
   return api;

@@ -13,8 +13,8 @@
     "token": {
       "type": "string",
       "title": "Token",
-      "description": "The token your harness sends: `ukt token` prints it on the server's host, or whoever runs the server gave you one.",
-      "required": true,
+      "description": "The token your harness sends: `ukt token` prints it on the server's host, or whoever runs the server gave you one. Leave it empty for a server on this machine that you alone use.",
+      "required": false,
       "sensitive": true
     }
   },

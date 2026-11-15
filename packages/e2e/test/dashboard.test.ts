@@ -1,4 +1,3 @@
-import { request } from "node:http";
 import {
   API_CSRF_HEADER,
   FENCED_BLOCK,
@@ -13,23 +12,16 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
   CITATION,
   CLAIM,
+  exchange,
   PROJECT,
   startServer,
   TOKEN,
   type RunningServer,
 } from "./running-server.ts";
 
-/** One HTTP exchange with headers a `fetch` will not send: Host, Origin and fetch metadata. */
-function raw(url: string, headers: Record<string, string>): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const sent = request(url, { method: "GET", headers }, (response) => {
-      response.resume();
-      resolve(response.statusCode ?? 0);
-    });
-    sent.once("error", reject);
-    sent.end();
-  });
-}
+/** The status a GET with these headers is answered with. */
+const raw = async (url: string, headers: Record<string, string>): Promise<number> =>
+  (await exchange(url, { headers })).status;
 
 describe("the dashboard's side of the server: sign-in, the guard, the files and /api", () => {
   let server: RunningServer;
@@ -65,7 +57,6 @@ describe("the dashboard's side of the server: sign-in, the guard, the files and 
     const { person, csrf } = (await session.json()) as DashboardSession;
     expect(person).toBe("you");
     expect((await fetch(`${url}/api/session`)).status).toBe(401);
-    expect((await fetch(`${url}/api/facts`)).status).toBe(401);
     expect((await fetch(`${url}/api/facts`, { headers: { cookie } })).status).toBe(200);
 
     const change = (headers: Record<string, string>) =>

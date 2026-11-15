@@ -140,19 +140,38 @@ export async function replaceTokens(
   return { token: await issueToken(ports, caller, label), revoked: live.length };
 }
 
-/** The identity of a local host and a community server: a bearer token whose hash the store holds. */
-export function createTokenIdentity(ports: Pick<CorePorts, "store" | "clock">): Identity {
+export interface TokenIdentityOptions {
+  /** Whether every request must carry a token, the host's one person's included. Left out, theirs need not. */
+  readonly requireToken?: boolean;
+}
+
+/**
+ * The identity of a local host and a community server: a bearer token whose hash the store holds.
+ * A request that carried none is the host's own person while nobody else is on the host, unless
+ * whoever runs it asked every caller for a token: what one person keeps on their own machine is
+ * theirs to reach from it. The first person added ends that for everyone.
+ */
+export function createTokenIdentity(
+  ports: DirectoryPorts,
+  options: TokenIdentityOptions = {},
+): Identity {
   const { directory } = ports.store;
-  const holderOf = async (secret: string | undefined, kind: CredentialKind): Promise<Caller> => {
-    if (secret === undefined || secret === "") throw new AuthError("missing");
+  const holderOf = async (secret: string, kind: CredentialKind): Promise<Caller> => {
+    if (secret === "") throw new AuthError("missing");
     const hash = await sha256Hex(secret);
     const caller = await directory.callerByTokenHash(hash, kind, ports.clock.now());
     if (caller === null) throw new AuthError("invalid");
     return caller;
   };
+  const onlyPerson = async (): Promise<Caller> => {
+    if (options.requireToken === true) throw new AuthError("missing");
+    const owner = await ensureOwner(ports);
+    if ((await directory.people(owner.orgId)).length !== 1) throw new AuthError("missing");
+    return owner;
+  };
   return {
     challenge: "Bearer",
-    authenticate: (bearer) => holderOf(bearer, "agent"),
+    authenticate: (bearer) => (bearer === undefined ? onlyPerson() : holderOf(bearer, "agent")),
     signIn: (key) => holderOf(key, "person"),
     current: (caller) =>
       caller.credentialId === null

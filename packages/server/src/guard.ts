@@ -15,6 +15,7 @@ import {
   validateHostHeader,
   validateOriginHeader,
 } from "@modelcontextprotocol/server";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, MiddlewareHandler } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { failed, foreign } from "./errors.ts";
@@ -29,7 +30,31 @@ const LOCAL = [
 ] as const;
 
 /** The addresses a request from this machine arrives from. */
-export const LOOPBACK_ADDRESSES = LOCAL.map((family) => family.loopback);
+export const LOOPBACK_ADDRESSES: readonly string[] = LOCAL.map((family) => family.loopback);
+
+/**
+ * What a proxy or a tunnel adds to a request it passes on. One that runs on this machine connects
+ * from a loopback address whoever it speaks for, so a request that carries any of these is taken
+ * to come from elsewhere. A proxy that adds none cannot be told from a local program: whoever
+ * puts one in front of a server asks every caller for a token.
+ */
+const PASSED_ON = /^(forwarded|via|x-real-ip|x-forwarded-.*)$/;
+
+/**
+ * Whether a request came straight from a program on this machine: its connection is from a
+ * loopback address and nothing in it says it was passed on. A request with no connection behind
+ * it, as a test hands one to `fetch`, did not.
+ */
+export function fromThisMachine(c: Context): boolean {
+  let address: string | undefined;
+  try {
+    ({ address } = getConnInfo(c).remote);
+  } catch {
+    return false;
+  }
+  if (address === undefined || !LOOPBACK_ADDRESSES.includes(address)) return false;
+  return ![...c.req.raw.headers.keys()].some((name) => PASSED_ON.test(name));
+}
 
 /** The address a server listens on unless it is told another. */
 export const DEFAULT_HOST = LOCAL[0].loopback;

@@ -1,6 +1,7 @@
 /**
  * The wiring of the server `ukt` runs: its owner, who runs it and may add other people, the system
- * clock, UUIDv7 ids, an identity that checks bearer tokens against the store, and the store
+ * clock, UUIDv7 ids, an identity that checks bearer tokens against the store and takes the owner
+ * at their word while they are alone on it, and the store
  * itself: the embedded engine in a data directory, or a PostgreSQL server when it is given one's
  * address.
  */
@@ -47,6 +48,8 @@ export interface LocalPortsOptions {
   readonly embedder?: Embedder | null;
   /** How long a task's lease lasts, in milliseconds. Left out, core's fifteen minutes. */
   readonly taskLeaseMs?: number;
+  /** Whether every caller must send a token, the owner's own harnesses on this machine included. */
+  readonly requireToken?: boolean;
 }
 
 /** The ports of the server `ukt` runs, and the owner they belong to. */
@@ -63,7 +66,7 @@ export interface LocalPorts {
  * `ports.identity` and passes the rest to `composeServer` unchanged.
  */
 export async function openLocalPorts(options: LocalPortsOptions): Promise<LocalPorts> {
-  const { dataDir, databaseUrl, taskLeaseMs } = options;
+  const { dataDir, databaseUrl, taskLeaseMs, requireToken } = options;
   const embedded = databaseUrl === undefined ? await openEmbeddedStore({ dataDir }) : null;
   const store = embedded ?? (await openServerStore({ connectionString: databaseUrl ?? "" }));
   const embedder = options.embedder ?? null;
@@ -71,7 +74,7 @@ export async function openLocalPorts(options: LocalPortsOptions): Promise<LocalP
   try {
     const owner = await ensureOwner(base);
     return {
-      ports: { ...base, identity: createTokenIdentity(base) },
+      ports: { ...base, identity: createTokenIdentity(base, { requireToken }) },
       owner,
       snapshot: embedded === null ? null : () => embedded.snapshot(),
       close: () => store.close(),
@@ -107,6 +110,8 @@ export interface LocalServer {
   /** The base URL; `/mcp` is under it. For a server bound to every address, its loopback URL. */
   readonly url: string;
   readonly port: number;
+  /** Whether it can be reached from beyond this machine, so that every caller sends a token. */
+  readonly beyond: boolean;
   /** The token issued at this start, if one was; it is shown once and never stored. */
   readonly issuedToken: string | null;
   close(): Promise<void>;
@@ -153,6 +158,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
     return {
       url: listening.url,
       port: listening.port,
+      beyond: listening.beyond,
       issuedToken,
       async close() {
         await server.close();

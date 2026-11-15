@@ -164,7 +164,6 @@ describeOnEachEngine("a task published into another project", (open) => {
       { event: "claimed", by: "you", client: "antigravity" },
     ]);
     expect((await hers.get(`/api/tasks/${randomUUID()}`)).status).toBe(404);
-    expect((await fetch(`${url}/api/tasks`)).status).toBe(401);
   });
 
   test("a person added to the server sees none of it until its publisher shares the project", async () => {

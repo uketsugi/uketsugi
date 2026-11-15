@@ -20,6 +20,12 @@ export function unauthorized(): ToolFailure {
   });
 }
 
+/**
+ * Why a request that carried no token is asked for one: the server can be `reached` from beyond
+ * its own machine, or the request was; or its identity `asks` every caller for one.
+ */
+export type TokenNeed = "reached" | "asks";
+
 /** How a person puts the token where a harness reads it, and adds the server again. */
 const ADD_AGAIN = `set ${TOKEN_ENV} in the shell (on the server's host: export ${TOKEN_ENV}="$(ukt token)"), remove the server from the harness and add it again with the command on the dashboard's Connect page`;
 
@@ -29,11 +35,20 @@ const ADD_AGAIN = `set ${TOKEN_ENV} in the shell (on the server's host: export $
  * with how the harness was added, then what to type.
  */
 export const HARNESS_REFUSALS = {
-  /** No Authorization header at all: the server was added by its URL alone. */
-  none: () =>
+  /**
+   * No token at all: the server was added by its address alone, which is enough only for the one
+   * person of a server that nothing but their own machine reaches.
+   */
+  none: (why: TokenNeed) =>
     new ToolFailure("unauthorized", {
-      what: "This harness sent no token.",
-      meaning: "The server was added to the harness without its Authorization header.",
+      what:
+        why === "reached"
+          ? "This harness sent no token, and this server takes one from whatever reaches it from beyond its own machine."
+          : "This harness sent no token, and this server asks every caller for one.",
+      meaning:
+        why === "reached"
+          ? "The server listens beyond its own machine, or the request was passed on by a proxy or a tunnel, so the address alone is not enough."
+          : "It has more than one person, or whoever runs it turned tokens on, so the address alone is not enough.",
       next: `To connect: ${ADD_AGAIN}.`,
     }),
   /** An Authorization header no token can be read from: most often the variable in the add command was empty. */

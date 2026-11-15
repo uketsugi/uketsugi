@@ -4,7 +4,8 @@
  * package holds no business rule: every decision is core's.
  *
  * In order, a request meets: the guard (Host, Origin and fetch metadata, on every route) and the
- * response headers; then `/healthz`, `/mcp` behind a bearer token, `/sign-in` (a one-time code,
+ * response headers; then `/healthz`, `/mcp` behind a bearer token (which one person on their own
+ * machine need not send, see `auth.ts`), `/sign-in` (a one-time code,
  * or the person's dashboard key), `/api`, the plugins a harness fetches (`/plugins`), and last the
  * dashboard's built files, with `index.html` for a deep link.
  */
@@ -22,14 +23,21 @@ import {
   type AppPorts,
   type ClaimedJob,
 } from "@uketsugi/core";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
 import { bodyLimit } from "hono/body-limit";
 import { validator } from "hono/validator";
 import { apiRoutes } from "./api.ts";
 import { createSignIn, sentByHost, tokenAuth, type AuthEnv, type Operator } from "./auth.ts";
 import { errorHandler, failed, HARNESS_REFUSALS, noOAuth } from "./errors.ts";
-import { DEFAULT_HOST, loopbackOfEvery, requestGuard, responseHeaders } from "./guard.ts";
+import {
+  DEFAULT_HOST,
+  fromThisMachine,
+  LOOPBACK_ADDRESSES,
+  loopbackOfEvery,
+  requestGuard,
+  responseHeaders,
+} from "./guard.ts";
 import { createMcpEndpoint } from "./mcp.ts";
 import { pluginRoutes, PLUGINS_PATH, pluginsFolder } from "./plugins.ts";
 import { createToolUses } from "./tool-uses.ts";
@@ -65,6 +73,11 @@ export interface Listening {
    * listener on every address gives its loopback URL.
    */
   readonly url: string;
+  /**
+   * Whether the server can now be reached from beyond its own machine: it listens on an address
+   * that is not a loopback one, or answers to a name of its own. Every caller then sends a token.
+   */
+  readonly beyond: boolean;
   close(): Promise<void>;
 }
 
@@ -90,10 +103,15 @@ export function localUrl(host: string, port: number): string {
   return `http://${hostnameOf(loopbackOfEvery(host) ?? host)}:${port}`;
 }
 
-function listen(fetch: UketsugiServer["fetch"], host: string, port: number): Promise<Listening> {
+/** Listens on `host`, and says with the listener which address it took. */
+function listen(
+  fetch: UketsugiServer["fetch"],
+  host: string,
+  port: number,
+): Promise<{ listening: Omit<Listening, "beyond">; address: string }> {
   return new Promise((resolve, reject) => {
     const server = serve({ fetch, port, hostname: host }, (info: AddressInfo) => {
-      resolve({
+      const listening = {
         port: info.port,
         url: localUrl(host, info.port),
         close: () =>
@@ -102,7 +120,8 @@ function listen(fetch: UketsugiServer["fetch"], host: string, port: number): Pro
             node.closeAllConnections();
             node.close((error) => (error === undefined ? done() : fail(error)));
           }),
-      });
+      };
+      resolve({ listening, address: info.address });
     });
     server.once("error", reject);
   });
@@ -181,7 +200,13 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
     return c.json({ ...up, jobs: await ports.store.jobs.counts() });
   });
 
-  http.use("/mcp", tokenAuth(app, HARNESS_REFUSALS));
+  // A request with no token is its identity's to answer only where nothing but this machine can
+  // have sent it: every listener is on a loopback address, the server answers to no name but the
+  // loopback ones, and the request came straight from a local program.
+  let reachable = (options.allowedHosts ?? []).length > 0;
+  const alone = (c: Context): boolean => !reachable && fromThisMachine(c);
+
+  http.use("/mcp", tokenAuth(app, HARNESS_REFUSALS, alone));
   http.all("/mcp", (c) => mcp.fetch(c.req.raw, c.get("caller")));
   // A harness with no token asks here to sign in with OAuth: it is told what the server takes.
   http.all("/register", (c) => failed(c, noOAuth()));
@@ -193,7 +218,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
     validator("json", (sent) => validateRequest("SignInRequest", "body", sent)),
     (c) => signIn.withKey(c, c.req.valid("json").key),
   );
-  const api = { app, ports, signIn, onError, operator, snapshot, toolUses, plugins };
+  const api = { app, ports, signIn, onError, operator, snapshot, toolUses, plugins, alone };
   http.route("/api", apiRoutes(api));
   if (plugins !== null) http.route(PLUGINS_PATH, pluginRoutes(plugins));
   if (webDir !== undefined && existsSync(webDir)) serveDashboard(http, webDir);
@@ -203,8 +228,10 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
     async listen({ host = DEFAULT_HOST, port }) {
       worker.start();
       const address = host.replace(/^\[|\]$/g, "");
-      const listening = await listen(http.fetch, address, port);
+      const { listening: taken, address: bound } = await listen(http.fetch, address, port);
       if (loopbackOfEvery(address) === null) hostnames.add(hostnameOf(address));
+      if (!LOOPBACK_ADDRESSES.includes(bound)) reachable = true;
+      const listening = { ...taken, beyond: reachable };
       listeners.push(listening);
       return listening;
     },

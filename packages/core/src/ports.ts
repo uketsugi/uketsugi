@@ -68,8 +68,10 @@ export class AuthError extends Error {
 export interface Identity {
   /**
    * The caller a bearer credential belongs to, with the visible set already resolved.
-   * `bearer` is the token alone, without the `Bearer ` prefix, or undefined when the request
-   * carried none. Rejects with `AuthError` and never with anything that names the token.
+   * `bearer` is the token alone, without the `Bearer ` prefix. It is undefined for a request that
+   * carried none and that its transport knows came from the server's own machine and nowhere
+   * else: an identity may answer that one with a person, and a transport asks for no other.
+   * Rejects with `AuthError` and never with anything that names the token.
    */
   authenticate(bearer: string | undefined): Promise<Caller>;
   /**

@@ -95,6 +95,13 @@ export async function invitePerson(
     ...(options.operatorName === undefined ? {} : { operator_name: options.operatorName }),
   });
   const { person } = invited;
+  // The first person added ends the time a harness on this machine needed no token.
+  const first = invited.added && (await people(server)).people.length === 2;
+  const nowTokens = [
+    "",
+    "From now on every harness sends a token, yours included. One you added by the server's address",
+    "alone is refused until you add it again with your token: `ukt token` prints it.",
+  ];
   const howTo = [
     "",
     `Give ${person} both, and this server's address. They:`,
@@ -109,6 +116,7 @@ export async function invitePerson(
       "Each secret is shown this once.",
       ...invited.issued.flatMap(secretLines),
       ...(invited.added ? howTo : []),
+      ...(first ? nowTokens : []),
     ],
   };
 }

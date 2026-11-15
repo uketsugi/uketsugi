@@ -223,6 +223,9 @@ describe("with the server stopped", () => {
       `other machines: http://box.lan:${port}/mcp, or the address of a proxy in front of it`,
     ]);
     expect(answers).toEqual([200, 403]);
+    expect(named.report.lines).toContain(
+      "harnesses: each sends a token, because this server listens beyond this machine.",
+    );
 
     const unnamed = await serve(fakeIo(), listen, {});
     await unnamed.close();
@@ -234,8 +237,22 @@ describe("with the server stopped", () => {
     // A server for this machine alone says nothing of other machines, and nothing of a fault
     // where the model was left out.
     const alone = await serve(fakeIo(), { dataDir, host: "127.0.0.1", port: "0" }, {});
+    const unsigned = await fetch(`${alone.report.data["url"] as string}/api/facts`);
     await alone.close();
     expect(alone.report.lines.join("\n")).not.toContain("other machines");
+    // Its one person's own programs reach it by its address alone, and it says what ends that.
+    expect(unsigned.status).toBe(200);
+    expect(alone.report.lines.join("\n")).toContain(
+      "harnesses: on this machine they need no token while you are this server's only person.",
+    );
+
+    // Told to, it takes nobody without a token.
+    const strict = { dataDir, host: "127.0.0.1", port: "0", requireToken: true };
+    const asking = await serve(fakeIo(), strict, {});
+    const refused = await fetch(`${asking.report.data["url"] as string}/api/facts`);
+    await asking.close();
+    expect(refused.status).toBe(401);
+    expect(asking.report.lines).toContain("harnesses: each sends a token (--require-token).");
     expect(alone.report.lines).toContain(
       "model: none installed, so search matches words only. `ukt setup` adds it.",
     );
