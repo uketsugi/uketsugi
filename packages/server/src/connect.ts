@@ -124,7 +124,7 @@ const HARNESSES: readonly Harness[] = [
     activate: "/{name}:activate",
     note: `\`claude -p\` refuses every call to the server until its tools are allowed: add --allowedTools mcp__{name} (with the plugin, mcp__plugin_${PLUGIN_NAME}_${SERVER_NAME}). There its commands are /mcp__{name}__setup and /mcp__{name}__activate. Type set-up in an interactive session: with \`claude -p\` nobody is there to allow the edit of the file.`,
     known:
-      "run here: Claude Code 2.1.325 takes the address alone from a server that needs no token and reports it connected; the commands were not typed in a session",
+      "run here: Claude Code 2.1.325 takes the address alone from a server that needs no token, and both commands were typed in a session",
     instructionFile: "~/.claude/CLAUDE.md",
     // Claude Code keeps its configuration, this file included, in the folder CLAUDE_CONFIG_DIR
     // names where that is set, and under the home it runs in, whichever that is.
@@ -160,8 +160,9 @@ const HARNESSES: readonly Harness[] = [
     addKind: "command",
     remove: "agy mcp remove {name}",
     // It lists no server's prompts, so there is nothing to type: the block is put in the file by hand.
+    note: "`agy mcp list` says `enabled` of a server it could not reach or that refused it; the dashboard's Connect page lists the sessions that reached the server.",
     known:
-      "run here: Antigravity 1.5.9 takes the address with `agy mcp add`; that it then connects is not shown",
+      "run here: Antigravity 1.5.9 takes the address with `agy mcp add`, and a session then called the server's tools",
     instructionFile: "~/.gemini/GEMINI.md",
     conversationIdKey: "antigravity.google/conversation_id",
     // The plugin is the block, as a rule that is always on. Antigravity installs one from a folder.

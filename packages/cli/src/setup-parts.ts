@@ -119,8 +119,8 @@ async function prepareModel(io: Io, home: Home): Promise<Done> {
 export async function modelPart(io: Io, home: Home, wanted: boolean): Promise<Part> {
   const part = { id: "model", label: "model", outside: false, state: SKIPPED };
   if (!wanted) return { ...part, plan: [LEFT_OUT], pending: false, apply: null };
-  // A directory the person names is checked by the part, which says what is wrong with it.
-  if (home.modelIsOurs && (await verifyModel(home.modelDir)).ok)
+  const check = await verifyModel(home.modelDir);
+  if (check.ok)
     return {
       ...part,
       state: "present",
@@ -128,6 +128,7 @@ export async function modelPart(io: Io, home: Home, wanted: boolean): Promise<Pa
       pending: false,
       apply: null,
     };
+  // A directory the person names is never written to: the part says what is wrong with it.
   return {
     ...part,
     plan: home.modelIsOurs
@@ -135,7 +136,7 @@ export async function modelPart(io: Io, home: Home, wanted: boolean): Promise<Pa
           `a download of about 170 MB into ${home.modelDir}, from the npm registry and Hugging Face,`,
           "each file checked against a pinned hash. It lets search match meaning.",
         ]
-      : [`in place, in ${home.modelDir}`],
+      : [`UKT_MODEL_DIR=${home.modelDir} cannot be used: ${check.detail}; ${WORDS_ONLY}`],
     pending: home.modelIsOurs,
     apply: () => prepareModel(io, home),
   };

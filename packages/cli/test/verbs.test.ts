@@ -227,6 +227,11 @@ describe("ukt setup and ukt token", () => {
   test("setup refuses a UKT_MODEL_DIR that holds no model, and says the rest is ready", async () => {
     const env = { UKT_MODEL_DIR: join(dataDir, "no-model-here") };
 
+    // The plan says so first: it does not call a directory it has not looked at "in place".
+    const plan = await setup(fakeIo(), { dataDir, ...LISTEN, model: true, plan: true }, env);
+    expect(plan.lines.join("\n")).toContain(`UKT_MODEL_DIR=${env.UKT_MODEL_DIR} cannot be used`);
+    expect(plan.lines.join("\n")).not.toContain("in place, in");
+
     const refused = await setup(fakeIo(), { dataDir, ...LISTEN, model: true }, env);
 
     expect(refused.failure).toMatchObject({

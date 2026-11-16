@@ -207,8 +207,10 @@ From the next session on, in every repository:
 The plugin talks to the server from Claude Code's hooks, which need `sh`, `curl` and `git`. A
 hook that cannot reach the server does nothing, and the session goes on without it. Of the agent's
 last message the server keeps the first 4,000 characters the scan leaves. On your own machine none
-of this goes further than your own server. Where a token is needed, a second line gives it to the
-plugin on standard input, so that it is never on a command line:
+of this goes further than your own server. Claude Code ends the install by saying that two of the
+plugin's options are not set: the token and `capture`. On your own machine neither is needed.
+Where a token is needed, a second line gives it to the plugin on standard input, so that it is
+never on a command line:
 
 ```sh
 printf '{"token":"%s"}' "$(ukt token)" | claude plugin configure uketsugi@uketsugi --values-stdin
@@ -351,6 +353,10 @@ claude plugin install uketsugi --marketplace https://memory.example.com/plugins/
 printf '{"token":"%s"}' "$UKT_TOKEN" | claude plugin configure uketsugi@uketsugi --values-stdin
 ```
 
+Claude Code fetches a plugin from a server over `https` only, and never from a loopback address.
+Someone who works on the server's own machine installs the plugin from the release's folder,
+as [above](#the-plugin-as-an-extra), or adds the server by its URL.
+
 The dashboard's Connect page shows these lines with the server's own address in them, and the
 ones for Antigravity. After the server is upgraded, `claude plugin update uketsugi@uketsugi`
 fetches the plugin that goes with it.
@@ -410,7 +416,7 @@ sends as each turn ends. To have it read the whole conversation, turn on the plu
 option in Claude Code:
 
 ```sh
-printf '{"capture":true}' | claude plugin configure uketsugi@uketsugi --values-stdin
+printf '{"capture":"true"}' | claude plugin configure uketsugi@uketsugi --values-stdin
 ```
 
 The plugin then also sends what you ask and the agent's final answer of every turn. The server
