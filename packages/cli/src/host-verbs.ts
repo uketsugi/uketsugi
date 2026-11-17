@@ -1,8 +1,8 @@
 /** `ukt token`: prints the token a harness sends, or replaces it and ends the old ones. */
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { replaceTokens } from "@uketsugi/core";
-import { readToken, resolveHome, writeToken, type Home } from "./home.ts";
-import { hostStore, requireStore, withStore } from "./host-store.ts";
+import { readToken, resolveHome, writeToken } from "./home.ts";
+import { hostOf, requireStore, withStore, type Host } from "./host-store.ts";
 import { dirFlag, onStore, type OnStore, type Program } from "./program.ts";
 import { CliFailure, confirmPlan, type Io, type Report } from "./report.ts";
 import { pauseFor } from "./service.ts";
@@ -22,11 +22,10 @@ export interface TokenOptions extends OnStore {
  */
 async function rotate(
   io: Io,
-  home: Home,
+  { home, store }: Host,
   options: TokenOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<Report> {
-  const store = await hostStore(home, options.databaseUrl);
   requireStore(home, store, "token --rotate");
   const pause = await pauseFor(io, env, home, "token --rotate");
   await confirmPlan(
@@ -80,8 +79,8 @@ export async function token(
   options: TokenOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<Report> {
+  if (options.rotate === true) return rotate(io, await hostOf(options, env), options, env);
   const home = resolveHome(options.dataDir, env);
-  if (options.rotate === true) return rotate(io, home, options, env);
   const held = await readToken(home);
   if (held === null)
     throw new CliFailure({

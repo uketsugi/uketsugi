@@ -3,6 +3,7 @@
  * take the page: the list stays in use behind it.
  */
 import { Drawer } from "@base-ui/react/drawer";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -12,6 +13,21 @@ export function Section({ title, children }: { title: string; children: ReactNod
       <h3 className="font-semibold">{title}</h3>
       {children}
     </section>
+  );
+}
+
+/** What the drawer says of the record, one term and its value to a line. */
+export function Details({ children }: { children: ReactNode }) {
+  return <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">{children}</dl>;
+}
+
+/** One term of `Details` and its value. */
+export function Detail(props: { term: string; className?: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-ink-muted">{props.term}</dt>
+      <dd className={props.className}>{props.children}</dd>
+    </>
   );
 }
 
@@ -29,14 +45,18 @@ const POPUP =
 interface SideDrawerProps {
   /** What kind of record it shows, in one word: its heading and the name of its close button. */
   readonly name: string;
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly children: ReactNode;
+  /** Where the address names the record: its search parameter. */
+  readonly param: "fact" | "task";
+  /** The record's body, for its id. */
+  readonly children: (id: string) => ReactNode;
 }
 
-export function SideDrawer({ name, open, onClose, children }: SideDrawerProps) {
+/** The drawer of the record the address names; closing it takes the record out of the address. */
+export function SideDrawer({ name, param, children }: SideDrawerProps) {
+  const id = useSearch({ strict: false })[param];
+  const navigate = useNavigate();
   const change = (next: boolean) => {
-    if (!next) onClose();
+    if (!next) void navigate({ to: ".", search: (shown) => ({ ...shown, [param]: undefined }) });
   };
   // Closing returns the focus to the row that opened the drawer. A row that is gone, as after a
   // redaction, leaves the focus nowhere, so it goes to the page.
@@ -45,7 +65,7 @@ export function SideDrawer({ name, open, onClose, children }: SideDrawerProps) {
   };
   return (
     <Drawer.Root
-      open={open}
+      open={id !== undefined}
       onOpenChange={change}
       onOpenChangeComplete={refocus}
       swipeDirection="right"
@@ -64,7 +84,7 @@ export function SideDrawer({ name, open, onClose, children }: SideDrawerProps) {
                   <X aria-hidden className="size-4" />
                 </Drawer.Close>
               </div>
-              {children}
+              {id === undefined ? null : children(id)}
             </Drawer.Content>
           </Drawer.Popup>
         </Drawer.Viewport>

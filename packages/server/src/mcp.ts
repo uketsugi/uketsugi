@@ -11,6 +11,7 @@ import {
   PROMPT_DESCRIPTIONS,
   promptText,
   SERVER_INSTRUCTIONS,
+  SERVER_NAME,
   type PromptName,
 } from "@uketsugi/contracts";
 import {
@@ -30,7 +31,7 @@ import {
   type McpHttpHandler,
   type ServerContext,
 } from "@modelcontextprotocol/server";
-import { CONVERSATION_ID_KEYS, instructionFileOf, SERVER_NAME, toolUseOf } from "./connect.ts";
+import { CONVERSATION_ID_KEYS, instructionFileOf, toolUseOf } from "./connect.ts";
 import { createConnections, type Connections } from "./connections.ts";
 import type { ToolUses } from "./tool-uses.ts";
 

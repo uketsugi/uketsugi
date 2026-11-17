@@ -8,11 +8,16 @@ import { Link } from "@tanstack/react-router";
 import { cx } from "class-variance-authority";
 import type { ReactNode } from "react";
 import { projectsQuery } from "./api.ts";
-import { Card, ErrorPanel } from "./ui.tsx";
+import { Card, Mark, QueryFailed, SEEN_BY } from "./ui.tsx";
 
 /** Whether this server has other people, so that a record is either shared with them or private. */
 export function useSharing(): boolean {
   return useQuery(projectsQuery).data?.sharing === true;
+}
+
+/** Who sees a record, said only on a server with other people, where a record is shared or private. */
+export function SeenByMark({ audience }: { audience: "private" | "shared" }) {
+  return useSharing() ? <Mark look={SEEN_BY[audience]}>{audience}</Mark> : null;
 }
 
 /** The pages that list by project. Each keeps the chosen project in its address as `project`. */
@@ -64,11 +69,7 @@ function Projects(choice: Choice) {
           ))}
         </ul>
       </nav>
-      {projects.isError ? (
-        <div className="p-3">
-          <ErrorPanel error={projects.error} onRetry={() => void projects.refetch()} />
-        </div>
-      ) : null}
+      {projects.isError ? <QueryFailed query={projects} inset="p-3" /> : null}
     </Card>
   );
 }

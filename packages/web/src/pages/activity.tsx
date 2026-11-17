@@ -10,7 +10,7 @@ import { useTable } from "@tanstack/react-table";
 import { activityQuery } from "../api.ts";
 import { Page } from "../shell.tsx";
 import { columnsFor, DataTable, features } from "../table.tsx";
-import { Ago, buttonClass, Card, Empty, ErrorPanel, FILTER_LINK, Loading } from "../ui.tsx";
+import { Ago, buttonClass, Card, Empty, FILTER_LINK, QueryState } from "../ui.tsx";
 import { Rulings } from "./rulings.tsx";
 
 const route = getRouteApi("/activity");
@@ -116,15 +116,9 @@ export function ActivityPage() {
       <Periods />
       <Card label="Sessions by client">
         <h2 className="px-4 pt-4 pb-2 font-semibold">Sessions by client</h2>
-        {activity.isPending ? (
-          <Loading what="activity" />
-        ) : activity.isError ? (
-          <div className="p-4">
-            <ErrorPanel error={activity.error} onRetry={() => void activity.refetch()} />
-          </div>
-        ) : (
-          <Clients report={activity.data} />
-        )}
+        <QueryState query={activity} what="activity" inset="p-4">
+          {(data) => <Clients report={data} />}
+        </QueryState>
       </Card>
       {activity.data === undefined ? null : <ReadByModel sessions={activity.data.recent} />}
       <Rulings />

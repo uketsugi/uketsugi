@@ -37,7 +37,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
-import { failed, foreign, notOperator, unauthorized, type TokenNeed } from "./errors.ts";
+import { failed, foreign, notOperator, unauthorized, type TokenRefusals } from "./errors.ts";
 import { overTls } from "./guard.ts";
 
 /** How long a one-time code can be exchanged. */
@@ -53,16 +53,6 @@ function sameSecret(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
-}
-
-/** What a request is told for each way its bearer token can fail it. */
-export interface TokenRefusals {
-  /** No token at all. */
-  readonly none: (why: TokenNeed) => ToolFailure;
-  /** An Authorization header that holds no token. */
-  readonly empty: () => ToolFailure;
-  /** A token the server does not know. */
-  readonly unknown: () => ToolFailure;
 }
 
 /** What `/api` says: its callers are the dashboard and scripts, and all three are told the same. */

@@ -4,15 +4,24 @@
  * it private, and can change their mind. Nobody else makes the choice, and no agent can. Below
  * the list a person makes a named project, for work that no origin remote names.
  */
-import { AlertDialog } from "@base-ui/react/alert-dialog";
 import type { ApiProject, ProjectChoice, ProjectChoiceRequest } from "@uketsugi/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTable } from "@tanstack/react-table";
 import { createContext, use, useState } from "react";
-import { chooseTreatment, projectsQuery } from "../api.ts";
+import { chooseTreatment, projectsQuery, refreshFacts } from "../api.ts";
 import { Page, useSession } from "../shell.tsx";
 import { columnsFor, DataTable, features } from "../table.tsx";
-import { Button, Card, count, DIALOG, Empty, ErrorPanel, Loading, Mark, SEEN_BY } from "../ui.tsx";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  count,
+  Empty,
+  ErrorPanel,
+  Mark,
+  QueryState,
+  SEEN_BY,
+} from "../ui.tsx";
 import { NamedProjects } from "./named-project.tsx";
 
 type Treatment = ProjectChoiceRequest["treatment"];
@@ -49,29 +58,18 @@ function AskFirst({ project, to }: { project: ApiProject; to: Treatment }) {
     choose({ project: project.key, treatment: to });
   };
   return (
-    <AlertDialog.Root open={open} onOpenChange={setOpen}>
-      <AlertDialog.Trigger
-        render={<Button size="sm" disabled={pending} aria-label={`${label} ${project.key}…`} />}
-      >
-        {label}…
-      </AlertDialog.Trigger>
-      <AlertDialog.Portal>
-        <AlertDialog.Backdrop forceRender className={DIALOG.backdrop} />
-        <AlertDialog.Popup className={DIALOG.popup}>
-          <AlertDialog.Title className="text-base font-semibold">{ask.title}</AlertDialog.Title>
-          <AlertDialog.Description>
-            <span className="block font-mono break-all">{project.key}</span>
-            <span className="mt-2 block">{ask.body}</span>
-          </AlertDialog.Description>
-          <div className="flex justify-end gap-2">
-            <AlertDialog.Close render={<Button />}>Leave it as it is</AlertDialog.Close>
-            <Button tone="primary" onClick={confirm}>
-              {ask.confirm}
-            </Button>
-          </div>
-        </AlertDialog.Popup>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={setOpen}
+      trigger={<Button size="sm" disabled={pending} aria-label={`${label} ${project.key}…`} />}
+      triggerText={`${label}…`}
+      title={ask.title}
+      keep="Leave it as it is"
+      change={{ text: ask.confirm, tone: "primary", onClick: confirm }}
+    >
+      <span className="block font-mono break-all">{project.key}</span>
+      <span className="mt-2 block">{ask.body}</span>
+    </ConfirmDialog>
   );
 }
 
@@ -157,11 +155,7 @@ export function ProjectsPage() {
   const projects = useQuery(projectsQuery);
   const choice = useMutation({
     mutationFn: (made: ProjectChoiceRequest) => chooseTreatment(made, csrf),
-    onSuccess: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: projectsQuery.queryKey }),
-        client.invalidateQueries({ queryKey: ["facts"] }),
-      ]),
+    onSuccess: () => refreshFacts(client),
   });
   const sharing = projects.data?.sharing === true;
   return (
@@ -177,17 +171,13 @@ export function ProjectsPage() {
       <p role="status">{choice.isSuccess ? outcome(choice.data) : ""}</p>
       {choice.isError ? <ErrorPanel error={choice.error} /> : null}
       <Card label="Your projects">
-        {projects.isPending ? (
-          <Loading what="your projects" />
-        ) : projects.isError ? (
-          <div className="p-4">
-            <ErrorPanel error={projects.error} onRetry={() => void projects.refetch()} />
-          </div>
-        ) : (
-          <Choosing value={{ sharing, pending: choice.isPending, choose: choice.mutate }}>
-            <Listed projects={projects.data.projects} />
-          </Choosing>
-        )}
+        <QueryState query={projects} what="your projects" inset="p-4">
+          {(data) => (
+            <Choosing value={{ sharing, pending: choice.isPending, choose: choice.mutate }}>
+              <Listed projects={data.projects} />
+            </Choosing>
+          )}
+        </QueryState>
       </Card>
       <NamedProjects projects={projects.data?.projects ?? NONE} />
     </Page>

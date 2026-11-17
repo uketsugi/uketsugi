@@ -8,6 +8,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import ssri from "ssri";
 import { CATALOG, layout, unsupportedPlatform, type Catalog } from "./catalog.ts";
+import { isMissing } from "./faults.ts";
 
 /** Why a model directory cannot be used. `changed` is a file or version that differs from its pin. */
 export type ModelFault = "unsupported_platform" | "not_installed" | "changed";
@@ -17,10 +18,6 @@ export type ModelCheck =
   | { readonly ok: false; readonly reason: ModelFault; readonly detail: string };
 
 const fault = (reason: ModelFault, detail: string): ModelCheck => ({ ok: false, reason, detail });
-
-function isMissing(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
-}
 
 /** The version a package directory declares, or null when it holds no package. */
 async function installedVersion(dir: string): Promise<string | null> {

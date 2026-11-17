@@ -20,8 +20,8 @@ import {
   CopyButton,
   ErrorPanel,
   INLINE_CODE,
-  Loading,
   Mark,
+  QueryState,
   type Look,
 } from "../ui.tsx";
 
@@ -111,14 +111,9 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
             </p>
           )}
         </>
-      ) : filed ? (
-        <>
-          <p>{harness.add_where}</p>
-          <CodeBlock text={harness.add} label={`what adds the server to ${harness.name}`} />
-        </>
       ) : (
         <>
-          <p>Give the client this URL:</p>
+          <p>{filed ? harness.add_where : "Give the client this URL:"}</p>
           <CodeBlock text={harness.add} label={`what adds the server to ${harness.name}`} />
         </>
       )}
@@ -373,13 +368,9 @@ export function ConnectPage() {
   return (
     <Page title="Connect an agent" lead="Pick where you work, then run what it shows.">
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        {connect.isPending ? (
-          <Loading what="the set-up" />
-        ) : connect.isError ? (
-          <ErrorPanel error={connect.error} onRetry={() => void connect.refetch()} />
-        ) : (
-          <Harnesses info={connect.data} />
-        )}
+        <QueryState query={connect} what="the set-up">
+          {(data) => <Harnesses info={data} />}
+        </QueryState>
         <RecentSessions />
       </div>
     </Page>

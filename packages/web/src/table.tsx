@@ -14,6 +14,7 @@ import {
 } from "@tanstack/react-table";
 import { cx } from "class-variance-authority";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { Button } from "./ui.tsx";
 
 export const features = tableFeatures({
   rowSortingFeature,
@@ -106,5 +107,22 @@ export function DataTable<TData extends RowData>({
         ))}
       </tbody>
     </table>
+  );
+}
+
+/**
+ * The line under a list: how many rows it shows of how many matched, and the button that shows
+ * more, where `more` says there are more to ask for. `waiting` keeps it from being pressed twice.
+ */
+export function ShowMore(props: { shown: string; more?: () => void; waiting: boolean }) {
+  return (
+    <div className="flex items-center gap-3 border-t border-line px-4 py-2.5 text-ink-muted">
+      <p role="status">{props.shown}</p>
+      {props.more === undefined ? null : (
+        <Button size="sm" disabled={props.waiting} onClick={props.more}>
+          Show more
+        </Button>
+      )}
+    </div>
   );
 }

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { EmbedError, type Embedder } from "@uketsugi/core";
 import { CATALOG, layout, type Catalog } from "./catalog.ts";
+import { describe } from "./faults.ts";
 import type { WorkerData, WorkerReply } from "./inference-worker.ts";
 import { verifyModel, type ModelCheck } from "./verify.ts";
 
@@ -49,9 +50,6 @@ interface Session {
   run(text: string): Promise<{ dims: readonly number[]; data: Float32Array }>;
   close(): Promise<void>;
 }
-
-const describe = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 /** The worker's entry beside this file: `.ts` when running from source, `.js` when built. */
 function workerEntry(): URL {

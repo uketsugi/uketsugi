@@ -20,7 +20,6 @@ import {
   createApp,
   createWorker,
   ModelError,
-  validateRequest,
   type AppPorts,
   type ClaimedJob,
   type DigestReport,
@@ -28,10 +27,9 @@ import {
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
 import { bodyLimit } from "hono/body-limit";
-import { validator } from "hono/validator";
-import { apiRoutes } from "./api.ts";
+import { apiRoutes, body } from "./api.ts";
 import { createSignIn, sentByHost, tokenAuth, type AuthEnv, type Operator } from "./auth.ts";
-import { errorHandler, failed, HARNESS_REFUSALS, noOAuth } from "./errors.ts";
+import { errorHandler, failed, HARNESS_REFUSALS, type HarnessRefusals } from "./errors.ts";
 import {
   DEFAULT_HOST,
   fromThisMachine,
@@ -43,6 +41,16 @@ import {
 import { createMcpEndpoint } from "./mcp.ts";
 import { pluginRoutes, PLUGINS_PATH, pluginsFolder } from "./plugins.ts";
 import { createToolUses } from "./tool-uses.ts";
+
+/** What differs between editions of the server: what it is called, and what it tells a harness it refuses. */
+export interface Edition {
+  /** The edition's name in the capability descriptor. */
+  readonly name: string;
+  readonly refusals: HarnessRefusals;
+}
+
+/** The open edition. */
+const COMMUNITY: Edition = { name: "community", refusals: HARNESS_REFUSALS };
 
 export interface ComposeOptions {
   /** Every port the server runs on. The caller opened them and closes them. */
@@ -68,6 +76,8 @@ export interface ComposeOptions {
   readonly snapshot?: () => Promise<Blob>;
   /** Told of every session the model step has read, with what the reading did and cost: counts, never text. */
   readonly onDigest?: (report: DigestReport) => void;
+  /** The edition this server is. Left out, the open one. */
+  readonly edition?: Edition;
 }
 
 export interface Listening {
@@ -180,7 +190,7 @@ const SIGN_IN_BODY_BYTES = 4096;
 
 /** Builds the server from its ports. */
 export function composeServer(options: ComposeOptions): UketsugiServer {
-  const { webDir, snapshot, operator } = options;
+  const { webDir, snapshot, operator, edition = COMMUNITY } = options;
   const onError = options.onError ?? ((error: unknown) => console.error(printed(error)));
   // The outbox worker runs in this process. Its store wakes it when a unit leaves a job.
   const worker = createWorker(options.ports, {
@@ -219,20 +229,17 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   let reachable = (options.allowedHosts ?? []).length > 0;
   const alone = (c: Context): boolean => !reachable && fromThisMachine(c);
 
-  http.use("/mcp", tokenAuth(app, alone, HARNESS_REFUSALS));
+  http.use("/mcp", tokenAuth(app, alone, edition.refusals));
   http.all("/mcp", (c) => mcp.fetch(c.req.raw, c.get("caller")));
   // A harness with no token asks here to sign in with OAuth: it is told what the server takes.
-  http.all("/register", (c) => failed(c, noOAuth()));
+  http.all("/register", (c) => failed(c, edition.refusals.register()));
 
   http.get(SIGN_IN_PATH, (c) => signIn.exchange(c));
-  http.post(
-    SIGN_IN_PATH,
-    bodyLimit({ maxSize: SIGN_IN_BODY_BYTES }),
-    validator("json", (sent) => validateRequest("SignInRequest", "body", sent)),
-    (c) => signIn.withKey(c, c.req.valid("json").key),
+  http.post(SIGN_IN_PATH, bodyLimit({ maxSize: SIGN_IN_BODY_BYTES }), body("SignInRequest"), (c) =>
+    signIn.withKey(c, c.req.valid("json").key),
   );
-  const api = { app, ports, signIn, onError, operator, snapshot, toolUses, plugins, alone };
-  http.route("/api", apiRoutes(api));
+  const api = { app, ports, edition: edition.name, signIn, onError, operator, snapshot, toolUses };
+  http.route("/api", apiRoutes({ ...api, plugins, alone }));
   if (plugins !== null) http.route(PLUGINS_PATH, pluginRoutes(plugins));
   if (webDir !== undefined && existsSync(webDir)) serveDashboard(http, webDir);
 

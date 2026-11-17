@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { zipSync, type Zippable } from "fflate";
 import { Hono, type Context } from "hono";
 import type { PluginsFrom } from "./connect.ts";
-import { noRoute, failed } from "./errors.ts";
+import { notFound } from "./errors.ts";
 import { reachedAt, reachedLocally } from "./guard.ts";
 
 /** Where the routes are mounted. */
@@ -92,9 +92,9 @@ export function pluginRoutes(folder: string): Hono {
   });
   routes.get("/:file{[a-z-]+\\.zip}", (c) => {
     const name = c.req.param("file").replace(/\.zip$/, "");
-    if (!names.includes(name)) return failed(c, noRoute(c.req.method, c.req.path));
+    if (!names.includes(name)) return notFound(c);
     return c.body(zipNamed(name), 200, { "Content-Type": "application/zip" });
   });
-  routes.all("*", (c) => failed(c, noRoute(c.req.method, c.req.path)));
+  routes.all("*", notFound);
   return routes;
 }

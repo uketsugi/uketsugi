@@ -17,12 +17,11 @@ import {
   keepSettings,
   readToken,
   readTokenFile,
-  resolveHome,
   settingsWith,
   writeToken,
   type Home,
 } from "./home.ts";
-import { hostStore, storePlace, withStore, type HostStore } from "./host-store.ts";
+import { hostOf, storePlace, withStore, type HostStore } from "./host-store.ts";
 import { dirFlag, onStore, serving, servingOf, toldOf, type Program } from "./program.ts";
 import { CliFailure, type Io, type Report } from "./report.ts";
 import { llmOptions } from "./llm.ts";
@@ -222,12 +221,11 @@ export async function setup(
   options: SetupOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<Report> {
-  const home = resolveHome(options.dataDir, env);
+  const { home, store } = await hostOf(options, env);
   const runs = await servingOf(home, toldOf(options));
   const origin = localUrl(runs.host, numberOf(runs.port, "--port", 0, 65535));
   // A lease that `ukt serve` would refuse is refused here, before it is kept.
   leaseMs(runs.taskLeaseMinutes);
-  const store = await hostStore(home, options.databaseUrl);
   const parts = await survey(io, env, home, options, origin);
   const heading = [`data directory  ${home.dataDir}`, `server URL      ${origin}/mcp`];
   const plan = [...heading, ...parts.flatMap((part) => column(part.label, part.plan))];

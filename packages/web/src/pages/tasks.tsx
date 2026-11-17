@@ -11,17 +11,15 @@ import { useState } from "react";
 import { tasksQuery } from "../api.ts";
 import { ByProject, useSharing } from "../by-project.tsx";
 import { Page } from "../shell.tsx";
-import { columnsFor, DataTable, features } from "../table.tsx";
+import { columnsFor, DataTable, features, ShowMore } from "../table.tsx";
 import {
   Ago,
-  Button,
   Card,
   count,
   Empty,
-  ErrorPanel,
   FILTER_LINK,
   inWords,
-  Loading,
+  QueryState,
   sentence,
   TASK_STATES,
   TaskStateMark,
@@ -149,39 +147,34 @@ function TaskList() {
         <h2 className="mr-auto font-semibold break-all">{project ?? "All projects"}</h2>
         <States />
       </div>
-      {list.isPending ? (
-        <Loading what="tasks" />
-      ) : list.isError ? (
-        <div className="p-4">
-          <ErrorPanel error={list.error} onRetry={() => void list.refetch()} />
-        </div>
-      ) : tasks.length === 0 ? (
-        <NoTasks status={status} />
-      ) : (
-        <>
-          <DataTable
-            table={table}
-            caption={
-              status === undefined
-                ? "Tasks that are not done, in the order an agent could pick them up"
-                : `Tasks that are ${inWords(status)}`
-            }
-            current={(task) => task.id === open}
-          />
-          <div className="flex items-center gap-3 border-t border-line px-4 py-2.5 text-ink-muted">
-            <p role="status">{matched > tasks.length ? `${matched} matched · ${shown}` : shown}</p>
-            {matched > tasks.length && limit < MOST ? (
-              <Button
-                size="sm"
-                disabled={list.isPlaceholderData}
-                onClick={() => setLimit(Math.min(limit + STEP, MOST))}
-              >
-                Show more
-              </Button>
-            ) : null}
-          </div>
-        </>
-      )}
+      <QueryState query={list} what="tasks" inset="p-4">
+        {() =>
+          tasks.length === 0 ? (
+            <NoTasks status={status} />
+          ) : (
+            <>
+              <DataTable
+                table={table}
+                caption={
+                  status === undefined
+                    ? "Tasks that are not done, in the order an agent could pick them up"
+                    : `Tasks that are ${inWords(status)}`
+                }
+                current={(task) => task.id === open}
+              />
+              <ShowMore
+                shown={matched > tasks.length ? `${matched} matched · ${shown}` : shown}
+                more={
+                  matched > tasks.length && limit < MOST
+                    ? () => setLimit(Math.min(limit + STEP, MOST))
+                    : undefined
+                }
+                waiting={list.isPlaceholderData}
+              />
+            </>
+          )
+        }
+      </QueryState>
     </Card>
   );
 }

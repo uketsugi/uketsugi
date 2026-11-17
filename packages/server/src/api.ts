@@ -54,7 +54,7 @@ import {
   type SignIn,
 } from "./auth.ts";
 import { capabilityDescriptor, connectInfo } from "./connect.ts";
-import { errorHandler, failed, noRoute, noSnapshot, personOnly, unauthorized } from "./errors.ts";
+import { errorHandler, failed, noSnapshot, notFound, personOnly, unauthorized } from "./errors.ts";
 import { LOOPBACK_ADDRESSES, reachedAt } from "./guard.ts";
 import { answerClaudeCode, CAPTURE_HEADER, isOn, ORIGIN_HEADER } from "./hooks.ts";
 import { pluginsFrom } from "./plugins.ts";
@@ -63,6 +63,8 @@ import type { ToolUses } from "./tool-uses.ts";
 export interface ApiDeps {
   readonly app: App;
   readonly ports: AppPorts;
+  /** The edition's name, for the capability descriptor. */
+  readonly edition: string;
   readonly signIn: SignIn;
   readonly onError: (error: unknown) => void;
   /** Whoever runs this server. Left out, nobody does, and its routes for them do not exist. */
@@ -86,7 +88,7 @@ function query<N extends keyof ApiRequests>(name: N) {
 }
 
 /** The same for a JSON body. */
-function body<N extends keyof ApiRequests>(name: N) {
+export function body<N extends keyof ApiRequests>(name: N) {
   return validator("json", (sent) => validateRequest(name, "body", sent));
 }
 
@@ -95,8 +97,8 @@ const onThisMachine = ipRestriction(getConnInfo, { allowList: [...LOOPBACK_ADDRE
 
 /** The routes that sign a request in by their own means: nobody, or the cookie alone. */
 function signInRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
-  const { app, ports, signIn } = deps;
-  api.get("/capabilities", (c) => c.json(capabilityDescriptor(app, ports)));
+  const { app, ports, signIn, edition } = deps;
+  api.get("/capabilities", (c) => c.json(capabilityDescriptor(edition, app, ports)));
   api.get("/session", signIn.cookieAuth, (c) => {
     const login = signIn.loginOf(c);
     if (login === null) return failed(c, unauthorized());
@@ -232,6 +234,6 @@ export function apiRoutes(deps: ApiDeps): Hono<AuthEnv> {
   operatorRoutes(api, deps);
   api.use("*", some(tokenAuth(deps.app, deps.alone), deps.signIn.cookieAuth));
   personRoutes(api, deps);
-  api.all("*", (c) => failed(c, noRoute(c.req.method, c.req.path)));
+  api.all("*", notFound);
   return api;
 }

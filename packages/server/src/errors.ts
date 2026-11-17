@@ -26,15 +26,30 @@ export function unauthorized(): ToolFailure {
  */
 export type TokenNeed = "reached" | "asks";
 
+/** What a request is told for each way its bearer token can fail it. */
+export interface TokenRefusals {
+  /** No token at all. */
+  readonly none: (why: TokenNeed) => ToolFailure;
+  /** An Authorization header that holds no token. */
+  readonly empty: () => ToolFailure;
+  /** A token the server does not know. */
+  readonly unknown: () => ToolFailure;
+}
+
+/** What a harness is told: by `/mcp` when it does not accept it, and by `/register` when it asks to sign in with OAuth. */
+export interface HarnessRefusals extends TokenRefusals {
+  readonly register: () => ToolFailure;
+}
+
 /** How a person puts the token where a harness reads it, and adds the server again. */
 const ADD_AGAIN = `set ${TOKEN_ENV} in the shell (if you run this server, on its host: export ${TOKEN_ENV}="$(ukt token)"; if someone else runs it, ask them for your token), remove the server from the harness and add it again with the command on the dashboard's Connect page`;
 
 /**
- * What a harness is told when `/mcp` does not accept it, one for each way that happens. A harness
+ * What a harness is told when the open edition does not accept it, one for each way that happens. A harness
  * shows its person the beginning of this text and little else, so each says first what is wrong
  * with how the harness was added, then what to type.
  */
-export const HARNESS_REFUSALS = {
+export const HARNESS_REFUSALS: HarnessRefusals = {
   /**
    * No token at all: the server was added by its address alone, which is enough only for the one
    * person of a server that nothing but their own machine reaches.
@@ -65,20 +80,18 @@ export const HARNESS_REFUSALS = {
       meaning: "The token was replaced or revoked, or belongs to another server.",
       next: `Use your current token: ${ADD_AGAIN}.`,
     }),
-} as const;
-
-/**
- * What a harness is told when it asks to sign in with OAuth. A harness that was given no token
- * takes the server's 401 for an invitation to register as an OAuth client (Claude Code 2.1.325
- * posts to `/register`), and what that request is answered is all it shows its person.
- */
-export function noOAuth(): ToolFailure {
-  return new ToolFailure("not_found", {
-    what: "This server takes a token, not an OAuth sign-in.",
-    meaning: "The harness asked to sign in because the server was added to it without a token.",
-    next: `To connect: ${ADD_AGAIN}.`,
-  });
-}
+  /**
+   * Asked to sign in with OAuth. A harness that was given no token takes the server's 401 for an
+   * invitation to register as an OAuth client (Claude Code 2.1.325 posts to `/register`), and what
+   * that request is answered is all it shows its person.
+   */
+  register: () =>
+    new ToolFailure("not_found", {
+      what: "This server takes a token, not an OAuth sign-in.",
+      meaning: "The harness asked to sign in because the server was added to it without a token.",
+      next: `To connect: ${ADD_AGAIN}.`,
+    }),
+};
 
 /** A request that did not come from this server's own page or from a client of it. */
 export function foreign(what: string): ToolFailure {
@@ -117,18 +130,20 @@ export function personOnly(): ToolFailure {
   });
 }
 
-export function noRoute(method: string, path: string): ToolFailure {
-  return new ToolFailure("not_found", {
-    what: `No route ${method} ${path}.`,
-    meaning: NOT_DONE,
-    next: "See the API's contract.",
-  });
-}
-
 /** Answers with a failure: its body, and the status its code maps to unless one is given. */
 export function failed(c: Context, failure: ToolFailure, status?: number): Response {
   const code = status ?? API_ERROR_STATUS[failure.code];
   return c.json(failure.toToolError(), code as ContentfulStatusCode);
+}
+
+/** Answers a request for a route that does not exist. */
+export function notFound(c: Context): Response {
+  const { method, path } = c.req;
+  const what = `No route ${method} ${path}.`;
+  return failed(
+    c,
+    new ToolFailure("not_found", { what, meaning: NOT_DONE, next: "See the API's contract." }),
+  );
 }
 
 /** The code nearest an HTTP status a middleware refused a request with. */

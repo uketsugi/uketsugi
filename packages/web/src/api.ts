@@ -25,7 +25,12 @@ import {
   type TaskListParams,
   type TaskPage,
 } from "@uketsugi/contracts";
-import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  keepPreviousData,
+  queryOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 
 type Params = Readonly<Record<string, string | number | undefined>>;
 
@@ -129,6 +134,14 @@ export const projectsQuery = queryOptions({
   queryKey: ["projects"],
   queryFn: () => request<ProjectList>("/api/projects"),
 });
+
+/** Asks again for what a change to facts can change: every list and view of them, and the projects' counts. */
+export function refreshFacts(client: QueryClient): Promise<unknown> {
+  return Promise.all([
+    client.invalidateQueries({ queryKey: ["facts"] }),
+    client.invalidateQueries({ queryKey: projectsQuery.queryKey }),
+  ]);
+}
 
 /** The facts list, a page at a time. A search needs a project and has one page. */
 export function factsQuery(filter: { project?: string; q?: string }) {

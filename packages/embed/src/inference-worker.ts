@@ -5,6 +5,7 @@
  */
 import { pathToFileURL } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
+import { describe } from "./faults.ts";
 
 /** What a worker is started with. */
 export interface WorkerData {
@@ -43,8 +44,6 @@ if (port === null) throw new Error("the inference worker was started outside a w
 
 const post = (reply: WorkerReply, transfer: ArrayBuffer[] = []): void =>
   port.postMessage(reply, transfer);
-const describe = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 async function load(): Promise<Extractor | null> {
   try {

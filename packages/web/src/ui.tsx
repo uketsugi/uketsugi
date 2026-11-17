@@ -2,6 +2,7 @@
  * The dashboard's own parts: Base UI for behaviour, Tailwind classes over the tokens in
  * `styles.css` for looks. A status is always drawn by `Mark`: a shape, a colour and a word.
  */
+import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { Button as BaseButton } from "@base-ui/react/button";
 import {
   CITATION_WORD,
@@ -35,7 +36,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { partsOf } from "./api.ts";
 
 export const buttonClass = cva(
@@ -162,9 +163,13 @@ export const SEEN_BY: Record<"private" | "shared", Look> = {
   private: { tone: "neutral", icon: Lock },
 };
 
-/** A flag in the contract's word. */
-export function FlagMark({ kind }: { kind: FlagKind }) {
-  return <Mark look={FLAG[kind]}>{inWords(kind)}</Mark>;
+/** A record's flags, each in the contract's word. */
+export function FlagMarks({ flags }: { flags: readonly FlagKind[] }) {
+  return flags.map((kind) => (
+    <Mark key={kind} look={FLAG[kind]}>
+      {inWords(kind)}
+    </Mark>
+  ));
 }
 
 export function TrustMark({ trust }: { trust: Trust }) {
@@ -185,11 +190,59 @@ export const FILTER_LINK =
   "inline-flex h-8 items-center rounded-md border border-line-strong bg-surface px-3 font-medium hover:bg-sunken aria-[current]:border-accent aria-[current]:bg-accent-soft aria-[current]:text-accent-ink";
 
 /** How a dialog that asks before a change is drawn: centred, over a dimmed page. */
-export const DIALOG = {
+const DIALOG = {
   backdrop: "fixed inset-0 bg-black/40",
   popup:
     "fixed top-1/2 left-1/2 w-[28rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 space-y-4 rounded-lg border border-line bg-surface p-5 shadow-xl",
 } as const;
+
+interface ConfirmDialogProps {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  /** The button that opens the dialog, and what it says. */
+  readonly trigger: ReactElement;
+  readonly triggerText: ReactNode;
+  readonly title: string;
+  /** What the change does, said before it is made. */
+  readonly children: ReactNode;
+  /** Why the change last failed, where it did. */
+  readonly failure?: ReactNode;
+  /** The words of the button that leaves things as they are. */
+  readonly keep: string;
+  /** The button that makes the change. */
+  readonly change: {
+    readonly text: string;
+    readonly tone: "primary" | "destroy";
+    readonly disabled?: boolean;
+    readonly onClick: () => void;
+  };
+  /** Where the focus goes when the dialog closes, where not back to its button. */
+  readonly finalFocus?: AlertDialog.Popup.Props["finalFocus"];
+}
+
+/** A change a person is asked about before it is made: what it does, and the two ways out. */
+export function ConfirmDialog(props: ConfirmDialogProps) {
+  const { change } = props;
+  return (
+    <AlertDialog.Root open={props.open} onOpenChange={props.onOpenChange}>
+      <AlertDialog.Trigger render={props.trigger}>{props.triggerText}</AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Backdrop forceRender className={DIALOG.backdrop} />
+        <AlertDialog.Popup finalFocus={props.finalFocus} className={DIALOG.popup}>
+          <AlertDialog.Title className="text-base font-semibold">{props.title}</AlertDialog.Title>
+          <AlertDialog.Description>{props.children}</AlertDialog.Description>
+          {props.failure}
+          <div className="flex justify-end gap-2">
+            <AlertDialog.Close render={<Button />}>{props.keep}</AlertDialog.Close>
+            <Button tone={change.tone} disabled={change.disabled} onClick={change.onClick}>
+              {change.text}
+            </Button>
+          </div>
+        </AlertDialog.Popup>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
 
 export function Card({ children, label }: { children: ReactNode; label?: string }) {
   return (
@@ -269,6 +322,39 @@ export function ErrorPanel({ error, onRetry }: { error: unknown; onRetry?: () =>
       </div>
     </div>
   );
+}
+
+/** What a page reads of a query to show where it stands. */
+interface Queried<T> {
+  readonly data: T | undefined;
+  readonly isError: boolean;
+  readonly error: unknown;
+  refetch(): unknown;
+}
+
+/**
+ * A query's failure, with the button that asks again. `inset` is the padding it takes inside a
+ * card.
+ */
+export function QueryFailed({ query, inset }: { query: Queried<unknown>; inset?: string }) {
+  const panel = <ErrorPanel error={query.error} onRetry={() => void query.refetch()} />;
+  return inset === undefined ? panel : <div className={inset}>{panel}</div>;
+}
+
+/**
+ * Where a query stands: "Loading" the `what` until it has its data, its failure with a retry, and
+ * once it has the data, what `children` makes of it.
+ */
+export function QueryState<T>(props: {
+  query: Queried<T>;
+  what: string;
+  inset?: string;
+  children: (data: T) => ReactNode;
+}) {
+  const { query } = props;
+  if (query.isError) return <QueryFailed query={query} inset={props.inset} />;
+  if (query.data === undefined) return <Loading what={props.what} />;
+  return props.children(query.data);
 }
 
 export function Loading({ what }: { what: string }) {

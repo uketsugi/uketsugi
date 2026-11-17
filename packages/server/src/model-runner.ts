@@ -13,9 +13,67 @@
 import { ModelError, type Caller, type Chore, type ModelRunner } from "@uketsugi/core";
 import type * as AiSdk from "ai";
 
-/** The providers a model can be configured on. The last is any server that speaks OpenAI's chat API, at a URL. */
-export const MODEL_PROVIDERS = ["google", "openai", "anthropic", "openai-compatible"] as const;
-export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
+/** What a provider's model is made with: a configured model's settings, its provider by name. */
+type ProviderSettings = Omit<ModelConfig, "provider"> & { readonly provider: string };
+
+/** What the server knows of a provider a model can be configured on. */
+export interface Provider {
+  /** Makes the configured model from the provider's own package, which is loaded then and not before. */
+  readonly load: (config: ProviderSettings) => Promise<AiSdk.LanguageModel>;
+  /** Whether it has no address of its own, so that one must be given. */
+  readonly needsUrl: boolean;
+  /** Whether it is called with a key. A server on the person's own machine often asks for none. */
+  readonly needsKey: boolean;
+  /** Whether it takes the setting of how long a model thinks before it answers. */
+  readonly takesReasoning: boolean;
+}
+
+/** What a provider's own package makes a model with: its settings, then the model's id. */
+type Factory = (settings: {
+  apiKey: string;
+  baseURL?: string;
+}) => (model: string) => AiSdk.LanguageModel;
+
+/**
+ * A provider at an address of its own, called with a key, that takes the reasoning setting:
+ * `factory` loads its package's factory.
+ */
+function hosted(factory: () => Promise<Factory>): Provider {
+  return {
+    load: async ({ model, apiKey, baseUrl }) => {
+      const at = baseUrl === undefined ? {} : { baseURL: baseUrl };
+      return (await factory())({ apiKey, ...at })(model);
+    },
+    needsUrl: false,
+    needsKey: true,
+    takesReasoning: true,
+  };
+}
+
+/** Each provider's row. The last is any server that speaks OpenAI's chat API, at a URL. */
+const ROWS = {
+  google: hosted(async () => (await import("@ai-sdk/google")).createGoogleGenerativeAI),
+  openai: hosted(async () => (await import("@ai-sdk/openai")).createOpenAI),
+  anthropic: hosted(async () => (await import("@ai-sdk/anthropic")).createAnthropic),
+  "openai-compatible": {
+    load: async ({ provider, model, apiKey, baseUrl }): Promise<AiSdk.LanguageModel> => {
+      const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
+      return createOpenAICompatible({ name: provider, apiKey, baseURL: baseUrl ?? "" })(model);
+    },
+    needsUrl: true,
+    needsKey: false,
+    // A server that only speaks OpenAI's chat API may not know the setting.
+    takesReasoning: false,
+  },
+} satisfies Record<string, Provider>;
+
+export type ModelProvider = keyof typeof ROWS;
+
+/** The providers a model can be configured on, by name. */
+export const PROVIDERS: Readonly<Record<ModelProvider, Provider>> = ROWS;
+
+/** The providers' names, in the order they are offered. */
+export const MODEL_PROVIDERS = Object.keys(PROVIDERS) as ModelProvider[];
 
 export interface ModelConfig {
   readonly provider: ModelProvider;
@@ -43,30 +101,6 @@ const REASON_CHARS = 240;
  * billed as output.
  */
 const REASONING = "none";
-
-/** The configured model, from its provider's own package, which is loaded here and not before. */
-async function languageModel(config: ModelConfig): Promise<AiSdk.LanguageModel> {
-  const { provider, model, apiKey, baseUrl } = config;
-  const at = baseUrl === undefined ? {} : { baseURL: baseUrl };
-  switch (provider) {
-    case "google": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      return createGoogleGenerativeAI({ apiKey, ...at })(model);
-    }
-    case "openai": {
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      return createOpenAI({ apiKey, ...at })(model);
-    }
-    case "anthropic": {
-      const { createAnthropic } = await import("@ai-sdk/anthropic");
-      return createAnthropic({ apiKey, ...at })(model);
-    }
-    case "openai-compatible": {
-      const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
-      return createOpenAICompatible({ name: provider, apiKey, baseURL: baseUrl ?? "" })(model);
-    }
-  }
-}
 
 /** The shortest piece of a key that is taken out of a text on its own: a provider that masks a key shows its two ends. */
 const KEY_END_CHARS = 8;
@@ -115,6 +149,19 @@ export function modelName(config: Pick<ModelConfig, "provider" | "model">): stri
   return `${config.provider} · ${config.model}`;
 }
 
+/** A model as `ukt` is told it and keeps it: `provider/model`. */
+export function modelSpec(config: Pick<ModelConfig, "provider" | "model">): string {
+  return `${config.provider}/${config.model}`;
+}
+
+/** The model a `provider/model` names; null where it names no provider this build knows, or no model. */
+export function parseModel(spec: string): Pick<ModelConfig, "provider" | "model"> | null {
+  const [first = "", ...rest] = spec.split("/");
+  const provider = MODEL_PROVIDERS.find((known) => known === first);
+  const model = rest.join("/");
+  return provider === undefined || model === "" ? null : { provider, model };
+}
+
 /**
  * The runner for a configured model. It serves the one person who configured it, `agreedBy`:
  * theirs is the only text it is ever sent. It makes no request until a chore is run.
@@ -127,7 +174,7 @@ export async function createModelRunner(
   // The SDK's notes on how it fitted a setting to a model go to standard error unless told not
   // to: they are not this server's to print, and what fails is reported as a `ModelError`.
   globalThis.AI_SDK_LOG_WARNINGS = false;
-  const model = await languageModel(config);
+  const model = await PROVIDERS[config.provider].load(config);
   return {
     kind: "endpoint",
     name: modelName(config),
@@ -142,8 +189,7 @@ export async function createModelRunner(
           prompt: chore.material,
           output: sdk.Output.object({ schema: sdk.jsonSchema(chore.shape) }),
           temperature: 0,
-          // A server that only speaks OpenAI's chat API may not know the setting.
-          ...(config.provider === "openai-compatible" ? {} : { reasoning: REASONING }),
+          ...(PROVIDERS[config.provider].takesReasoning ? { reasoning: REASONING } : {}),
           abortSignal: signal,
         });
         return {

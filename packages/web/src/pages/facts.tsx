@@ -10,20 +10,17 @@ import { useTable } from "@tanstack/react-table";
 import { cx } from "class-variance-authority";
 import { useMemo, type FormEvent } from "react";
 import { exportHref, factsQuery } from "../api.ts";
-import { ByProject, useSharing } from "../by-project.tsx";
+import { ByProject, SeenByMark } from "../by-project.tsx";
 import { Page } from "../shell.tsx";
-import { columnsFor, DataTable, features } from "../table.tsx";
+import { columnsFor, DataTable, features, ShowMore } from "../table.tsx";
 import {
   Ago,
   Button,
   buttonClass,
   Card,
   Empty,
-  ErrorPanel,
-  FlagMark,
-  Loading,
-  Mark,
-  SEEN_BY,
+  FlagMarks,
+  QueryState,
   StatusMark,
   ToSay,
 } from "../ui.tsx";
@@ -38,7 +35,6 @@ const NO_FACTS: ApiFact[] = [];
 
 function FactCell({ fact }: { fact: ApiFact }) {
   const { project } = route.useSearch();
-  const sharing = useSharing();
   const count = fact.citations.length;
   // The words break anywhere, so that a long project key never makes the table wider than its card.
   return (
@@ -57,10 +53,8 @@ function FactCell({ fact }: { fact: ApiFact }) {
         {count === 1 ? "1 citation" : `${count} citations`} · by {fact.author}
         {fact.from_session === null ? "" : `, written by a model from session ${fact.from_session}`}
         {project === undefined ? ` · ${fact.project}` : ""}
-        {sharing ? <Mark look={SEEN_BY[fact.audience]}>{fact.audience}</Mark> : null}
-        {fact.flags.map((kind) => (
-          <FlagMark key={kind} kind={kind} />
-        ))}
+        <SeenByMark audience={fact.audience} />
+        <FlagMarks flags={fact.flags} />
       </p>
     </div>
   );
@@ -159,35 +153,26 @@ function FactList() {
   return (
     <Card label="Facts">
       <ListHeader project={project} q={q} />
-      {list.isPending ? (
-        <Loading what="facts" />
-      ) : list.isError ? (
-        <div className="p-4">
-          <ErrorPanel error={list.error} onRetry={() => void list.refetch()} />
-        </div>
-      ) : facts.length === 0 ? (
-        <NoFacts q={q} />
-      ) : (
-        <>
-          <DataTable
-            table={table}
-            caption={q === undefined ? "Facts, newest first" : `Facts matching “${q}”`}
-            current={(fact) => fact.id === open}
-          />
-          <div className="flex items-center gap-3 border-t border-line px-4 py-2.5 text-ink-muted">
-            <p role="status">{matched === undefined ? shown : `${matched} matched · ${shown}`}</p>
-            {list.hasNextPage ? (
-              <Button
-                size="sm"
-                disabled={list.isFetchingNextPage}
-                onClick={() => void list.fetchNextPage()}
-              >
-                Show more
-              </Button>
-            ) : null}
-          </div>
-        </>
-      )}
+      <QueryState query={list} what="facts" inset="p-4">
+        {() =>
+          facts.length === 0 ? (
+            <NoFacts q={q} />
+          ) : (
+            <>
+              <DataTable
+                table={table}
+                caption={q === undefined ? "Facts, newest first" : `Facts matching “${q}”`}
+                current={(fact) => fact.id === open}
+              />
+              <ShowMore
+                shown={matched === undefined ? shown : `${matched} matched · ${shown}`}
+                more={list.hasNextPage ? () => void list.fetchNextPage() : undefined}
+                waiting={list.isFetchingNextPage}
+              />
+            </>
+          )
+        }
+      </QueryState>
     </Card>
   );
 }

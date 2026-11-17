@@ -13,7 +13,7 @@ import {
   StoreUnreadableError,
   StoreUnavailableError,
 } from "@uketsugi/store";
-import { keepSettings, readSettings, type Home } from "./home.ts";
+import { keepSettings, readSettings, resolveHome, type Home } from "./home.ts";
 import { CliFailure, describe } from "./report.ts";
 
 /** A host's store: where it is, and whether the data directory holds or names it yet. */
@@ -69,6 +69,18 @@ export async function hostStore(home: Home, given: string | undefined): Promise<
       next: `${LEAVE_OUT} to use the store in the data directory. A host on ${asked} ${OWN_DIRECTORY}`,
     });
   return { kind: "postgres", made: false, databaseUrl: (given ?? "").trim(), name: asked };
+}
+
+/** What names a verb's host and its store: `--data-dir` and `--database-url`. */
+type HostOptions = { readonly dataDir?: string; readonly databaseUrl?: string };
+
+/** A verb's host and its store. */
+export type Host = { readonly home: Home; readonly store: HostStore };
+
+/** The host a verb is run for, by `--data-dir` and `--database-url` or their variables, and its store. */
+export async function hostOf(options: HostOptions, env: NodeJS.ProcessEnv): Promise<Host> {
+  const home = resolveHome(options.dataDir, env);
+  return { home, store: await hostStore(home, options.databaseUrl) };
 }
 
 /** What `openLocalPorts` and `startLocalServer` take to open this host's store. */
@@ -143,9 +155,17 @@ export function requireStore(home: Home, store: HostStore, verb: string): void {
   });
 }
 
-/** Refuses a verb that copies the data directory's own store, on a host that keeps its store elsewhere. */
-export function requireEmbedded(store: HostStore, verb: string): void {
-  if (store.kind === "embedded") return;
+/**
+ * The host of a verb that copies the files of the store in the data directory, and that store; a
+ * host that keeps its store elsewhere is refused.
+ */
+export async function embeddedHostOf(
+  options: HostOptions,
+  env: NodeJS.ProcessEnv,
+  verb: string,
+): Promise<Host> {
+  const { home, store } = await hostOf(options, env);
+  if (store.kind === "embedded") return { home, store };
   throw new CliFailure({
     what: `This host's store is the PostgreSQL database ${store.name}.`,
     meaning: `\`ukt ${verb}\` copies the files of a store kept in the data directory, so it did nothing.`,

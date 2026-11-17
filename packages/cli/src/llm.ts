@@ -10,6 +10,9 @@ import {
   DEFAULT_DAILY_TOKENS,
   MODEL_PROVIDERS,
   modelName,
+  modelSpec,
+  parseModel,
+  PROVIDERS,
   type ModelConfig,
 } from "@uketsugi/server";
 import { MIN_DAILY_TOKENS } from "@uketsugi/core";
@@ -69,10 +72,8 @@ function budgetOf(told: string | undefined, onFile: number | undefined): number 
 
 /** A value `--llm` takes in its two parts, or a refusal when it is not `provider/model` with a provider this build knows. */
 function namedModel(value: string): Pick<ModelConfig, "provider" | "model"> {
-  const [first = "", ...rest] = value.split("/");
-  const provider = MODEL_PROVIDERS.find((known) => known === first);
-  const model = rest.join("/");
-  if (provider !== undefined && model !== "") return { provider, model };
+  const named = parseModel(value);
+  if (named !== null) return named;
   throw refused(
     `"${value}" is not a language model --llm takes.`,
     `Pass it as provider/model, the provider one of ${MODEL_PROVIDERS.join(", ")}: for example google/gemini-3.8-flash. Pass \`${NONE}\` for no model.`,
@@ -81,13 +82,19 @@ function namedModel(value: string): Pick<ModelConfig, "provider" | "model"> {
 
 /** The model a record on file names, or null when the file does not read as one. */
 function recorded(record: Awaited<ReturnType<typeof readLlmRecord>>): ModelConfig | null {
-  if (record === null) return null;
-  const [provider = "", ...rest] = record.model.split("/");
-  const known = MODEL_PROVIDERS.find((name) => name === provider);
-  if (known === undefined || rest.length === 0) return null;
+  const named = record === null ? null : parseModel(record.model);
+  if (record === null || named === null) return null;
   const at = record.url === undefined ? {} : { baseUrl: record.url };
   const budget = record.budget === undefined ? {} : { dailyTokens: record.budget };
-  return { provider: known, model: rest.join("/"), apiKey: record.key, ...at, ...budget };
+  return { ...named, apiKey: record.key, ...at, ...budget };
+}
+
+/** What a run says of the model (`--llm`, trimmed), and the model remembered in the data directory. */
+async function toldAndKept(
+  home: Home,
+  options: LlmOptions,
+): Promise<{ value: string; onFile: ModelConfig | null }> {
+  return { value: options.llm?.trim() ?? "", onFile: recorded(await readLlmRecord(home)) };
 }
 
 /**
@@ -103,17 +110,16 @@ function withRemembered(
   const same = onFile !== null && modelName(onFile) === modelName(named) ? onFile : null;
   const baseUrl = given.url === "" ? (same?.baseUrl ?? "") : given.url;
   const apiKey = given.key === "" ? (same?.apiKey ?? "") : given.key;
-  // A model served on this machine often asks for no key and has no address but its own.
-  const local = named.provider === "openai-compatible";
-  if (local && baseUrl === "")
+  const provider = PROVIDERS[named.provider];
+  if (provider.needsUrl && baseUrl === "")
     throw refused(
-      "--llm names an openai-compatible provider, and no address says where it is.",
+      `--llm names an ${named.provider} provider, and no address says where it is.`,
       "Pass its base URL as --llm-url or UKT_LLM_URL, for example http://127.0.0.1:11434/v1.",
     );
-  if (!local && apiKey === "")
+  if (provider.needsKey && apiKey === "")
     throw refused(
       `--llm names a model at ${named.provider}, and no key for it was given.`,
-      `Run \`ukt setup --llm ${modelName(named).replace(" · ", "/")}\` to give the key once, or set ${KEY_ENV} in the environment this starts in.`,
+      `Run \`ukt setup --llm ${modelSpec(named)}\` to give the key once, or set ${KEY_ENV} in the environment this starts in.`,
     );
   return { ...named, apiKey, ...(baseUrl === "" ? {} : { baseUrl }) };
 }
@@ -149,7 +155,7 @@ async function givenKey(
 ): Promise<string> {
   const held = env[KEY_ENV];
   if (held !== undefined) return held;
-  if (!io.interactive || named.provider === "openai-compatible") return "";
+  if (!io.interactive || !PROVIDERS[named.provider].needsKey) return "";
   return (await io.secret(`The key for ${modelName(named)}`)) ?? "";
 }
 
@@ -160,7 +166,7 @@ async function remember(home: Home, model: ModelConfig, told?: string): Promise<
   const at = baseUrl === undefined ? {} : { url: baseUrl };
   const limit = budget === undefined ? {} : { budget };
   await writeLlmRecord(home, {
-    model: `${rest.provider}/${rest.model}`,
+    model: modelSpec(rest),
     key: apiKey,
     ...at,
     ...limit,
@@ -196,8 +202,7 @@ export async function rememberModel(
   options: LlmOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<string | null> {
-  const value = options.llm?.trim() ?? "";
-  const onFile = recorded(await readLlmRecord(home));
+  const { value, onFile } = await toldAndKept(home, options);
   if (value === NONE) {
     await removeLlmRecord(home);
     return onFile === null ? null : `none: ${modelName(onFile)} is forgotten`;
@@ -226,8 +231,7 @@ export async function llmChange(
   onFile: ModelConfig | null;
   pending: boolean;
 }> {
-  const value = options.llm?.trim() ?? "";
-  const onFile = recorded(await readLlmRecord(home));
+  const { value, onFile } = await toldAndKept(home, options);
   if (value === "") return { named: null, onFile, pending: (options.llmBudget ?? "") !== "" };
   if (value === NONE) return { named: null, onFile, pending: onFile !== null };
   return { named: namedModel(value), onFile, pending: true };

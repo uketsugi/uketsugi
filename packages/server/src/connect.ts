@@ -12,6 +12,7 @@ import {
   MCP_REVISIONS,
   pathPrintedBy,
   PROMPT_DESCRIPTIONS,
+  SERVER_NAME,
   TOKEN_ENV,
   type CapabilityDescriptor,
   type ConnectHarness,
@@ -19,9 +20,6 @@ import {
   type PromptName,
 } from "@uketsugi/contracts";
 import { JOB_KINDS, type App, type AppPorts } from "@uketsugi/core";
-
-/** The name the server is added to a harness under; the commands' names follow from it. */
-export const SERVER_NAME = "uketsugi";
 
 /** Claude Code, as its MCP client names itself: the harness whose hooks the server answers. */
 export const CLAUDE_CODE = "claude-code";
@@ -36,6 +34,28 @@ export const PLUGIN_NAME = SERVER_NAME;
 export type PluginsFrom = { readonly folder: string } | { readonly url: string };
 
 type Plugin = NonNullable<ConnectHarness["plugin"]>;
+
+/**
+ * A harness's plugin, as the lines that install it and take it out again. Slots, besides the
+ * ones every line has: `{source}`, where the harness installs it from, and `{origin}`, the
+ * server's address.
+ */
+interface PluginRow {
+  /**
+   * How the harness takes it: from the marketplace file of the folder of plugins (served, with
+   * each plugin as a zip, from an address), or as one plugin's folder, which from an address is
+   * fetched as its zip and unpacked first.
+   */
+  readonly source: "marketplace" | { readonly folder: string };
+  readonly install: string;
+  /** The line that gives it the token, added where the server needs one. */
+  readonly giveToken?: string;
+  readonly remove: string;
+  /** Whether installing it adds the server too. */
+  readonly addsServer: boolean;
+  /** Whether the harness fetches it from an address only over TLS. */
+  readonly httpsOnly: boolean;
+}
 
 interface Harness {
   /** The name its MCP client gives on a call, and its key on the Connect page. */
@@ -75,21 +95,29 @@ interface Harness {
    * which conversation each call belongs to before the call is made (`tool-uses.ts`).
    */
   readonly toolUseIdKey?: string;
-  /**
-   * How the person installs its plugin for the server at `origin`, with the step that gives it a
-   * token only where the server needs one; null where it has none, or cannot fetch it from where
-   * the person would have to.
-   */
-  plugin(origin: string, from: PluginsFrom, needsToken: boolean): Plugin | null;
+  /** Its plugin, where it has one. */
+  readonly plugin?: PluginRow;
 }
 
-/** A row's line with its slots filled for the server at `mcpUrl`. */
-function filled(line: string, mcpUrl: string): string {
-  return line
-    .replaceAll("{name}", SERVER_NAME)
-    .replaceAll("{url}", mcpUrl)
-    .replaceAll("{token}", `$${TOKEN_ENV}`)
-    .replaceAll("{tokenVar}", TOKEN_ENV);
+type Slots = Readonly<Record<string, string>>;
+
+/** A row's line with every slot it names filled, in one pass, so that no filled value is read for slots. */
+function filled(line: string, slots: Slots): string {
+  return line.replace(/\{(\w+)\}/g, (slot, key: string) => slots[key] ?? slot);
+}
+
+/**
+ * The slots every line of a row has, for the server at `mcpUrl`: the server's name, the plugin's,
+ * the server's MCP address, and the variable that holds the token as a shell reads it and by name.
+ */
+function slotsOf(mcpUrl: string): Slots {
+  return {
+    name: SERVER_NAME,
+    plugin: PLUGIN_NAME,
+    url: mcpUrl,
+    token: `$${TOKEN_ENV}`,
+    tokenVar: TOKEN_ENV,
+  };
 }
 
 /** A word of a shell line: as it is where a shell reads it as one word, else in single quotes. */
@@ -97,18 +125,43 @@ export function word(text: string): string {
   return /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
 }
 
-/** A harness's plugin folder on the person's machine, and the lines that put it there first, if any. */
-function folderOf(from: PluginsFrom, plugin: string): { folder: string; fetch: string } {
-  if ("folder" in from) return { folder: word(`${from.folder}/${plugin}`), fetch: "" };
+/** Where a plugin is installed from on the person's machine, and the lines that put it there first. */
+function sourceOf(row: PluginRow, from: PluginsFrom): { source: string; fetch: string[] } {
+  if (row.source === "marketplace") {
+    const source = "folder" in from ? word(from.folder) : `${from.url}/marketplace.json`;
+    return { source, fetch: [] };
+  }
+  const plugin = row.source.folder;
+  if ("folder" in from) return { source: word(`${from.folder}/${plugin}`), fetch: [] };
   const folder = `${PLUGIN_NAME}-${plugin}`;
   const zip = `${folder}.zip`;
+  const fetch = [`curl -fsSL ${from.url}/${plugin}.zip -o ${zip}`, `unzip -o ${zip} -d ${folder}`];
+  return { source: folder, fetch };
+}
+
+/**
+ * How the person installs a plugin for the server at `origin`, with the step that gives it a token
+ * only where the server needs one; null where the harness cannot fetch it from where the person
+ * would have to.
+ */
+function pluginOf(
+  row: PluginRow,
+  slots: Slots,
+  from: PluginsFrom,
+  needsToken: boolean,
+): Plugin | null {
+  if ("url" in from && row.httpsOnly && !from.url.startsWith("https://")) return null;
+  const { source, fetch } = sourceOf(row, from);
+  const line = (text: string) => filled(text, { ...slots, source });
+  const give = needsToken && row.giveToken !== undefined ? [line(row.giveToken)] : [];
   return {
-    folder,
-    fetch: `curl -fsSL ${from.url}/${plugin}.zip -o ${zip}\nunzip -o ${zip} -d ${folder}\n`,
+    install: [...fetch, line(row.install), ...give].join("\n"),
+    remove: line(row.remove),
+    adds_server: row.addsServer,
   };
 }
 
-const HARNESSES: readonly Harness[] = [
+export const HARNESSES: readonly Harness[] = [
   {
     id: CLAUDE_CODE,
     name: "Claude Code",
@@ -122,7 +175,7 @@ const HARNESSES: readonly Harness[] = [
     // mcp__ form, which the note gives.
     setup: "/{name}:setup",
     activate: "/{name}:activate",
-    note: `\`claude -p\` refuses every call to the server until its tools are allowed: add --allowedTools mcp__{name} (with the plugin, mcp__plugin_${PLUGIN_NAME}_${SERVER_NAME}). There its commands are /mcp__{name}__setup and /mcp__{name}__activate. Type set-up in an interactive session: with \`claude -p\` nobody is there to allow the edit of the file.`,
+    note: `\`claude -p\` refuses every call to the server until its tools are allowed: add --allowedTools mcp__{name} (with the plugin, mcp__plugin_{plugin}_{name}). There its commands are /mcp__{name}__setup and /mcp__{name}__activate. Type set-up in an interactive session: with \`claude -p\` nobody is there to allow the edit of the file.`,
     known:
       "run here: Claude Code 2.1.325 takes the address alone from a server that needs no token, and both commands were typed in a session",
     instructionFile: "~/.claude/CLAUDE.md",
@@ -134,19 +187,13 @@ const HARNESSES: readonly Harness[] = [
     // leaves each session's note. Claude Code fetches a plugin from a server only as a zip over
     // TLS; from a folder it reads the files where they are. The token goes in on standard input:
     // on a command line every user of the machine could read it.
-    plugin: (origin, from, needsToken) => {
-      if ("url" in from && !from.url.startsWith("https://")) return null;
-      const marketplace = "folder" in from ? word(from.folder) : `${from.url}/marketplace.json`;
-      const id = `${PLUGIN_NAME}@${PLUGIN_NAME}`;
-      const give = `printf '{"token":"%s"}' "$${TOKEN_ENV}" | claude plugin configure ${id} --values-stdin`;
-      return {
-        install: [
-          `claude plugin install ${PLUGIN_NAME} --marketplace ${marketplace} --config url=${origin}`,
-          ...(needsToken ? [give] : []),
-        ].join("\n"),
-        remove: `claude plugin marketplace remove ${PLUGIN_NAME}`,
-        adds_server: true,
-      };
+    plugin: {
+      source: "marketplace",
+      install: "claude plugin install {plugin} --marketplace {source} --config url={origin}",
+      giveToken: `printf '{"token":"%s"}' "{token}" | claude plugin configure {plugin}@{plugin} --values-stdin`,
+      remove: "claude plugin marketplace remove {plugin}",
+      addsServer: true,
+      httpsOnly: true,
     },
   },
   {
@@ -166,13 +213,12 @@ const HARNESSES: readonly Harness[] = [
     instructionFile: "~/.gemini/GEMINI.md",
     conversationIdKey: "antigravity.google/conversation_id",
     // The plugin is the block, as a rule that is always on. Antigravity installs one from a folder.
-    plugin: (_origin, from) => {
-      const { folder, fetch } = folderOf(from, "antigravity");
-      return {
-        install: `${fetch}agy plugin install ${folder}`,
-        remove: `agy plugin uninstall ${PLUGIN_NAME}`,
-        adds_server: false,
-      };
+    plugin: {
+      source: { folder: "antigravity" },
+      install: "agy plugin install {source}",
+      remove: "agy plugin uninstall {plugin}",
+      addsServer: false,
+      httpsOnly: false,
     },
   },
   {
@@ -185,7 +231,6 @@ const HARNESSES: readonly Harness[] = [
     remove: "codex mcp remove {name}",
     known:
       "run here: Codex 0.166.0 stores the address with `codex mcp add` and lists a server that needs no token as enabled; no session was started, so whether it offers the server's commands and which file it reads are not established",
-    plugin: () => null,
   },
   {
     id: "vscode",
@@ -196,7 +241,6 @@ const HARNESSES: readonly Harness[] = [
     addKind: "command",
     known:
       "run here: VS Code 1.146.0 adds the server to its user profile with `code --add-mcp`; the line that carries a token was not run, and no session was started",
-    plugin: () => null,
   },
   {
     id: "cursor",
@@ -210,7 +254,6 @@ const HARNESSES: readonly Harness[] = [
     tokenNote: "Put your token in place of <your token>; that line was not run here.",
     known:
       "run here: Cursor's agent 2025.11.25 reads the server from ~/.cursor/mcp.json and asks for it to be approved; no session was started",
-    plugin: () => null,
   },
   {
     id: "other",
@@ -221,7 +264,6 @@ const HARNESSES: readonly Harness[] = [
     note: "Any client that takes a remote MCP server by its URL: add this one under the name {name}.",
     tokenNote: 'Send the token as the header "Authorization: Bearer" and the token.',
     known: "not established: no other client was tried",
-    plugin: () => null,
   },
 ];
 
@@ -263,15 +305,16 @@ export function instructionFileOf(clientName: string): string | null {
   return harness?.instructionFile ?? null;
 }
 
-/** The descriptor of this server as it is composed now. */
+/** The descriptor of this server as it is composed now, for the edition of that name. */
 export function capabilityDescriptor(
+  edition: string,
   app: App,
   ports: Pick<AppPorts, "embedder" | "runner">,
 ): CapabilityDescriptor {
   const tools = app.tools.map((tool) => tool.name);
   const runner = ports.runner?.kind ?? "rules";
   return {
-    edition: "community",
+    edition,
     contract_version: CONTRACT_VERSION,
     mcp_revisions: [...MCP_REVISIONS],
     features: {
@@ -301,9 +344,14 @@ export function connectInfo(
   needsToken: boolean,
 ): ConnectInfo {
   const mcpUrl = `${origin}/mcp`;
+  const slots = { ...slotsOf(mcpUrl), origin };
   const command = (name: PromptName) => ({ name, description: PROMPT_DESCRIPTIONS[name] });
   const line = (text: string | undefined): string | undefined =>
-    text === undefined ? undefined : filled(text, mcpUrl);
+    text === undefined ? undefined : filled(text, slots);
+  const plugin = (row: PluginRow | undefined) =>
+    row === undefined || plugins === null
+      ? undefined
+      : (pluginOf(row, slots, plugins, needsToken) ?? undefined);
   return {
     mcp_url: mcpUrl,
     server_name: SERVER_NAME,
@@ -315,8 +363,8 @@ export function connectInfo(
     harnesses: HARNESSES.map((harness) => ({
       id: harness.id,
       name: harness.name,
-      plugin: (plugins === null ? null : harness.plugin(origin, plugins, needsToken)) ?? undefined,
-      add: filled(needsToken ? harness.addWithToken : harness.add, mcpUrl),
+      plugin: plugin(harness.plugin),
+      add: filled(needsToken ? harness.addWithToken : harness.add, slots),
       add_kind: harness.addKind,
       add_where: harness.addWhere,
       remove: line(harness.remove),

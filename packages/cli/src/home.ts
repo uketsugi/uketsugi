@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { TOKEN_ENV } from "@uketsugi/contracts";
+import { isMissing } from "@uketsugi/embed";
 import { BACKUPS_DIR } from "@uketsugi/store";
 import writeFileAtomic from "write-file-atomic";
 import { xdgData } from "xdg-basedir";
@@ -96,10 +97,6 @@ export function resolveHome(dataDir: string | undefined, env: NodeJS.ProcessEnv)
     backupsDir: join(dir, BACKUPS_DIR),
     givenToken: token === undefined || token === "" ? undefined : token,
   };
-}
-
-function isMissing(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 async function readOrNull(path: string): Promise<string | null> {

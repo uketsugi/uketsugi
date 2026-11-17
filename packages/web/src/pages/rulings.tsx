@@ -8,10 +8,20 @@ import { Link } from "@tanstack/react-router";
 import { useTable } from "@tanstack/react-table";
 import { Undo2 } from "lucide-react";
 import { createContext, use } from "react";
-import { projectsQuery, revertRuling, rulingsQuery } from "../api.ts";
+import { refreshFacts, revertRuling, rulingsQuery } from "../api.ts";
 import { useSession } from "../shell.tsx";
 import { columnsFor, DataTable, features } from "../table.tsx";
-import { Ago, Button, Card, Empty, ErrorPanel, inWords, Loading, Mark, type Look } from "../ui.tsx";
+import {
+  Ago,
+  Button,
+  Card,
+  Empty,
+  ErrorPanel,
+  inWords,
+  Mark,
+  QueryState,
+  type Look,
+} from "../ui.tsx";
 
 /** How a row asks for its ruling to be reverted, and which ruling is being reverted now. */
 const Reverting = createContext<{ revert: (id: string) => void; pending?: string }>({
@@ -89,8 +99,7 @@ export function Rulings() {
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: rulingsQuery.queryKey }),
-        client.invalidateQueries({ queryKey: ["facts"] }),
-        client.invalidateQueries({ queryKey: projectsQuery.queryKey }),
+        refreshFacts(client),
       ]),
   });
   const table = useTable({
@@ -115,24 +124,22 @@ export function Rulings() {
           <ErrorPanel error={revert.error} />
         </div>
       ) : null}
-      {rulings.isPending ? (
-        <Loading what="rulings" />
-      ) : rulings.isError ? (
-        <div className="p-4">
-          <ErrorPanel error={rulings.error} onRetry={() => void rulings.refetch()} />
-        </div>
-      ) : rulings.data.rulings.length === 0 ? (
-        <Empty sentence="No ruling has been made yet" />
-      ) : (
-        <Reverting
-          value={{
-            revert: revert.mutate,
-            pending: revert.isPending ? revert.variables : undefined,
-          }}
-        >
-          <DataTable table={table} caption="Recent rulings, newest first" />
-        </Reverting>
-      )}
+      <QueryState query={rulings} what="rulings" inset="p-4">
+        {(data) =>
+          data.rulings.length === 0 ? (
+            <Empty sentence="No ruling has been made yet" />
+          ) : (
+            <Reverting
+              value={{
+                revert: revert.mutate,
+                pending: revert.isPending ? revert.variables : undefined,
+              }}
+            >
+              <DataTable table={table} caption="Recent rulings, newest first" />
+            </Reverting>
+          )
+        }
+      </QueryState>
     </Card>
   );
 }

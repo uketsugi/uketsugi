@@ -6,11 +6,11 @@ import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BLOCK_TEXT, type ConnectInfo } from "@uketsugi/contracts";
+import { BLOCK_TEXT, SERVER_NAME, type ConnectInfo } from "@uketsugi/contracts";
 import { acceptToken } from "@uketsugi/core";
 import { strFromU8, unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { connectInfo, PLUGIN_NAME, SERVER_NAME } from "../src/connect.ts";
+import { connectInfo, PLUGIN_NAME } from "../src/connect.ts";
 import { composeServer, openLocalPorts, type UketsugiServer } from "../src/index.ts";
 
 const PLUGINS = fileURLToPath(new URL("../plugins", import.meta.url));

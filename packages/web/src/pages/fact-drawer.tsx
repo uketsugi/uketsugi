@@ -2,7 +2,6 @@
  * One fact, in a drawer beside the list: what it claims, where it comes from, who checked it, what
  * happened to it, and the one change a person makes here, Redact, behind a confirmation.
  */
-import { AlertDialog } from "@base-ui/react/alert-dialog";
 import type {
   ApiConfirmation,
   ApiFact,
@@ -11,28 +10,24 @@ import type {
   FactHistoryEntry,
 } from "@uketsugi/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useRef, useState, type RefObject } from "react";
-import { factQuery, projectsQuery, redactFact } from "../api.ts";
-import { useSharing } from "../by-project.tsx";
-import { Lead, Section, SideDrawer } from "../drawer.tsx";
+import { factQuery, redactFact, refreshFacts } from "../api.ts";
+import { SeenByMark } from "../by-project.tsx";
+import { Detail, Details, Lead, Section, SideDrawer } from "../drawer.tsx";
 import { useSession } from "../shell.tsx";
 import {
   Ago,
   Button,
   CitationMark,
-  DIALOG,
+  ConfirmDialog,
   ErrorPanel,
-  FlagMark,
-  Loading,
-  Mark,
-  SEEN_BY,
+  FlagMarks,
+  QueryState,
   sentence,
   StatusMark,
   TrustMark,
 } from "../ui.tsx";
-
-const route = getRouteApi("/facts");
 
 /** A reference a browser can open. Anything else is shown as text, never as a link. */
 function isWebAddress(ref: string): boolean {
@@ -108,12 +103,11 @@ function Connections({ fact }: { fact: ApiFact }) {
   if (fact.superseded_by === null) return null;
   return (
     <Section title="Connections">
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
-        <dt className="text-ink-muted">Superseded by</dt>
-        <dd>
+      <Details>
+        <Detail term="Superseded by">
           <FactLink id={fact.superseded_by} />
-        </dd>
-      </dl>
+        </Detail>
+      </Details>
     </Section>
   );
 }
@@ -160,10 +154,7 @@ function Redact(props: { id: string; live: string | null; after: RefObject<HTMLE
     onSuccess: async () => {
       done.current = true;
       setOpen(false);
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ["facts"] }),
-        client.invalidateQueries({ queryKey: projectsQuery.queryKey }),
-      ]);
+      await refreshFacts(client);
     },
   });
   const change = (next: boolean) => {
@@ -171,43 +162,36 @@ function Redact(props: { id: string; live: string | null; after: RefObject<HTMLE
     setOpen(next);
   };
   return (
-    <AlertDialog.Root open={open} onOpenChange={change}>
-      <AlertDialog.Trigger render={<Button tone="danger" />}>Redact…</AlertDialog.Trigger>
-      <AlertDialog.Portal>
-        <AlertDialog.Backdrop forceRender className={DIALOG.backdrop} />
-        <AlertDialog.Popup
-          // Once the fact is redacted its button is gone, so the focus goes to the top of the drawer.
-          finalFocus={() => (done.current ? after.current : true)}
-          className={DIALOG.popup}
-        >
-          <AlertDialog.Title className="text-base font-semibold">
-            Redact this fact?
-          </AlertDialog.Title>
-          <AlertDialog.Description>
-            Agents stop receiving its text, and it is gone at once from the dashboard, from search
-            and from any export made from now on. This cannot be undone.
-            <span className="mt-2 block">{ON_DISK}</span>
-            <span className="mt-2 block">
-              If the text is a secret, such as a password or a key, change the secret as well.
-            </span>
-            {live === null ? null : (
-              <span className="mt-2 block">
-                This fact was merged into <span className="font-mono break-all">{live}</span>, which
-                says the same and keeps its text: redact that fact as well if the claim itself
-                should go.
-              </span>
-            )}
-          </AlertDialog.Description>
-          {redact.isError ? <ErrorPanel error={redact.error} /> : null}
-          <div className="flex justify-end gap-2">
-            <AlertDialog.Close render={<Button />}>Keep the fact</AlertDialog.Close>
-            <Button tone="destroy" disabled={redact.isPending} onClick={() => redact.mutate()}>
-              Redact the fact
-            </Button>
-          </div>
-        </AlertDialog.Popup>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
+    <ConfirmDialog
+      open={open}
+      onOpenChange={change}
+      trigger={<Button tone="danger" />}
+      triggerText="Redact…"
+      title="Redact this fact?"
+      failure={redact.isError ? <ErrorPanel error={redact.error} /> : null}
+      keep="Keep the fact"
+      change={{
+        text: "Redact the fact",
+        tone: "destroy",
+        disabled: redact.isPending,
+        onClick: () => redact.mutate(),
+      }}
+      // Once the fact is redacted its button is gone, so the focus goes to the top of the drawer.
+      finalFocus={() => (done.current ? after.current : true)}
+    >
+      Agents stop receiving its text, and it is gone at once from the dashboard, from search and
+      from any export made from now on. This cannot be undone.
+      <span className="mt-2 block">{ON_DISK}</span>
+      <span className="mt-2 block">
+        If the text is a secret, such as a password or a key, change the secret as well.
+      </span>
+      {live === null ? null : (
+        <span className="mt-2 block">
+          This fact was merged into <span className="font-mono break-all">{live}</span>, which says
+          the same and keeps its text: redact that fact as well if the claim itself should go.
+        </span>
+      )}
+    </ConfirmDialog>
   );
 }
 
@@ -263,46 +247,42 @@ const BY_A_MODEL =
 
 function FactBody({ id }: { id: string }) {
   const detail = useQuery(factQuery(id));
-  const sharing = useSharing();
+  return (
+    <QueryState query={detail} what="the fact">
+      {(data) => <FactShown detail={data} />}
+    </QueryState>
+  );
+}
+
+function FactShown({ detail }: { detail: FactDetail }) {
   const top = useRef<HTMLDivElement>(null);
-  if (detail.isPending) return <Loading what="the fact" />;
-  if (detail.isError) {
-    return <ErrorPanel error={detail.error} onRetry={() => void detail.refetch()} />;
-  }
-  const { fact, confirmations, history, private_because: because } = detail.data;
+  const { fact, confirmations, history, private_because: because } = detail;
   return (
     <>
       <div ref={top} tabIndex={-1} className="flex flex-wrap gap-1.5 outline-none">
         <StatusMark fact={fact} />
-        {sharing ? <Mark look={SEEN_BY[fact.audience]}>{fact.audience}</Mark> : null}
+        <SeenByMark audience={fact.audience} />
         <TrustMark trust={fact.trust} />
-        {fact.flags.map((kind) => (
-          <FlagMark key={kind} kind={kind} />
-        ))}
+        <FlagMarks flags={fact.flags} />
       </div>
       {because === undefined ? null : <p className="text-ink-muted">{PRIVATE_BECAUSE[because]}</p>}
       {fact.from_session === null ? null : <p className="text-ink-muted">{BY_A_MODEL}</p>}
       <Text fact={fact} />
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
-        <dt className="text-ink-muted">Project</dt>
-        <dd className="break-all">{fact.project}</dd>
-        <dt className="text-ink-muted">Author</dt>
-        <dd>{fact.author}</dd>
+      <Details>
+        <Detail term="Project" className="break-all">
+          {fact.project}
+        </Detail>
+        <Detail term="Author">{fact.author}</Detail>
         {fact.from_session === null ? null : (
-          <>
-            <dt className="text-ink-muted">Written by</dt>
-            <dd>a language model, from session {fact.from_session}</dd>
-          </>
+          <Detail term="Written by">a language model, from session {fact.from_session}</Detail>
         )}
-        <dt className="text-ink-muted">Published</dt>
-        <dd>
+        <Detail term="Published">
           <Ago at={fact.created_at} />
-        </dd>
-        <dt className="text-ink-muted">Updated</dt>
-        <dd>
+        </Detail>
+        <Detail term="Updated">
           <Ago at={fact.updated_at} />
-        </dd>
-      </dl>
+        </Detail>
+      </Details>
       <Citations citations={fact.citations} />
       <Checks confirmations={confirmations} />
       <Connections fact={fact} />
@@ -316,12 +296,9 @@ function FactBody({ id }: { id: string }) {
 
 /** The drawer of the fact the address names. */
 export function FactDrawer() {
-  const { fact: id } = route.useSearch();
-  const navigate = route.useNavigate();
-  const close = () => void navigate({ search: (shown) => ({ ...shown, fact: undefined }) });
   return (
-    <SideDrawer name="Fact" open={id !== undefined} onClose={close}>
-      {id === undefined ? null : <FactBody key={id} id={id} />}
+    <SideDrawer name="Fact" param="fact">
+      {(id) => <FactBody key={id} id={id} />}
     </SideDrawer>
   );
 }

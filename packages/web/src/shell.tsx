@@ -19,7 +19,7 @@ import {
   type ReactNode,
 } from "react";
 import { capabilitiesQuery, isSignedOut, sessionQuery, signIn, signOut } from "./api.ts";
-import { Button, ErrorPanel, INLINE_CODE, inWords, Loading } from "./ui.tsx";
+import { Button, ErrorPanel, INLINE_CODE, inWords, Loading, QueryFailed } from "./ui.tsx";
 
 const SessionContext = createContext<DashboardSession | null>(null);
 
@@ -239,7 +239,7 @@ export function Gate() {
     if (isSignedOut(session.error)) return <SignIn ended={signedInBefore} />;
     return (
       <Alone>
-        <ErrorPanel error={session.error} onRetry={() => void session.refetch()} />
+        <QueryFailed query={session} />
       </Alone>
     );
   }

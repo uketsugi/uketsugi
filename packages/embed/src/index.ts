@@ -4,5 +4,6 @@
  */
 export { CATALOG } from "./catalog.ts";
 export { openLocalEmbedder, type LocalEmbedder } from "./embedder.ts";
+export { isMissing } from "./faults.ts";
 export { installModel } from "./install.ts";
 export { verifyModel } from "./verify.ts";

@@ -14,6 +14,7 @@ import { pipeline } from "node:stream/promises";
 import ssri from "ssri";
 import { extract } from "tar";
 import { CATALOG, layout, tarballUrl, unsupportedPlatform, type Catalog } from "./catalog.ts";
+import { describe } from "./faults.ts";
 import { fileMatches, verifyModel } from "./verify.ts";
 
 export type InstallFault = "unsupported_platform" | "fetch_failed" | "integrity_mismatch";
@@ -52,9 +53,6 @@ const SHARP_STUB = {
   "index.js":
     'export default function sharp() { throw new Error("image input is not supported"); }\n',
 };
-
-const describe = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 interface Download {
   readonly name: string;

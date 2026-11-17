@@ -11,8 +11,8 @@ import {
   restoreEmbeddedStore,
   writeSnapshot,
 } from "@uketsugi/store";
-import { resolveHome, type Home } from "./home.ts";
-import { hostStore, requireEmbedded, requireStore, storeFailure } from "./host-store.ts";
+import type { Home } from "./home.ts";
+import { embeddedHostOf, requireStore, storeFailure } from "./host-store.ts";
 import { dirFlag, onStore, type OnStore, type Program } from "./program.ts";
 import { CliFailure, confirmPlan, describe, size, type Io, type Report } from "./report.ts";
 import { connectAsHost, servingNow, snapshot } from "./server-client.ts";
@@ -44,9 +44,7 @@ export interface BackupOptions extends OnStore {
 
 /** `ukt backup`: the whole store, vectors included, as one file. A running server takes the snapshot itself and goes on serving. */
 export async function backup(options: BackupOptions, env: NodeJS.ProcessEnv): Promise<Report> {
-  const home = resolveHome(options.dataDir, env);
-  const store = await hostStore(home, options.databaseUrl);
-  requireEmbedded(store, "backup");
+  const { home, store } = await embeddedHostOf(options, env, "backup");
   requireStore(home, store, "backup");
   const file = resolve(options.out ?? join(home.backupsDir, `uketsugi-${stamp(new Date())}.tgz`));
   const serving = (await servingNow(home)) !== null;
@@ -74,9 +72,7 @@ export async function restore(
   options: RestoreOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<Report> {
-  const home = resolveHome(options.dataDir, env);
-  const store = await hostStore(home, options.databaseUrl);
-  requireEmbedded(store, "restore");
+  const { home, store } = await embeddedHostOf(options, env, "restore");
   const file = resolve(snapshotFile);
   const found = await stat(file).catch(() => null);
   if (found === null || !found.isFile())

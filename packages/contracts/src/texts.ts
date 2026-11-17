@@ -31,8 +31,11 @@ export function noConfidentMatch(shown: number): string {
 export const SERVER_INSTRUCTIONS =
   "uketsugi holds this project's shared memory: facts with citations, published by earlier sessions and other agents.";
 
+/** The name the server is added to a harness under; the commands' names follow from it, and the block names it. */
+export const SERVER_NAME = "uketsugi";
+
 /** The instruction-file block: the one source of the `activate` prompt, the `setup` prompt and the Connect page. */
-export const BLOCK_TEXT = `This session uses uketsugi, the shared memory for this project (MCP server \`uketsugi\`).
+export const BLOCK_TEXT = `This session uses uketsugi, the shared memory for this project (MCP server \`${SERVER_NAME}\`).
 Every uketsugi call takes \`project\`: this repository's origin remote as host/owner/name (run \`git remote get-url origin\` once).
 
 For this session:

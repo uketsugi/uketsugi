@@ -15,6 +15,7 @@ import {
   type AppPorts,
   type Caller,
   type Clock,
+  type CorePorts,
   type DigestReport,
   type Embedder,
   type IdGen,
@@ -37,7 +38,7 @@ const systemIds: IdGen = {
   bytes: (length) => new Uint8Array(randomBytes(length)),
 };
 
-export interface LocalPortsOptions {
+export interface PortsOptions {
   /** The data directory of the embedded store: one process owns it. Left out, the store lives in memory, as a test wants. */
   readonly dataDir?: string;
   /**
@@ -50,6 +51,33 @@ export interface LocalPortsOptions {
   readonly embedder?: Embedder | null;
   /** How long a task's lease lasts, in milliseconds. Left out, core's fifteen minutes. */
   readonly taskLeaseMs?: number;
+}
+
+/** The store and the ports around it, with nobody in them yet. */
+export interface OpenedPorts {
+  readonly ports: CorePorts;
+  /** A copy of the whole store while it serves, where its host can make one: the embedded store's. */
+  readonly snapshot: (() => Promise<Blob>) | null;
+  close(): Promise<void>;
+}
+
+/**
+ * Opens the store and the ports around it, and makes no person: an edition with another identity
+ * adds its own and passes the ports to `composeServer`.
+ */
+export async function openPorts(options: PortsOptions): Promise<OpenedPorts> {
+  const { dataDir, databaseUrl, taskLeaseMs } = options;
+  const embedded = databaseUrl === undefined ? await openEmbeddedStore({ dataDir }) : null;
+  const store = embedded ?? (await openServerStore({ connectionString: databaseUrl ?? "" }));
+  const embedder = options.embedder ?? null;
+  return {
+    ports: { store, clock: systemClock, ids: systemIds, embedder, taskLeaseMs },
+    snapshot: embedded === null ? null : () => embedded.snapshot(),
+    close: () => store.close(),
+  };
+}
+
+export interface LocalPortsOptions extends PortsOptions {
   /** Whether every caller must send a token, the owner's own harnesses on this machine included. */
   readonly requireToken?: boolean;
   /**
@@ -61,35 +89,23 @@ export interface LocalPortsOptions {
 }
 
 /** The ports of the server `ukt` runs, and the owner they belong to. */
-export interface LocalPorts {
+export interface LocalPorts extends OpenedPorts {
   readonly ports: AppPorts;
   readonly owner: Caller;
-  /** A copy of the whole store while it serves, where its host can make one: the embedded store's. */
-  readonly snapshot: (() => Promise<Blob>) | null;
-  close(): Promise<void>;
 }
 
-/**
- * Opens the store and the ports around it. An edition that needs another identity replaces
- * `ports.identity` and passes the rest to `composeServer` unchanged.
- */
+/** `openPorts`, with the server's owner, the model they configured and the identity that checks stored tokens. */
 export async function openLocalPorts(options: LocalPortsOptions): Promise<LocalPorts> {
-  const { dataDir, databaseUrl, taskLeaseMs, requireToken, model } = options;
-  const embedded = databaseUrl === undefined ? await openEmbeddedStore({ dataDir }) : null;
-  const store = embedded ?? (await openServerStore({ connectionString: databaseUrl ?? "" }));
-  const embedder = options.embedder ?? null;
-  const base = { store, clock: systemClock, ids: systemIds, embedder, taskLeaseMs };
+  const { requireToken, model } = options;
+  const opened = await openPorts(options);
   try {
+    const base = opened.ports;
     const owner = await ensureOwner(base);
     const runner = model === undefined ? {} : { runner: await createModelRunner(model, owner) };
-    return {
-      ports: { ...base, ...runner, identity: createTokenIdentity(base, { requireToken }) },
-      owner,
-      snapshot: embedded === null ? null : () => embedded.snapshot(),
-      close: () => store.close(),
-    };
+    const identity = createTokenIdentity(base, { requireToken });
+    return { ...opened, ports: { ...base, ...runner, identity }, owner };
   } catch (error) {
-    await store.close();
+    await opened.close();
     throw error;
   }
 }
