@@ -1,0 +1,22 @@
+{
+  "path": ["packages"],
+  "format": ["typescript", "tsx"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/test/**",
+    "**/scripts/**",
+    "packages/testkit/**",
+    "packages/e2e/**",
+    "**/generated.ts",
+    "**/*.d.ts",
+    "**/*.config.ts"
+  ],
+  "minTokens": 25,
+  "minLines": 1,
+  "mode": "mild",
+  "reporters": ["console"],
+  "noTips": true,
+  "baseline": ".jscpd-baseline.json",
+  "failOnNewClones": 0
+}
