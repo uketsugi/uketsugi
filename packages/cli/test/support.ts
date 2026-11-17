@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,3 +63,12 @@ export async function tempDir(): Promise<string> {
 afterEach(async () => {
   await Promise.all(made.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
+
+/** A port nothing listens on now: where a test that must find no server points a verb, in place of the default one, which the machine's own server may hold. */
+export async function unusedPort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((listening) => probe.listen(0, "127.0.0.1", listening));
+  const { port } = probe.address() as { port: number };
+  await new Promise((closed) => probe.close(closed));
+  return port;
+}

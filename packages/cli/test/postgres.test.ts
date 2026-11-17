@@ -65,7 +65,9 @@ describe.runIf(TEST_POSTGRES_URL !== "")("a host set up on a PostgreSQL server",
       `answers and accepts the token: 0 projects, 0 facts · PostgreSQL at ${new URL(database.url).host}/${database.name}`,
     );
     expect(existsSync(join(dataDir, "pg"))).toBe(false);
-    expect((await stat(join(dataDir, "store.json"))).mode & 0o777).toBe(0o600);
+    // Where the database is kept is the settings file, private because it holds a password.
+    expect((await stat(join(dataDir, "settings.json"))).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(dataDir, "store.json"))).toBe(false);
   });
 
   test("refuses a verb that copies the data directory's own store, and names PostgreSQL's tools", async () => {

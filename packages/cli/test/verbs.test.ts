@@ -4,7 +4,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG } from "@uketsugi/embed";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import type * as Server from "@uketsugi/server";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { doctor, type Finding } from "../src/doctor.ts";
 import { token } from "../src/host-verbs.ts";
 import { main } from "../src/index.ts";
@@ -13,6 +14,13 @@ import { CliFailure, confirmPlan, progressLine, runVerb, type Report } from "../
 import { nextCommands, setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { fakeIo, tempDir } from "./support.ts";
+
+// The port a verb is not told is the default one, where this machine's own server may answer: a
+// test of "no server running" looks at a port that is free instead.
+vi.mock("@uketsugi/server", async (original) => ({
+  ...(await original<typeof Server>()),
+  DEFAULT_PORT: await (await import("./support.ts")).unusedPort(),
+}));
 
 const LISTEN = { host: "127.0.0.1", port: "7410" };
 const modeOf = async (path: string): Promise<number> => (await stat(path)).mode & 0o777;
