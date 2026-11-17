@@ -11,8 +11,10 @@ import {
 import {
   ensureDataDir,
   ensureHostKey,
+  keepStartFailure,
   readTokenFile,
   removeRecord,
+  removeStartFailure,
   resolveHome,
   writeRecord,
   writeToken,
@@ -26,7 +28,7 @@ import {
   storePlace,
   type HostStore,
 } from "./host-store.ts";
-import { hostModel, llmOptions, sentLine, type LlmOptions } from "./llm.ts";
+import { hostModel, idleBudgetLines, llmOptions, sentLine, type LlmOptions } from "./llm.ts";
 import {
   onStore,
   serving,
@@ -230,13 +232,42 @@ function tokenLine(home: Home, onFile: boolean): string {
     : `token: taken from ${TOKEN_ENV}`;
 }
 
-/** Starts the server. The data directory, the store and the token are made if `ukt setup` has not made them. */
+/**
+ * Starts the server. The data directory, the store and the token are made if `ukt setup` has
+ * not made them. A start that fails leaves its reason in the data directory, for set-up and
+ * doctor to show where the journal holds nothing of it; one that succeeds takes it away. A
+ * second server refused because one runs is not a failed start.
+ */
 export async function serve(
   io: Io,
   options: ServeOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<Serving> {
   const home = resolveHome(options.dataDir, env);
+  try {
+    const serving = await startServing(io, options, env, home);
+    await removeStartFailure(home);
+    return serving;
+  } catch (error) {
+    if ((await servingNow(home)) === null)
+      await keepStartFailure(home, failureText(error)).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** A failure as `ukt serve` prints it. */
+function failureText(error: unknown): string {
+  if (!(error instanceof CliFailure)) return describe(error);
+  const { what, meaning, next } = error.failure;
+  return `${what}\n${meaning}\nNext: ${next}`;
+}
+
+async function startServing(
+  io: Io,
+  options: ServeOptions,
+  env: NodeJS.ProcessEnv,
+  home: Home,
+): Promise<Serving> {
   const told = await servingOf(home, options);
   const port = numberOf(told.port, "--port", 0, 65535);
   const taskLeaseMs = leaseMs(told.taskLeaseMinutes);
@@ -287,7 +318,7 @@ export async function serve(
         tokenLine(home, onFile !== null || server.issuedToken !== null),
         model.line,
         ...(llm === null
-          ? []
+          ? idleBudgetLines(options)
           : [
               `language model: ${sentLine(modelName(llm))}`,
               `language model: at most ${llm.dailyTokens ?? DEFAULT_DAILY_TOKENS} tokens a day; readings wait once it is reached, and \`ukt doctor\` shows what has been used.`,

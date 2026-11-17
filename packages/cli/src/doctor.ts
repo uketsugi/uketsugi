@@ -39,6 +39,7 @@ import {
   serves,
   serviceState,
   startCommand,
+  startFix,
   UNIT,
   type ServiceState,
 } from "./service.ts";
@@ -202,14 +203,8 @@ async function checkService(
         fix: "ukt setup --port <a free port>",
         notes,
       };
-    const start = startCommand(service, home);
     const why = (await lastWords(io, env, home)).trim().split("\n");
-    // A unit set-up turned off after its server did not come up starts again only to fail again.
-    const fix = !service.enabled
-      ? "put right what the lines below say, then run `ukt setup`"
-      : start.includes("reset-failed")
-        ? `${start}, once what the lines below say is put right`
-        : start;
+    const fix = startFix(service, home);
     return { check, state: "fail", detail, fix, notes: [...notes, ...why] };
   }
   return service.enabled
@@ -226,7 +221,7 @@ async function checkService(
 /** What the running server says of itself, or null with the finding that says why it cannot be asked. */
 async function checkServer(
   home: Home,
-  start: string,
+  fix: string,
   askModel: boolean,
 ): Promise<{ findings: Finding[]; vector: boolean | null }> {
   const check = "server";
@@ -246,7 +241,7 @@ async function checkServer(
     const origin = await foreignAnswer(home);
     const stopped: Finding =
       origin === null
-        ? { check, state: "fail", detail, fix: start }
+        ? { check, state: "fail", detail, fix }
         : {
             check,
             state: "fail",
@@ -398,7 +393,7 @@ export async function doctor(
   const service = await serviceState(io, env);
   // A server that is down is started by its service where it has one.
   const start = startCommand(service, home);
-  const server = await checkServer(home, start, options.llm !== false);
+  const server = await checkServer(home, startFix(service, home), options.llm !== false);
   const about = (check: Finding["check"]): Finding[] =>
     server.findings.filter((finding) => finding.check === check);
   const findings = [

@@ -3,7 +3,7 @@
  * given: see testkit's `postgres.ts`.
  */
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -68,6 +68,9 @@ describe.runIf(TEST_POSTGRES_URL !== "")("a host set up on a PostgreSQL server",
     // Where the database is kept is the settings file, private because it holds a password.
     expect((await stat(join(dataDir, "settings.json"))).mode & 0o777).toBe(0o600);
     expect(existsSync(join(dataDir, "store.json"))).toBe(false);
+    // ...and it holds the address itself: it is what the next verb reads to find the database.
+    const kept = JSON.parse(await readFile(join(dataDir, "settings.json"), "utf8")) as unknown;
+    expect(kept).toMatchObject({ databaseUrl: database.url });
   });
 
   test("refuses a verb that copies the data directory's own store, and names PostgreSQL's tools", async () => {

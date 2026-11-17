@@ -5,7 +5,7 @@ import { SERVER_NAME } from "@uketsugi/server";
 import { doctor, type Finding } from "../src/doctor.ts";
 import { token } from "../src/host-verbs.ts";
 import type { Report } from "../src/report.ts";
-import { serve } from "../src/serve.ts";
+import { serve, type Serving } from "../src/serve.ts";
 import { setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { account, Machine } from "./machine.ts";
@@ -87,7 +87,7 @@ describe("a server that runs as the service", { timeout: 60_000 }, () => {
       detail: expect.stringContaining("failed (failed)") as string,
     });
     expect(service?.fix).toBe(
-      "systemctl --user reset-failed uketsugi && systemctl --user start uketsugi, once what the lines below say is put right",
+      "systemctl --user reset-failed uketsugi && systemctl --user start uketsugi, once what the service's lines say is put right",
     );
     // Where the user journal holds nothing, it says so and names what shows why.
     expect(service?.notes?.join("\n")).toContain("Run `ukt serve --data-dir");
@@ -103,8 +103,84 @@ describe("a server that runs as the service", { timeout: 60_000 }, () => {
 
     expect(service).toMatchObject({
       state: "fail",
-      fix: "put right what the lines below say, then run `ukt setup`",
+      fix: "put right what the service's lines say, then run `ukt setup`",
     });
+  });
+
+  test("is, for a unit turned off or given up on, the fix of the server line too: the same words as the service line above it", async () => {
+    const { dataDir, machine, env, io } = await served();
+    await machine.onStop?.();
+    machine.running = false;
+    const fixes = async () => {
+      const report = await doctor(io(), { dataDir }, env);
+      return [findingsOf(report, "service")[0]?.fix, findingsOf(report, "server")[0]?.fix];
+    };
+
+    machine.enabled = false;
+    const [offService, offServer] = await fixes();
+    machine.enabled = true;
+    machine.gaveUp = true;
+    const [gaveService, gaveServer] = await fixes();
+
+    expect(offServer).toBe(offService);
+    expect(offServer).toBe("put right what the service's lines say, then run `ukt setup`");
+    expect(gaveServer).toBe(gaveService);
+    expect(gaveServer).toContain("reset-failed");
+    // Starting a unit that set-up turned off does not help, so no fix says to.
+    expect(offServer).not.toContain("systemctl --user start");
+  });
+
+  test("is, when its server exits at start for any reason, told why from what the failed start kept, which a start that succeeds takes away", async () => {
+    const { dataDir, machine, env, io, options } = await account({ manager: true });
+    const listen = { dataDir, host: "127.0.0.1", port: options.port };
+    // The server the manager starts is refused at its start (a model it does not know), and prints to a journal that holds none of it.
+    machine.onStart = async () => {
+      await serve(fakeIo(), { ...listen, llm: "nonsense/model" }, env);
+    };
+
+    const failed = await setup(io(), { ...options, yes: true }, env);
+    const checked = await doctor(io(), { dataDir }, env);
+
+    const why = '"nonsense/model" is not a language model --llm takes.';
+    expect(failed.failure?.what).toContain("The service was not started");
+    expect(failed.lines.join("\n")).toMatch(
+      new RegExp(`The last start failed \\(\\d{4}-[^)]+\\):\n${why.replace(/[.]/g, "\\.")}`),
+    );
+    expect(checked.lines.join("\n")).toContain(why);
+    expect(checked.lines.join("\n")).toContain("log: journalctl --user -u uketsugi");
+    // The unit leaves the server's output to the journal.
+    expect(await readFile(machine.unitFile, "utf8")).not.toContain("StandardOutput");
+    expect(await readFile(machine.unitFile, "utf8")).not.toContain("StandardError");
+
+    // A start that succeeds takes the reason away.
+    let started: Serving | undefined;
+    machine.onStart = async () => void (started = await serve(fakeIo(), listen, env));
+    await setup(io(), { ...options, yes: true }, env);
+    await started?.close();
+    await expect(stat(join(dataDir, "last-start-failure"))).rejects.toThrow();
+  });
+
+  test("keeps no more than 2000 bytes of a start's failure, whatever the failure holds", async () => {
+    const { dataDir, env } = await account({ manager: true });
+    const listen = { dataDir, host: "127.0.0.1", port: "0" };
+    await mkdir(dataDir);
+
+    await serve(fakeIo(), { ...listen, llm: `nonsense/${"é".repeat(5000)}` }, env).catch(
+      () => null,
+    );
+
+    const kept = await readFile(join(dataDir, "last-start-failure"));
+    expect(kept.length).toBeGreaterThan(1500);
+    expect(kept.length).toBeLessThanOrEqual(2001);
+  });
+
+  test("a second server refused because one runs leaves no reason behind", async () => {
+    const { dataDir, env, io, options } = await account({ manager: true, real: true });
+    await setup(io(), { ...options, yes: true }, env);
+
+    await serve(io(), { dataDir, host: "127.0.0.1", port: options.port }, env).catch(() => null);
+
+    await expect(stat(join(dataDir, "last-start-failure"))).rejects.toThrow();
   });
 
   test("tells whoever starts a second one by hand what is running and how to stop it", async () => {
@@ -271,11 +347,15 @@ describe("what ukt setup is told of how the server runs", () => {
     const refused = serve(broken.io(), { dataDir: broken.dataDir }, broken.env);
     const elsewhere = backup({ dataDir: old.dataDir }, old.env);
 
-    await expect(refused).rejects.toMatchObject({
-      failure: { what: expect.stringContaining("settings.json cannot be read") as string },
-    });
-    await expect(elsewhere).rejects.toMatchObject({
-      failure: { what: "This host's store is the PostgreSQL database db.internal:5432/memory." },
-    });
+    await Promise.all([
+      expect(refused).rejects.toMatchObject({
+        failure: { what: expect.stringContaining("settings.json cannot be read") as string },
+      }),
+      expect(elsewhere).rejects.toMatchObject({
+        failure: {
+          what: "This host's store is the PostgreSQL database db.internal:5432/memory.",
+        },
+      }),
+    ]);
   });
 });

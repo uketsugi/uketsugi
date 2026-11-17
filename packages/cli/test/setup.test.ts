@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -21,6 +21,33 @@ const partOf = (report: Report, id: string): unknown =>
   (report.data["parts"] as { id: string }[]).find((part) => part.id === id);
 
 const MANAGED = { manager: true, linger: "no" } as const;
+const modeOf = async (path: string): Promise<number> => (await stat(path)).mode & 0o777;
+
+describe("ukt setup on a data directory other accounts can reach", () => {
+  test("--plan names it with the command that tightens it and changes nothing; the run tightens it before anything is installed", async () => {
+    const { dataDir, machine, env, io, options } = await account(MANAGED);
+    await mkdir(dataDir);
+    await chmod(dataDir, 0o775);
+
+    const plan = await setup(io(), { ...options, plan: true }, env);
+    const done = await setup(io(), { ...options, yes: true }, env);
+
+    expect(plan.lines.join("\n")).toContain(`chmod 700 ${dataDir}`);
+    expect(plan.lines.join("\n")).toContain("mode 775");
+    expect(await modeOf(dataDir)).toBe(0o700);
+    expect(done.lines.join("\n")).toContain(`had mode 775: now 700`);
+    expect(machine.changes.length).toBeGreaterThan(0);
+  });
+
+  test("--plan on a data directory only its owner reaches says nothing of modes", async () => {
+    const { dataDir, env, io, options } = await account(MANAGED);
+    await mkdir(dataDir, { mode: 0o700 });
+
+    const plan = await setup(io(), { ...options, plan: true }, env);
+
+    expect(plan.lines.join("\n")).not.toContain("chmod");
+  });
+});
 
 describe("ukt setup on a machine with a service manager", () => {
   test("with nobody to ask, does what it always did and leaves the service alone", async () => {

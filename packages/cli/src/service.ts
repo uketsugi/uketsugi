@@ -9,7 +9,7 @@ import { mkdir, readFile, rm, rmdir } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import { readRecord, type Home } from "./home.ts";
+import { readRecord, readStartFailure, type Home } from "./home.ts";
 import { dirFlag } from "./program.ts";
 import { CliFailure, lastLine, type Io } from "./report.ts";
 import { servingNow, whoAnswers } from "./server-client.ts";
@@ -27,6 +27,9 @@ export const SERVICE_COMMANDS = {
 
 /** What clears a unit the manager stopped starting after repeated failures. */
 export const RESET_FAILED = `systemctl --user reset-failed ${NAME}`;
+
+/** How many of the server's last lines a person is shown. */
+const LAST_LINES = 8;
 
 /** How long a server the manager has just started may take to answer. */
 const ANSWERS_WITHIN_MS = 30_000;
@@ -154,6 +157,20 @@ export function startCommand(state: ServiceState, home: Home): string {
   return gaveUp ? `${RESET_FAILED} && ${SERVICE_COMMANDS.start}` : SERVICE_COMMANDS.start;
 }
 
+/**
+ * What brings a server that is down back: what `startCommand` says, except for a service that
+ * will not start as it stands. One set-up turned off, or the manager gave up on, is put right
+ * first: the service finding and the server finding both say so, in these words.
+ */
+export function startFix(service: ServiceState, home: Home): string {
+  const start = startCommand(service, home);
+  if (!service.manager || !serves(service, home) || service.running) return start;
+  if (!service.enabled) return "put right what the service's lines say, then run `ukt setup`";
+  return start.includes("reset-failed")
+    ? `${start}, once what the service's lines say is put right`
+    : start;
+}
+
 /** Runs `systemctl --user` commands in turn. The first that fails, in words for a person; null when all ran. */
 async function systemctl(
   io: Io,
@@ -170,24 +187,29 @@ async function systemctl(
 
 /**
  * Waits for the server of a data directory to answer and prove it is that one: something else on
- * its port does not pass for it. False when it has not within the time a start may take.
+ * its port does not pass for it. False when it has not within the time a start may take, or the
+ * manager says it is no longer running.
  */
-async function answers(home: Home): Promise<boolean> {
+async function answers(io: Io, env: NodeJS.ProcessEnv, home: Home): Promise<boolean> {
   const until = Date.now() + ANSWERS_WITHIN_MS;
   for (;;) {
     const record = await readRecord(home);
     if (record !== null && (await whoAnswers(home, record.url)) === "own") return true;
-    if (Date.now() > until) return false;
+    // A server that has exited does not answer later: the manager no longer has it running.
+    const state = await serviceState(io, env);
+    if (Date.now() > until || (state.manager && !state.running)) return false;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
 /**
- * The last lines the service's server printed, as a person is shown them after a start that
- * failed. Where the user journal holds nothing the service wrote, which is so where the account
- * has no per-user journal, it says so and names what to run instead.
+ * Why the service's server did not come up, as a person is shown it after a start that failed:
+ * the reason the last start failed, which `ukt serve` keeps in the data directory, and the last
+ * lines the server printed to the user journal. Where neither holds anything, which is so where
+ * the account has no per-user journal, it says so and names what to run instead.
  */
 export async function lastWords(io: Io, env: NodeJS.ProcessEnv, home: Home): Promise<string> {
+  const failure = await readStartFailure(home);
   const asked = ["--user", "-u", NAME, "-n", "30", "--no-pager", "-o", "cat"];
   const ran = await io.run("journalctl", asked, { env });
   // The manager's own lines about the unit say it failed, not why: only the server's count.
@@ -195,8 +217,14 @@ export async function lastWords(io: Io, env: NodeJS.ProcessEnv, home: Home): Pro
   const lines = (ran?.code === 0 ? ran.stdout : "")
     .split("\n")
     .filter((l) => l.trim() !== "" && !own.test(l));
-  const said = lines.slice(-5).join("\n");
-  if (said !== "") return `\nIts last lines:\n${said}`;
+  const said = lines.slice(-LAST_LINES).join("\n");
+  const parts = [
+    ...(failure === null
+      ? []
+      : [`The last start failed (${failure.at.toISOString()}):\n${failure.text}`]),
+    ...(said === "" ? [] : [`Its last lines:\n${said}`]),
+  ];
+  if (parts.length > 0) return `\n${parts.join("\n")}`;
   return `\nThe journal holds nothing the server printed that this account can read. Run \`ukt serve${dirFlag(home)}\` in a terminal: it prints why.`;
 }
 
@@ -211,7 +239,7 @@ async function start(
   await systemctl(io, env, ["reset-failed", UNIT]);
   const failed = await systemctl(io, env, [how, UNIT]);
   if (failed !== null) return failed;
-  if (await answers(home)) return null;
+  if (await answers(io, env, home)) return null;
   return `the service was started, but its server does not answer. \`${SERVICE_COMMANDS.log}\` shows why.${await lastWords(io, env, home)}`;
 }
 

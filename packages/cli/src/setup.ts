@@ -15,11 +15,14 @@ import {
   ensureDataDir,
   ensureHostKey,
   keepSettings,
+  looseModes,
   readToken,
   readTokenFile,
   settingsWith,
+  tightenModes,
   writeToken,
   type Home,
+  type LooseMode,
 } from "./home.ts";
 import { hostOf, storePlace, withStore, type HostStore } from "./host-store.ts";
 import { dirFlag, onStore, serving, servingOf, toldOf, type Program } from "./program.ts";
@@ -215,6 +218,15 @@ async function survey(
   ];
 }
 
+/** What set-up does about a data directory or secret file that other accounts can reach: before it is done, and after. */
+function modeLines(loose: readonly LooseMode[], done: boolean): string[] {
+  return loose.map(({ path, mode, allowed }) =>
+    done
+      ? `${path} had mode ${mode}: now ${allowed}`
+      : `${path} has mode ${mode}, so other accounts can read it. Set-up runs: chmod ${allowed} ${path}`,
+  );
+}
+
 /** `ukt setup`. */
 export async function setup(
   io: Io,
@@ -228,12 +240,18 @@ export async function setup(
   leaseMs(runs.taskLeaseMinutes);
   const parts = await survey(io, env, home, options, origin);
   const heading = [`data directory  ${home.dataDir}`, `server URL      ${origin}/mcp`];
-  const plan = [...heading, ...parts.flatMap((part) => column(part.label, part.plan))];
+  const loose = await looseModes(home);
+  const plan = [
+    ...heading,
+    ...modeLines(loose, false),
+    ...parts.flatMap((part) => column(part.label, part.plan)),
+  ];
   if (options.plan === true)
     return { data: { data_dir: home.dataDir, mcp_url: `${origin}/mcp`, plan }, lines: plan };
   const chosen = await agreed(io, options, parts, plan);
 
   const madeDir = await ensureDataDir(home);
+  const tightened = await tightenModes(home);
   // What was told is kept only where the service can run on it: a refused port is not kept.
   const refused = parts.some((part) => part.blocked && chosen.has(part.id));
   if (!refused) await keepSettings(home, toldOf(options));
@@ -262,6 +280,7 @@ export async function setup(
     },
     lines: [
       `data directory  ${home.dataDir}${madeDir ? " (created)" : ""}`,
+      ...modeLines(tightened, true),
       ...(store.kind === "postgres" ? [`store           ${storePlace(home, store)}`] : []),
       `token           ${tokenText}`,
       ...column("model", ended("model").lines),

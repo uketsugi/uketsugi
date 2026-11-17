@@ -25,6 +25,8 @@ export interface Home {
   readonly hostKeyFile: string;
   /** Written by `ukt serve` while it runs: where it listens. */
   readonly recordFile: string;
+  /** Why the last start of the server failed, written by `ukt serve` and gone once a start succeeds. */
+  readonly startFailureFile: string;
   /** How the server is set to run: what `ukt setup` was told, and where the store is when it is elsewhere. */
   readonly settingsFile: string;
   /** Written by `ukt setup --llm`: the language model the host was given, with its provider's key. */
@@ -90,6 +92,7 @@ export function resolveHome(dataDir: string | undefined, env: NodeJS.ProcessEnv)
     tokenFile: join(dir, "token"),
     hostKeyFile: join(dir, "host.key"),
     recordFile: join(dir, "server.json"),
+    startFailureFile: join(dir, "last-start-failure"),
     settingsFile: join(dir, "settings.json"),
     llmFile: join(dir, "llm.json"),
     modelDir: external ? resolve(given) : join(dir, "model"),
@@ -246,6 +249,26 @@ export async function removeRecord(home: Home): Promise<void> {
   await rm(home.recordFile, { force: true });
 }
 
+/** The most bytes of a start's failure that are kept. */
+const START_FAILURE_BYTES = 2000;
+
+/** Replaces what is kept of why the last start failed. */
+export async function keepStartFailure(home: Home, text: string): Promise<void> {
+  const kept = Buffer.from(text).subarray(0, START_FAILURE_BYTES).toString();
+  await writePrivate(home.startFailureFile, `${kept}\n`);
+}
+
+/** Why the last start failed and when, or null where it did not, or a start has succeeded since. */
+export async function readStartFailure(home: Home): Promise<{ text: string; at: Date } | null> {
+  const text = (await readOrNull(home.startFailureFile))?.trim();
+  if (text === undefined || text === "") return null;
+  return { text, at: (await stat(home.startFailureFile)).mtime };
+}
+
+export async function removeStartFailure(home: Home): Promise<void> {
+  await rm(home.startFailureFile, { force: true });
+}
+
 /** The record of the server on this data directory, or null when none was left or it is unreadable. */
 export async function readRecord(home: Home): Promise<ServerRecord | null> {
   const record = (await readJson(home.recordFile)) as Partial<ServerRecord> | null;
@@ -303,5 +326,12 @@ export async function looseModes(home: Home): Promise<LooseMode[]> {
     if (mode !== null && (mode & ~allowed) !== 0)
       loose.push({ path, mode: mode.toString(8), allowed: allowed.toString(8) });
   }
+  return loose;
+}
+
+/** Tightens what `looseModes` finds to the mode it names, and returns what it found. */
+export async function tightenModes(home: Home): Promise<LooseMode[]> {
+  const loose = await looseModes(home);
+  for (const { path, allowed } of loose) await chmod(path, Number.parseInt(allowed, 8));
   return loose;
 }

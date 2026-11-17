@@ -175,19 +175,14 @@ async function remember(home: Home, model: ModelConfig, told?: string): Promise<
   return `${modelName(rest)}, ${how} in ${home.llmFile}, ${budget ?? DEFAULT_DAILY_TOKENS} tokens a day at most`;
 }
 
-/** Told no model: a budget alone changes the one remembered, key and all, and asks for nothing. */
+/** Told no model: a budget alone changes the one remembered, key and all, and asks for nothing. Where none is remembered, `llmChange` has refused it already. */
 async function budgetAlone(
   home: Home,
   onFile: ModelConfig | null,
   told: string | undefined,
 ): Promise<string | null> {
-  if ((told ?? "") === "")
-    return onFile === null ? null : `${modelName(onFile)}, remembered in ${home.llmFile}`;
-  if (onFile === null)
-    throw refused(
-      "--llm-budget was given and no language model is remembered to have one.",
-      "Name the model too: ukt setup --llm <provider/model> --llm-budget <tokens>.",
-    );
+  if (onFile === null) return null;
+  if ((told ?? "") === "") return `${modelName(onFile)}, remembered in ${home.llmFile}`;
   return remember(home, onFile, told);
 }
 
@@ -222,7 +217,21 @@ export function sentLine(name: string): string {
   return `${name} is sent what your sessions' agents said once a session is over (the closing note; with the plugin's capture option, every turn's request and answer), the claims of the facts you published in it and of your own facts near what it reads, and up to 60 more of your claims in the project, private ones included. Known kinds of secret are removed first; a password with no known form is not.`;
 }
 
-/** What `ukt setup` is about to do about the language model: nothing, or remember or forget one. */
+/** Whether a run was given a budget, which has no use without a model. */
+export function budgetGiven(options: LlmOptions): boolean {
+  return (options.llmBudget?.trim() ?? "") !== "";
+}
+
+/** What `ukt serve` says, where it has no model, of a budget it was given: that it does nothing. */
+export function idleBudgetLines(options: LlmOptions): string[] {
+  return budgetGiven(options)
+    ? [
+        "language model: none, so the budget you gave (--llm-budget or UKT_LLM_BUDGET) does nothing. Name a model with --llm <provider/model>.",
+      ]
+    : [];
+}
+
+/** What `ukt setup` is about to do about the language model: nothing, or remember or forget one. A budget with no model to hold it is refused. */
 export async function llmChange(
   home: Home,
   options: LlmOptions,
@@ -232,7 +241,12 @@ export async function llmChange(
   pending: boolean;
 }> {
   const { value, onFile } = await toldAndKept(home, options);
-  if (value === "") return { named: null, onFile, pending: (options.llmBudget ?? "") !== "" };
+  if (budgetGiven(options) && (value === NONE || (value === "" && onFile === null)))
+    throw refused(
+      "--llm-budget was given and there is no language model for it to limit.",
+      "Name the model too: ukt setup --llm <provider/model> --llm-budget <tokens>. The budget does nothing without one.",
+    );
+  if (value === "") return { named: null, onFile, pending: budgetGiven(options) };
   if (value === NONE) return { named: null, onFile, pending: onFile !== null };
   return { named: namedModel(value), onFile, pending: true };
 }

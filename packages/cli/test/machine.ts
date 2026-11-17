@@ -83,8 +83,12 @@ export class Machine {
     }
     if (verb === "enable" || verb === "disable") this.enabled = verb === "enable";
     if (verb === "start" || verb === "restart") {
-      await this.onStart?.(unit);
-      this.running = true;
+      // A server that fails to start exits at once: the manager has it not running.
+      this.running =
+        (await this.onStart?.(unit).then(
+          () => true,
+          () => false,
+        )) ?? true;
     }
   }
 

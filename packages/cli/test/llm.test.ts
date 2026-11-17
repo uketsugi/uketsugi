@@ -352,6 +352,30 @@ describe("the language model a host is given", () => {
     expect(await llmOf(dataDir, {}, {})).toBeNull();
   });
 
+  test("a budget with no model to spend it on is said to do nothing, by ukt serve and by ukt setup, not accepted and ignored", async () => {
+    const dataDir = await tempDir();
+    const base = { dataDir, host: "127.0.0.1", port: "0", model: false };
+
+    const serving = await serve(
+      fakeIo(),
+      { dataDir, host: "127.0.0.1", port: "0", llmBudget: "250000" },
+      {},
+    );
+    await serving.close();
+    const quiet = await serve(fakeIo(), { dataDir, host: "127.0.0.1", port: "0" }, {});
+    await quiet.close();
+
+    expect(serving.report.lines).toContain(
+      "language model: none, so the budget you gave (--llm-budget or UKT_LLM_BUDGET) does nothing. Name a model with --llm <provider/model>.",
+    );
+    expect(quiet.report.lines.join("\n")).not.toContain("budget");
+    for (const told of [{ llmBudget: "250000" }, { llm: "none", llmBudget: "250000" }])
+      for (const plan of [false, true])
+        expect(await refusalOf(setup(fakeIo(), { ...base, ...told, plan }, {}))).toMatch(
+          /--llm-budget was given and there is no language model/,
+        );
+  });
+
   test("ukt setup asks for the key at the terminal, unseen, where the environment holds none", async () => {
     const dataDir = await tempDir();
     const base = { dataDir, host: "127.0.0.1", port: "7410", model: false };
