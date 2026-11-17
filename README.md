@@ -301,6 +301,20 @@ ukt serve
 
 It serves `http://127.0.0.1:7410` in the foreground until you press Ctrl-C.
 
+**On a PostgreSQL server.** The store can live in a database you run instead of in the data
+directory. The database needs the `vector` (pgvector 0.7 or newer) and `pg_trgm` extensions, and
+the role you connect as must be allowed to create them. Name it once, to `ukt setup` or `ukt serve`:
+
+```sh
+ukt setup --database-url postgres://user:password@host:5432/database
+ukt serve --database-url postgres://user:password@host:5432/database
+```
+
+The data directory remembers the address, in `settings.json`, so later commands on it need no
+flag. `UKT_DATABASE_URL` does the same as the flag. One data directory has one store, and a
+different address is refused. `ukt backup` and `ukt restore` do not apply to it: use `pg_dump` and
+`pg_restore`.
+
 **Upgrading.** Run the install line of the newer release. It replaces the one installed and,
 without asking, restarts your service on the new one: your harnesses lose their connection for a
 moment. A `ukt serve` you started yourself you stop and start again.
@@ -328,8 +342,9 @@ only, unless you set it up with `--host`.
   one you started yourself you stop first.
 - `ukt export --markdown <folder>` writes every project's facts as Markdown, one file a project.
 - Redacting a fact on the dashboard takes its text out of the dashboard, out of search and out of
-  later exports. It does not reach the store's own files or a backup, even one made afterwards.
-  If the text was a secret, change the secret as well.
+  later exports. The text stays in the store's own files, and so in a backup made afterwards. On a
+  PostgreSQL server it stays in the server's files and write-ahead log, though not in a `pg_dump`
+  made afterwards. If the text was a secret, change the secret as well.
 - `ukt token --rotate` replaces your token. A server that runs as the service is stopped for it
   and started again. A harness that sends a token keeps the one it was given until you give it
   the new one: remove the server from it and add it again with the lines on the Connect page.
