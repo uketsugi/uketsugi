@@ -178,6 +178,20 @@ export function describeModelStepConformance(name: string, harness: StoreHarness
       });
     });
 
+    test("a failed reading is kept on the session, replaced by the next failure, and cleared by a reading that finishes", async () => {
+      const session = await open(alice);
+      const first = { at: new Date("2026-11-14T10:00:00Z"), reason: "status 402: no credit" };
+      const second = { at: new Date("2026-11-14T11:00:00Z"), reason: "status 404: retired" };
+      await store.sessions.digestFailed(alice.orgId, session.id, first);
+      // Another org's call does not reach her session.
+      await store.sessions.digestFailed(bob.orgId, session.id, { ...second, reason: "not hers" });
+      expect(await stored(session)).toMatchObject({ digestFailure: first });
+      await store.sessions.digestFailed(alice.orgId, session.id, second);
+      expect(await stored(session)).toMatchObject({ digestFailure: second });
+      await store.sessions.digested(alice.orgId, session.id, { at: clock.now(), turns: [] });
+      expect(await stored(session)).toMatchObject({ digestFailure: null });
+    });
+
     test("the facts published in a session are found by the session, by a reader who may see their log", async () => {
       const session = await open(alice);
       const other = await open(alice);

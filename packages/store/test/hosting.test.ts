@@ -124,7 +124,7 @@ describe("a store that a newer version opens", () => {
   /** What a later version adds to today's migrations: one that makes a table. */
   const newer = {
     ...MIGRATIONS,
-    "0002_next": {
+    "0004_next": {
       async up(db: Parameters<typeof migrate>[0]) {
         await sql`create table next_thing (id int)`.execute(db);
       },
@@ -146,18 +146,18 @@ describe("a store that a newer version opens", () => {
     expect(await migrationState(engine.db, newer)).toMatchObject({ pending: [] });
     expect(await engine.db.selectFrom("facts").select("id").execute()).toEqual([{ id: kept }]);
     await engine.close();
-    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0002_next.tgz"]);
+    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0004_next.tgz"]);
   });
 
   test("keeps the snapshots of its three newest upgrades, and every file that is not one", async () => {
     const backups = join(dataDir, BACKUPS_DIR);
     await writeFile(join(backups, "uketsugi-20260101T000000Z.tgz"), "a person's own backup");
-    for (const name of ["0003_more", "0004_again", "0005_last"])
+    for (const name of ["0005_more", "0006_again", "0007_last"])
       await keepUpgradeSnapshot(dataDir, name, new Blob(["as it was"]));
     expect((await readdir(backups)).sort()).toEqual([
-      "before-0003_more.tgz",
-      "before-0004_again.tgz",
-      "before-0005_last.tgz",
+      "before-0005_more.tgz",
+      "before-0006_again.tgz",
+      "before-0007_last.tgz",
       "uketsugi-20260101T000000Z.tgz",
     ]);
   });

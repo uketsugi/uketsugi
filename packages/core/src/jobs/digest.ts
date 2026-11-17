@@ -31,6 +31,7 @@ import {
   BUDGET_WAIT_MS,
   BUDGET_WINDOW_MS,
   costOf,
+  countedFor,
   RESERVE_TOKENS,
   SESSION_TOKENS,
 } from "../digest/budget.ts";
@@ -85,6 +86,8 @@ export interface DigestReport {
   readonly tokens: ModelTokens;
   /** How many turns were not read because the session had reached what its readings may cost. They are dropped. */
   readonly unread: number;
+  /** How many turns were left for a later reading because the day's budget ran out part-way through this one. */
+  readonly kept: number;
   /** True for a reading that did not happen: the server's budget for the day is spent, and the session waits. */
   readonly waited: boolean;
   /** What the server has spent on model calls in the last day, and what its operator allows. */
@@ -102,13 +105,14 @@ interface Run {
   readonly halt: AbortSignal;
 }
 
-/** Puts one question to the model, within its time, and counts what it cost. */
+/** Puts one question to the model, within its time, and counts what it cost: the provider's own count. */
 async function ask(run: Pick<Run, "ports" | "spent" | "halt">, chore: Chore): Promise<unknown> {
   const { runner, clock } = run.ports;
   const signal = AbortSignal.any([run.halt, clock.timeout(CHORE_MS)]);
   const answer = await runner.run(chore, signal);
-  run.spent.input += answer.inputTokens;
-  run.spent.output += answer.outputTokens;
+  const counted = countedFor(chore, answer);
+  run.spent.input += counted.input;
+  run.spent.output += counted.output;
   return answer.output;
 }
 
@@ -126,59 +130,72 @@ async function publishedBy(run: Run, readBefore: Date | null): Promise<LiveFact[
 
 type Refused = Record<Refusal, number>;
 
+/** What an extraction came to: its drafts, how many pieces were read, and what stopped it if not the end. */
+interface Extracted {
+  drafts: FactContent[];
+  read: number;
+  /** `session`: the session's limit, so the rest is dropped. `day`: the day's budget, so the rest waits. */
+  stoppedBy: "session" | "day" | null;
+}
+
 /**
- * The facts a model finds in what the session's agent said, each as a publish would store it.
- * The pieces are read in order, and a piece is told what the pieces before it gave. `record` is
- * what was sent, which every citation is held against.
+ * The facts a model finds in what the session's agent said, each as a publish would store it. The
+ * pieces are read in order, and a piece is told what the pieces before it gave. Every citation is
+ * held against the piece it came from, which is the text the model was shown and no other.
+ *
+ * A piece is asked only while what the provider has counted for this reading so far, with the
+ * estimate for this piece (taken high) and what the two closing questions keep back, stays within
+ * the session's `room` and the day's `dayRoom`. Counting what was spent and not the estimate of all
+ * that is to come is what lets a session be read as far as its limit allows; the estimate of the
+ * piece about to be asked is what keeps the limit from being passed.
  */
 async function extract(
   run: Run,
   pieces: readonly (readonly Said[])[],
   recorded: readonly string[],
+  room: { session: number; day: number },
   refused: Refused,
-): Promise<FactContent[]> {
-  const record = textOf(pieces.flat());
+): Promise<Extracted> {
   const drafts: FactContent[] = [];
+  let read = 0;
   for (const piece of pieces) {
     const known = [...recorded, ...drafts.map((draft) => draft.claim)]
       .slice(-MOST_RECORDED)
       .map((claim) => headOf(claim, RECORDED_CHARS));
-    const { candidates, malformed } = candidatesIn(await ask(run, extractChore(piece, known)));
+    const chore = extractChore(piece, known);
+    const needed = run.spent.input + run.spent.output + costOf(chore) + RESERVE_TOKENS;
+    if (needed > room.session) return { drafts, read, stoppedBy: "session" };
+    if (needed > room.day) return { drafts, read, stoppedBy: "day" };
+    const { candidates, malformed } = candidatesIn(await ask(run, chore));
+    read += 1;
     refused.invalid += malformed;
+    const shown = textOf(piece);
     for (const candidate of candidates) {
-      const draft = await draftOf(run.ports, run.reading, record, candidate);
+      const draft = await draftOf(run.ports, run.reading, shown, candidate);
       if (typeof draft === "string") refused[draft] += 1;
       else if (drafts.some((other) => other.claimHash === draft.claimHash)) refused.repeat += 1;
       else drafts.push(draft);
     }
   }
-  return drafts;
+  return { drafts, read, stoppedBy: null };
 }
 
-/** What asking a piece may cost: the chore as it would be sent, with room for the claims it is told of. */
+/** What asking a piece may cost beyond its text: room for the claims it is told of. */
 const KNOWN_TOKENS = 2_000;
 
 /**
- * The pieces a session's room allows, in order, and how many turns the rest holds. What is left
- * out is not read: a session that said more than its readings may cost has the rest dropped.
+ * What the pieces would cost by the estimate, as many as `room` allows. This is what a reading
+ * that cannot be done now is held for: the estimate is high, so a day's budget is waited for
+ * on the safe side, and the reading itself goes on by what the provider counts (`extract`).
  */
-function withinRoom(
-  pieces: readonly Said[][],
-  room: number,
-): { read: Said[][]; unread: number; cost: number } {
-  const read: Said[][] = [];
+function estimatedCost(pieces: readonly Said[][], room: number): number {
   let cost = 0;
   for (const piece of pieces) {
     const next = costOf(extractChore(piece, [])) + KNOWN_TOKENS;
     if (cost + next > room - RESERVE_TOKENS) break;
-    read.push(piece);
     cost += next;
   }
-  return {
-    read,
-    cost,
-    unread: pieces.slice(read.length).reduce((n, piece) => n + piece.length, 0),
-  };
+  return cost;
 }
 
 /** What the writing of one reading came to. */
@@ -268,6 +285,43 @@ function sortedTurns(session: Session, turns: readonly Turn[], now: Date) {
 }
 
 /**
+ * Records that a reading is done: the session is stamped as read, and the turns it answered are
+ * deleted. What the day's budget kept the reading from stays, to be read once, later; what the
+ * session's limit kept it from is dropped. Returns how many turns stay.
+ */
+async function closeReading(
+  run: Run,
+  turns: ReturnType<typeof sortedTurns>,
+  done: {
+    startedAt: Date;
+    turnsRead: number;
+    stoppedBy: "session" | "day" | null;
+    picks: readonly string[] | null;
+  },
+): Promise<number> {
+  const { ports, reading } = run;
+  const { session } = reading;
+  const { startedAt, turnsRead, stoppedBy, picks } = done;
+  const waiting = stoppedBy === "day" ? turns.answered.slice(turnsRead) : [];
+  const finished = turns.answered.slice(0, turns.answered.length - waiting.length);
+  await ports.store.sessions.digested(session.orgId, session.id, {
+    at: startedAt,
+    // Whatever was answered is gone with this reading, read or not; a turn still running or waiting stays.
+    turns: [...finished, ...turns.lost].map((turn) => turn.id),
+    ...(picks === null ? {} : { picks }),
+  });
+  if (waiting.length > 0) {
+    await ports.store.jobs.armDigest(
+      session.orgId,
+      session.id,
+      new Date(startedAt.getTime() + BUDGET_WAIT_MS),
+    );
+  }
+  if (turns.running.length > 0) await armDigest(ports, session, "quiet");
+  return waiting.length;
+}
+
+/**
  * Reads one session: what its agent said since the last reading, and what it published. When it
  * is done the session is stamped as read and the turns it read are deleted, in one step. A turn
  * that has no answer yet is a turn being worked on: it is neither read nor deleted, and the
@@ -287,7 +341,7 @@ async function read(run: Run): Promise<DigestReport> {
   const published = await publishedBy(run, session.digestedAt);
   // A session's room for readings, and whether there is any left for more than its closing questions.
   const room = SESSION_TOKENS - session.modelTokens.input - session.modelTokens.output;
-  const plan = withinRoom(piecesOf(said), room);
+  const pieces = piecesOf(said);
   // Nothing is asked of a session that left nothing, or whose room is spent.
   const asking = !(said.length === 0 && published.length === 0) && room >= RESERVE_TOKENS;
   const limit = ports.runner.dailyTokens;
@@ -301,31 +355,45 @@ async function read(run: Run): Promise<DigestReport> {
     refused,
     chose: false,
     tokens: { ...run.spent },
-    unread: plan.unread,
+    unread: 0,
+    kept: 0,
     waited: false,
     day: { used: used + run.spent.input + run.spent.output, limit },
     ...more,
   });
-  if (asking && used + plan.cost + RESERVE_TOKENS > limit) {
-    await jobs.armDigest(session.orgId, session.id, new Date(startedAt.getTime() + BUDGET_WAIT_MS));
+  const later = new Date(startedAt.getTime() + BUDGET_WAIT_MS);
+  if (asking && used + estimatedCost(pieces, room) + RESERVE_TOKENS > limit) {
+    await jobs.armDigest(session.orgId, session.id, later);
     return report({ waited: true });
   }
   const recorded = published.map((fact) => fact.claim);
-  const drafts =
-    !asking || plan.read.length === 0 ? [] : await extract(run, plan.read, recorded, refused);
+  // Neither the session's limit nor the day's budget is passed, by what the provider counts.
+  const {
+    drafts,
+    read: piecesRead,
+    stoppedBy,
+  } = asking
+    ? await extract(run, pieces, recorded, { session: room, day: limit - used }, refused)
+    : { drafts: [], read: 0, stoppedBy: null };
+  const turnsRead = pieces.slice(0, piecesRead).flat().length;
+  // The day's budget ran out before anything was read: the reading waits as a whole, as above.
+  if (stoppedBy === "day" && turnsRead === 0) {
+    await jobs.armDigest(session.orgId, session.id, later);
+    return report({ waited: true });
+  }
   const written = asking ? await judgeAndWrite(run, drafts, published, refused) : nothing;
   const stopped = said.at(-1)?.answer ?? session.note?.text ?? "";
   const picks = asking
     ? await choosePicks(ports, reading, stopped, (chore) => ask(run, chore))
     : null;
-  await sessions.digested(session.orgId, session.id, {
-    at: startedAt,
-    // Whatever was answered is gone with this reading, read or not; a turn still running stays.
-    turns: [...turns.answered, ...turns.lost].map((turn) => turn.id),
-    ...(picks === null ? {} : { picks }),
+  const kept = await closeReading(run, turns, { startedAt, turnsRead, stoppedBy, picks });
+  return report({
+    read: turnsRead,
+    unread: stoppedBy === "session" ? said.length - turnsRead : 0,
+    kept,
+    ...written,
+    chose: picks !== null,
   });
-  if (turns.running.length > 0) await armDigest(ports, session, "quiet");
-  return report({ read: plan.read.flat().length, ...written, chose: picks !== null });
 }
 
 /**
@@ -360,7 +428,14 @@ export const digest: JobHandler = async (ports, job, { halt, onDigest }) => {
     onDigest?.(report);
   } catch (error) {
     // A server that is stopping gives up a question that will be asked again, which is not a failure to pay for.
-    throw halt.aborted ? error : paidFor(error, spent);
+    if (halt.aborted) throw error;
+    // The reason a person is shown is the provider's, which a `ModelError` carries without the key.
+    if (error instanceof ModelError) {
+      const failure = { at: ports.clock.now(), reason: error.message };
+      // Keeping the reason must not hide the failure it is the reason of.
+      await store.sessions.digestFailed(job.orgId, job.subject, failure).catch(() => undefined);
+    }
+    throw paidFor(error, spent);
   } finally {
     if (spent.input + spent.output > 0) {
       await store.sessions.spent(job.orgId, job.subject, spent, ports.clock.now());

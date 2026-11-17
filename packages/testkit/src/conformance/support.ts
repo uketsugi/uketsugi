@@ -32,7 +32,11 @@ export function content(claim: string, detail: string | null = null): FactConten
 }
 
 /** What every session a test opens by hand holds of the model step: no model has read it. */
-export const UNREAD = { digestedAt: null, modelTokens: { input: 0, output: 0 } } as const;
+export const UNREAD = {
+  digestedAt: null,
+  modelTokens: { input: 0, output: 0 },
+  digestFailure: null,
+} as const;
 
 /** An event a person appends about a record. */
 export function event(

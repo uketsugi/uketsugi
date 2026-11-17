@@ -79,6 +79,8 @@ export interface Database {
     digestedAt: Date | null;
     modelInputTokens: Generated<number>;
     modelOutputTokens: Generated<number>;
+    digestFailedAt: Date | null;
+    digestFailure: string | null;
     briefPicks: ColumnType<string[] | null, string | null, string | null>;
   };
   modelSpend: {

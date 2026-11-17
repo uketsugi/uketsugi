@@ -7,6 +7,7 @@
 import {
   MOST_TURNS_KEPT,
   type ActivityRow,
+  type DigestFailure,
   type ModelTokens,
   type Session,
   type SessionKey,
@@ -65,15 +66,30 @@ const COLUMNS = [
   "digestedAt",
   "modelInputTokens",
   "modelOutputTokens",
+  "digestFailedAt",
+  "digestFailure",
 ] as const;
 
 function toSession(row: Pick<Selectable<Database["sessions"]>, (typeof COLUMNS)[number]>): Session {
-  const { noteText, noteFinal, noteAt, modelInputTokens, modelOutputTokens, ...session } = row;
+  const {
+    noteText,
+    noteFinal,
+    noteAt,
+    modelInputTokens,
+    modelOutputTokens,
+    digestFailedAt,
+    digestFailure,
+    ...session
+  } = row;
   const noted = noteText !== null && noteFinal !== null && noteAt !== null;
   return {
     ...session,
     note: noted ? { text: noteText, final: noteFinal, at: noteAt } : null,
     modelTokens: { input: modelInputTokens, output: modelOutputTokens },
+    digestFailure:
+      digestFailedAt === null || digestFailure === null
+        ? null
+        : { at: digestFailedAt, reason: digestFailure },
   };
 }
 
@@ -321,11 +337,20 @@ export class SqlSessions extends Repo implements SessionsRepo {
       }
       await trx
         .updateTable("sessions")
-        .set({ digestedAt: read.at, ...picks })
+        .set({ digestedAt: read.at, digestFailedAt: null, digestFailure: null, ...picks })
         .where("orgId", "=", orgId)
         .where("id", "=", id)
         .execute();
     });
+  }
+
+  async digestFailed(orgId: string, id: string, failure: DigestFailure): Promise<void> {
+    await this.db
+      .updateTable("sessions")
+      .set({ digestFailedAt: failure.at, digestFailure: failure.reason })
+      .where("orgId", "=", orgId)
+      .where("id", "=", id)
+      .execute();
   }
 
   async spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void> {

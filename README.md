@@ -444,9 +444,11 @@ one small question and says whether it answers; `ukt doctor --no-llm` leaves the
 
 The server spends on the model only within bounds you can see and set:
 
-- A session's readings together are held to 150,000 tokens. The server counts by its own estimate,
-  made before each call and taken high, so a long session can be cut off when the provider has
-  counted far fewer; the rest of that session is dropped.
+- A session's readings together are held to 150,000 tokens, input and output together, as the
+  provider counts them. Before each call the server adds its own estimate for that call, taken
+  high, to what the provider has counted so far, and asks only if the total, with 8,000 kept back
+  for the two small questions that close a reading, is within 150,000. A session is therefore read
+  as far as its limit allows and no further; what it said past that is dropped.
 - The server as a whole spends at most 1,000,000 tokens (in and out together) in any 24 hours
   unless you set `--llm-budget <tokens>` on `ukt setup` (remembered) or `ukt serve`. It takes no
   less than 20,000, which is about what one reading needs, and refuses a smaller number. Once the budget is reached, readings

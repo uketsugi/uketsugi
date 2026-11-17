@@ -1347,7 +1347,7 @@ export interface ActivitySession {
   last_publish_at: string | null;
   refused_calls: number;
   /**
-   * What the model step did with the session; null when it never had anything of the session to read.
+   * What the model step did with the session; null when it never had anything of the session to read and nothing failed.
    */
   digest: {
     /**
@@ -1359,6 +1359,19 @@ export interface ActivitySession {
      */
     input_tokens: number;
     output_tokens: number;
+    /**
+     * The last reading of the session that failed and has not been followed by one that finished; absent or null when there is none.
+     */
+    failure?: {
+      /**
+       * When it failed. ISO 8601, UTC.
+       */
+      at: string;
+      /**
+       * The provider's own words, cut short and without any key.
+       */
+      reason: string;
+    } | null;
   } | null;
 }
 /**

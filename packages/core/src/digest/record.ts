@@ -82,34 +82,53 @@ export function textOf(said: readonly Said[]): string {
 /** Characters a path or an address is made of: a name found between two of these is part of a longer name. */
 const NAME_CHAR = /[\w./-]/;
 
-/** Whether the record names `name` itself, and not only a longer name that holds it. */
-function names(record: string, name: string): boolean {
+/** Where the record names `name` itself, and not only a longer name that holds it. */
+function* occurrencesOf(record: string, name: string): Generator<number> {
   for (let at = record.indexOf(name); at !== -1; at = record.indexOf(name, at + 1)) {
     const before = record[at - 1] ?? " ";
     const after = record[at + name.length] ?? " ";
     // A full stop after a name ends a sentence as often as it joins an extension.
-    if (!NAME_CHAR.test(before) && (after === "." || !NAME_CHAR.test(after))) return true;
+    if (!NAME_CHAR.test(before) && (after === "." || !NAME_CHAR.test(after))) yield at;
   }
-  return false;
 }
 
-/** Whether the record gives a line number as a number of its own (`40`, `:40`, `L40`), not as digits inside a hash or a name. */
-function hasLine(record: string, digits: string): boolean {
-  return new RegExp(`(?<![A-Za-z0-9_])L?${digits}(?![A-Za-z0-9_])`).test(record);
+const RANGE = String.raw`L?(\d+)(?:\s*(?:-|\u2013|to)\s*L?(\d+))?`;
+/** Lines written after a path: `:40-62`, `#L40`, ` (lines 40-62)`, ` line 40`. */
+const LINES_AFTER = new RegExp(
+  String.raw`^(?::|#)${RANGE}|^\s*\(?\s*(?:lines?|L)\s*:?\s*${RANGE}`,
+  "i",
+);
+/** Lines written before a path: `lines 40-62 of `, `line 40 in `. */
+const LINES_BEFORE = new RegExp(String.raw`\blines?\s+${RANGE}\s+(?:of|in)\s+$`, "i");
+
+/**
+ * The lines the record gives for a file, as it writes them (`40-62`, or `40` for one line): only
+ * those written next to the file's name. A number elsewhere in the record is not a line of it.
+ */
+function linesShown(record: string, path: string): Set<string> {
+  const shown = new Set<string>();
+  for (const at of occurrencesOf(record, path)) {
+    const written =
+      LINES_AFTER.exec(record.slice(at + path.length, at + path.length + 40)) ??
+      LINES_BEFORE.exec(record.slice(Math.max(0, at - 40), at));
+    const [from, to] = written?.slice(1).filter((digits) => digits !== undefined) ?? [];
+    if (from !== undefined) shown.add(to === undefined ? from : `${from}-${to}`);
+  }
+  return shown;
 }
 
 /**
  * A citation as far as the record bears it out, or null when the record does not name its source.
  * A model reads only the record, so a source it names that the record does not is made up. A file
- * keeps its lines and its commit only where the record holds those too. Only a file, a commit and
+ * keeps its lines only where the record writes them for that file, and its commit only where the record holds it. Only a file, a commit and
  * a web page can be held against a record: anything else a model cites is its own word.
  */
 export function bornOut(record: string, citation: Citation): Citation | null {
   switch (citation.kind) {
     case "file": {
-      if (!names(record, citation.path)) return null;
+      if (occurrencesOf(record, citation.path).next().done === true) return null;
       const { lines, commit } = citation;
-      const numbered = lines?.split("-").every((digits) => hasLine(record, digits)) === true;
+      const numbered = lines !== undefined && linesShown(record, citation.path).has(lines);
       const pinned = commit !== undefined && record.toLowerCase().includes(commit);
       return {
         kind: "file",

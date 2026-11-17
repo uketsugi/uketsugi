@@ -214,6 +214,7 @@ describe("the line ukt serve prints for a session a model read", () => {
     tokens: { input: 5210, output: 640 },
     unread: 0,
     waited: false,
+    kept: 0,
     day: { used: 6000, limit: 1_000_000 },
   };
 

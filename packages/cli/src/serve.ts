@@ -62,6 +62,7 @@ export function digestLine(report: DigestReport): string {
     ...(report.merged === 0 ? [] : [`merged ${report.merged}`]),
     ...(report.flagged === 0 ? [] : [`raised ${count(report.flagged, "flag")}`]),
     ...(report.chose ? ["chose the next brief's facts"] : []),
+    ...(report.kept === 0 ? [] : [`${count(report.kept, "turn")} wait for the day's budget`]),
     ...(report.unread === 0
       ? []
       : [

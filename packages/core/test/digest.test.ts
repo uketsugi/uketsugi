@@ -94,6 +94,38 @@ describe("what a session's record bears out of a citation", () => {
     );
   });
 
+  test("lines are kept only where the record shows them for that file, as a number that happens to be in the record is not a line", () => {
+    const shown = textOf([
+      {
+        request: null,
+        answer:
+          "The cap is 30 seconds after 5 tries, in src/queue/retry.ts:40-62. " +
+          "Dedupe is in lib/dedupe.ts (lines 7-9) and src/queue/drain.ts line 12, " +
+          "and lines 3-4 of src/queue/pool.ts. The page says 5 to 30.",
+      },
+    ]);
+    // Numbers the record holds, put together by a model into a range the record never showed.
+    expect(bornOut(shown, file("src/queue/retry.ts", { lines: "5-30" }))).toEqual(
+      file("src/queue/retry.ts"),
+    );
+    // Lines the record shows, but for another file.
+    expect(bornOut(shown, file("lib/dedupe.ts", { lines: "40-62" }))).toEqual(
+      file("lib/dedupe.ts"),
+    );
+    // A part of a range shown is not the range.
+    expect(bornOut(shown, file("src/queue/retry.ts", { lines: "40" }))).toEqual(
+      file("src/queue/retry.ts"),
+    );
+    for (const [path, lines] of [
+      ["src/queue/retry.ts", "40-62"],
+      ["lib/dedupe.ts", "7-9"],
+      ["src/queue/drain.ts", "12"],
+      ["src/queue/pool.ts", "3-4"],
+    ] as const) {
+      expect(bornOut(shown, file(path, { lines }))).toEqual(file(path, { lines }));
+    }
+  });
+
   test("a file the record does not name is made up, as is one it names only as part of another", () => {
     expect(bornOut(record, file("src/queue/drain.ts"))).toBeNull();
     expect(bornOut(record, file("retry.ts"))).toBeNull();

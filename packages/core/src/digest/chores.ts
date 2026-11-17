@@ -51,7 +51,7 @@ Rules:
 - Take only what an answer states as established. Leave out plans, guesses, open questions, what the person merely asked for, and anything the session ended unsure of. Where a later answer corrects an earlier one, keep only the correction.
 - \`claim\`: one sentence that stands by itself and names what it is about, under 170 characters where it can be: a later session may be shown this sentence and nothing else of the fact. Keep names, paths, numbers, commands and identifiers exactly as the record writes them.
 - \`question\`: the question the fact answers, as a later session would ask it.
-- \`citations\`: where the record says the claim comes from, each copied exactly as the record writes it: a file path, with its lines when the record gives them (\`src/app.ts:10-20\`), a commit hash, or a URL. Never give a source the record does not name. A fact with no such source in the record is left out.
+- \`citations\`: where the record says the claim comes from, each copied exactly as the record writes it: a file path, a commit hash, or a URL. Give a file's lines (\`src/app.ts:10-20\`) when the record writes them next to that file, and then copy them whole; when it does not, give the path alone, and never work out, guess or round a line number, because a line that the record never showed is dropped. Never give a source the record does not name. A fact with no such source in the record is left out.
 - \`detail\`: what else the record says about it that a later session would need, in a few sentences, or an empty string.
 - Do not repeat a fact in \`recorded\`, and do not say one thing twice.
 - A few facts that are right are worth more than many. When nothing qualifies, return an empty list.

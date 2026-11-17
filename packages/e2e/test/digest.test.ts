@@ -34,7 +34,7 @@ describeUseCases("what the model step writes", (w) => {
             ["src/queue/retry.ts:40-62"],
             "How often does the webhook queue retry a failed delivery?",
           ),
-          candidate("Deliveries are deduplicated on the event id", ["src/queue/dedupe.ts:1-9"]),
+          candidate("Deliveries are deduplicated on the event id", ["src/queue/dedupe.ts:10-30"]),
         ],
       }),
     });
@@ -85,7 +85,7 @@ describeUseCases("what the model step writes", (w) => {
         session: ended.id,
       }),
     ]);
-    // The second candidate cited lines the record does not give: it keeps the file and loses them.
+    // The second candidate cited lines made of numbers the record holds (10 seconds, 30 seconds) but never gives for that file: it keeps the file and loses them.
     const other = last?.digested?.find((entry) => entry.id !== fact?.id);
     expect((await w.factOf(other?.id ?? "")).citations).toEqual([
       {

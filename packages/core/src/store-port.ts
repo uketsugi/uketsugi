@@ -33,6 +33,7 @@ import type {
   Flag,
   FlagKind,
   JobDraft,
+  DigestFailure,
   ModelTokens,
   Person,
   PersonProject,
@@ -439,13 +440,15 @@ export interface SessionsRepo {
   /**
    * Records that a model finished reading the session, in one step: the turns it read are
    * deleted, the session is stamped as read at `at`, and the facts it chose for the person's next
-   * brief in the project replace an earlier choice when it made one.
+   * brief in the project replace an earlier choice when it made one. A failure recorded before is cleared.
    */
   digested(
     orgId: string,
     id: string,
     read: { at: Date; turns: readonly string[]; picks?: readonly string[] },
   ): Promise<void>;
+  /** Records that a model's reading of the session failed, in place of any earlier failure: the next finished reading clears it. */
+  digestFailed(orgId: string, id: string, failure: DigestFailure): Promise<void>;
   /** Adds what model calls about the session cost, made at `at`, to what it has cost so far and to the server's account. */
   spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void>;
   /** What model calls have cost, input and output together, since `since`, across everyone the server serves. */

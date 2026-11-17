@@ -2122,7 +2122,7 @@
         },
         "digest": {
           "type": ["object", "null"],
-          "description": "What the model step did with the session; null when it never had anything of the session to read.",
+          "description": "What the model step did with the session; null when it never had anything of the session to read and nothing failed.",
           "properties": {
             "at": {
               "type": ["string", "null"],
@@ -2134,6 +2134,21 @@
             },
             "output_tokens": {
               "type": "integer"
+            },
+            "failure": {
+              "type": ["object", "null"],
+              "description": "The last reading of the session that failed and has not been followed by one that finished; absent or null when there is none.",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "When it failed. ISO 8601, UTC."
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "The provider's own words, cut short and without any key."
+                }
+              },
+              "required": ["at", "reason"]
             }
           },
           "required": ["at", "input_tokens", "output_tokens"]

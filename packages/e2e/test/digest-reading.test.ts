@@ -54,6 +54,7 @@ describeUseCases("when and what the model step reads", (w) => {
       at: read.digestedAt?.toISOString(),
       input_tokens: read.modelTokens.input,
       output_tokens: read.modelTokens.output,
+      failure: null,
     });
   });
 
@@ -182,6 +183,63 @@ describeUseCases("when and what the model step reads", (w) => {
       modelTokens: { output: 10 },
     });
     expect((await w.store.jobs.counts()).waiting).toBe(0);
+  });
+
+  test("a reading that fails leaves its reason where Activity reads it, until a reading finishes", async () => {
+    const refused = new ModelError(
+      "the provider refused the call (status 402): prepayment credits are depleted",
+      false,
+    );
+    let answer: unknown = refused;
+    const server = serverWith(
+      w,
+      scripted({ extract: () => (answer instanceof ModelError ? answer : { facts: [] }) }),
+    );
+    await server.call("search_facts", { query: "how are webhooks retried" });
+    await server.end(FOUND);
+    await server.drain();
+    const failedAt = clock.now().toISOString();
+    const { displayId } = await server.session();
+    const row = async () =>
+      (await activityReport(server.ports, w.owner, { days: 1 })).recent.find(
+        (each) => each.session === displayId,
+      );
+    const failed = await row();
+    expect(failed?.digest).toEqual({
+      at: null,
+      input_tokens: 0,
+      output_tokens: 0,
+      failure: { at: failedAt, reason: refused.message },
+    });
+
+    // The next reading that finishes takes the failure away.
+    answer = { facts: [] };
+    const { orgId, id } = await server.session();
+    await w.store.jobs.armDigest(orgId, id, clock.now());
+    await w.store.sessions.addTurn(orgId, id, {
+      id: w.ids.uuid(),
+      request: null,
+      answer: FOUND,
+      at: clock.now(),
+    });
+    await server.drain();
+    expect((await row())?.digest).toMatchObject({ failure: null });
+  });
+
+  test("a store that cannot keep the reason does not hide the failure it is the reason of", async () => {
+    const refused = new ModelError("the provider refused the call (status 402): no credit", false);
+    const keeping = vi
+      .spyOn(w.store.sessions, "digestFailed")
+      .mockRejectedValue(new Error("the store is down"));
+    try {
+      const server = serverWith(w, scripted({ extract: () => refused }));
+      await server.end(FOUND);
+      await server.drain();
+      expect(keeping).toHaveBeenCalled();
+      expect(server.failures).toEqual([refused]);
+    } finally {
+      keeping.mockRestore();
+    }
   });
 
   test("a server that stops gives up the question in flight, and the session is read when it is back", async () => {

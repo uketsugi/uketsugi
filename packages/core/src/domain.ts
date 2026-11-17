@@ -322,6 +322,14 @@ export interface Session extends SessionKey {
   readonly digestedAt: Date | null;
   /** The tokens every model call about the session took in and gave out, added up. */
   readonly modelTokens: ModelTokens;
+  /** The last reading that failed and has not been followed by one that finished: when, and the provider's reason, without any key. */
+  readonly digestFailure: DigestFailure | null;
+}
+
+/** A model's reading of a session that failed. */
+export interface DigestFailure {
+  readonly at: Date;
+  readonly reason: string;
 }
 
 /** What model calls cost, in the provider's own count of tokens. */

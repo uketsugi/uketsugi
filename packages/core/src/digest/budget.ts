@@ -6,10 +6,11 @@
  * - what a server spends in a day stays within what its operator set (`ModelRunner.dailyTokens`):
  *   a reading that would pass it waits;
  * - a reading that has cost something is not asked again if it fails, so a retry pays nothing twice.
- * A count here is an estimate made before the call, taken high; the provider's own count is what
- * is kept and added up.
+ * `costOf` is an estimate made before a call, taken high. The provider's own count is what is
+ * kept and added up, and a call is asked only while that count so far plus this estimate for the
+ * call stays within the bound: the estimate guards the call about to be made, never the total.
  */
-import type { Chore } from "../ports.ts";
+import type { Chore, ModelAnswer } from "../ports.ts";
 
 /** The most all the readings of one session may cost, input and output together: about eight chores of the largest size. */
 export const SESSION_TOKENS = 150_000;
@@ -32,4 +33,19 @@ export function costOf(chore: Pick<Chore, "instructions" | "material">): number 
   return (
     Math.ceil((chore.instructions.length + chore.material.length) / CHARS_PER_TOKEN) + ANSWER_TOKENS
   );
+}
+
+/**
+ * What a call is counted as having cost: the provider's own count, and, for a side it reports as
+ * nothing (a call that read a session and answered with nothing is no call that cost nothing),
+ * the estimate. A provider that counted nothing would otherwise be no bound on a session's cost.
+ */
+export function countedFor(
+  chore: Pick<Chore, "instructions" | "material">,
+  answer: Pick<ModelAnswer, "inputTokens" | "outputTokens">,
+): { input: number; output: number } {
+  return {
+    input: answer.inputTokens > 0 ? answer.inputTokens : costOf(chore) - ANSWER_TOKENS,
+    output: answer.outputTokens > 0 ? answer.outputTokens : ANSWER_TOKENS,
+  };
 }
