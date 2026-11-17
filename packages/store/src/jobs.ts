@@ -28,18 +28,21 @@ export class SqlJobs extends Repo implements JobsRepo {
       .executeTakeFirst();
     if (retired.numDeletedRows > 0n) return;
     // Armed again while it ran: it keeps its new time and is free to be claimed then.
-    await this.db
-      .updateTable("outbox")
-      .set({ lockedUntil: null })
-      .where("orgId", "=", job.orgId)
-      .where("id", "=", job.id)
-      .execute();
+    await this.release(job, {});
   }
 
   async fail(job: Pick<ClaimedJob, "orgId" | "id">, retryAt: Date | null): Promise<void> {
+    await this.release(job, retryAt === null ? { dead: true } : { runAfter: retryAt });
+  }
+
+  /** Frees a claimed job's lock, and changes what else `change` says. */
+  private async release(
+    job: Pick<ClaimedJob, "orgId" | "id">,
+    change: { dead?: true; runAfter?: Date },
+  ): Promise<void> {
     await this.db
       .updateTable("outbox")
-      .set({ lockedUntil: null, ...(retryAt === null ? { dead: true } : { runAfter: retryAt }) })
+      .set({ lockedUntil: null, ...change })
       .where("orgId", "=", job.orgId)
       .where("id", "=", job.id)
       .execute();

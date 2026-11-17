@@ -18,9 +18,9 @@
 import { LIMITS } from "@uketsugi/contracts";
 import { servedByModel } from "../context.ts";
 import { armDigest } from "../digest/arm.ts";
-import type { Caller, Session } from "../domain.ts";
+import type { Caller, Session, SessionNote } from "../domain.ts";
 import type { CorePorts } from "../ports.ts";
-import { parseProject, resolveProject } from "../project.ts";
+import { projectNamed } from "../project.ts";
 import { scanText } from "../scan/scanner.ts";
 import { sessionState, type ClientInfo, type SessionInference } from "../sessions.ts";
 
@@ -80,8 +80,7 @@ async function sessionOf(
 ): Promise<Session | null> {
   const { orgId, principalId } = caller;
   const { sessions } = ports.store;
-  const ref = parseProject(of.project);
-  const project = ref === null ? null : await resolveProject(ports, caller, ref);
+  const project = await projectNamed(ports, caller, of.project);
   const client: ClientInfo = { name: of.client, version: null, conversationId: of.id };
   if (project !== null && opening) return ports.sessions.continued(caller, client, project.key);
   const latest =
@@ -113,10 +112,22 @@ export async function noteSession(
   if (text === "") return null;
   const session = await sessionOf(ports, caller, of, true);
   if (session === null) return null;
-  const note = { text, final: false, at: ports.clock.now() };
-  await ports.store.sessions.setNote(caller.orgId, session.id, note);
   // On a server with a model, the note is something for it to read once the session is over.
-  await armDigest(ports, session, "quiet");
+  return writeNote(ports, session, { text, final: false, at: ports.clock.now() }, "quiet");
+}
+
+/**
+ * Puts a note on a session and arms the model's reading of it, where a model reads this person's
+ * sessions: once the session has been quiet a while, or now. Returns the session with its note.
+ */
+async function writeNote(
+  ports: NotePorts,
+  session: Session,
+  note: SessionNote,
+  when: "quiet" | "now",
+): Promise<Session> {
+  await ports.store.sessions.setNote(session.orgId, session.id, note);
+  await armDigest(ports, session, when);
   return { ...session, note };
 }
 
@@ -168,8 +179,6 @@ export async function endSession(
   const session = await sessionOf(ports, caller, of, false);
   if (session === null || (session.note === null && session.calls === 0)) return null;
   const note = { text: session.note?.text ?? "", final: true, at: ports.clock.now() };
-  await ports.store.sessions.setNote(caller.orgId, session.id, note);
   // The session is over: on a server with a model, what it left is read now.
-  await armDigest(ports, session, "now");
-  return { ...session, note };
+  return writeNote(ports, session, note, "now");
 }

@@ -15,6 +15,7 @@ import {
 import { sql, type InferResult } from "kysely";
 import { behindOf, headsIn } from "./chain.ts";
 import { live, Repo, scoped, toBytes, toHalfvec, UnitRepo, uuidsOf, type Db } from "./codec.ts";
+import { writeDerived } from "./derived.ts";
 import { forgetTaken, redactFacts } from "./redaction.ts";
 import { toEvent } from "./review.ts";
 
@@ -78,38 +79,6 @@ function textColumns(content: FactContent) {
   };
 }
 
-/** Replaces a fact's identifier rows with those of its current text. */
-async function writeIdents(
-  db: Db,
-  orgId: string,
-  factId: string,
-  idents: readonly string[],
-): Promise<void> {
-  await db
-    .deleteFrom("factIdents")
-    .where("orgId", "=", orgId)
-    .where("factId", "=", factId)
-    .execute();
-  const rows = [...new Set(idents)].map((ident) => ({ orgId, factId, ident }));
-  if (rows.length > 0) await db.insertInto("factIdents").values(rows).execute();
-}
-
-/** Replaces the rows of the facts a fact cites with those of its current citations. */
-async function writeCited(
-  db: Db,
-  orgId: string,
-  factId: string,
-  cited: readonly string[],
-): Promise<void> {
-  await db
-    .deleteFrom("citedFacts")
-    .where("orgId", "=", orgId)
-    .where("factId", "=", factId)
-    .execute();
-  const rows = [...new Set(cited)].map((citedFact) => ({ orgId, factId, citedFact }));
-  if (rows.length > 0) await db.insertInto("citedFacts").values(rows).execute();
-}
-
 /** The facts a fact replaced, directly or through others, that the scope holds. */
 async function factsBehind(db: Db, scope: ReadScope, id: string): Promise<Fact[]> {
   const chain = await behindOf(db, scope, [id]);
@@ -143,11 +112,13 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
     return factsAmong(this.db, this.scope, ids);
   }
 
+  /** The unit's facts by one author in one project. */
+  private by(author: string, project: string) {
+    return factsIn(this.db, this.scope).where("author", "=", author).where("project", "=", project);
+  }
+
   async writtenBy(author: string, project: string): Promise<Fact[]> {
-    const rows = await factsIn(this.db, this.scope)
-      .where("author", "=", author)
-      .where("project", "=", project)
-      .execute();
+    const rows = await this.by(author, project).execute();
     return rows.map(toFact);
   }
 
@@ -155,7 +126,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
     return factsBehind(this.db, this.scope, id);
   }
 
-  async merges(id: string): Promise<StoredEvent[]> {
+  async merges(id: string): Promise<StoredEvent<"FactSuperseded">[]> {
     // A fact that moved has entries in two logs: they are found by their subject, for a fact the
     // unit's audience was first seen to hold.
     if ((await this.get(id)) === null) return [];
@@ -165,6 +136,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
       .where("orgId", "=", this.target.orgId)
       .where("subject", "=", id)
       .where("kind", "=", "FactSuperseded")
+      .$narrowType<{ kind: "FactSuperseded" }>()
       .orderBy("at", "desc")
       .orderBy("seq", "desc")
       .execute();
@@ -172,9 +144,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
   }
 
   async findByClaimHash(author: string, project: string, claimHash: string): Promise<Fact | null> {
-    const row = await factsIn(this.db, this.scope)
-      .where("author", "=", author)
-      .where("project", "=", project)
+    const row = await this.by(author, project)
       .where("claimHash", "=", toBytes(claimHash))
       .where(live())
       .orderBy("createdAt")
@@ -201,8 +171,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
         digestSession: fact.digestSession ?? null,
       })
       .execute();
-    await writeIdents(this.db, orgId, fact.id, content.idents);
-    await writeCited(this.db, orgId, fact.id, content.citedFacts);
+    await writeDerived(this.db, orgId, [fact.id], content);
   }
 
   async rewrite(id: string, content: FactContent, vector: VectorChange): Promise<void> {
@@ -217,8 +186,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
       })
       .executeTakeFirst();
     this.mustHold(id, rewritten);
-    await writeIdents(this.db, this.target.orgId, id, content.idents);
-    await writeCited(this.db, this.target.orgId, id, content.citedFacts);
+    await writeDerived(this.db, this.target.orgId, [id], content);
   }
 
   async setCitations(id: string, change: CitationsChange): Promise<void> {
@@ -231,7 +199,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
       })
       .executeTakeFirst();
     this.mustHold(id, changed);
-    await writeCited(this.db, this.target.orgId, id, change.citedFacts);
+    await writeDerived(this.db, this.target.orgId, [id], { citedFacts: change.citedFacts });
   }
 
   async supersede(id: string, by: string): Promise<void> {

@@ -1,7 +1,7 @@
 /** What the four task tools share: finding a task, proving and granting a lease, events, views and refusals. */
 import type { Task as TaskView } from "@uketsugi/contracts";
 import { eventOf, idOf, namesFor, scopeOf, type CallContext } from "../../context.ts";
-import type { Caller, EventDraft, EventKind, Session, Task, TaskNote } from "../../domain.ts";
+import type { Caller, EventDraft, EventPayloads, Session, Task, TaskNote } from "../../domain.ts";
 import { notFound, ToolFailure } from "../../failure.ts";
 import { sha256Hex, toHex } from "../../hash.ts";
 import type { CorePorts } from "../../ports.ts";
@@ -37,6 +37,16 @@ export function leaseEnd(ports: Pick<CorePorts, "taskLeaseMs">, at: Date): Date 
   return new Date(at.getTime() + (ports.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS));
 }
 
+/** The same lease on the task, ending later: as from `at`. */
+export async function renewLease(
+  ports: Pick<CorePorts, "taskLeaseMs">,
+  unit: UnitWrites,
+  task: Task,
+  at: Date,
+): Promise<Task> {
+  return (await unit.tasks.renew(task.id, leaseEnd(ports, at))) ?? task;
+}
+
 /**
  * A text of a task write as it may be stored. The scanner runs first on every write, so a secret
  * in a title, a description or a note is replaced before anything is compared or kept. A blank
@@ -52,17 +62,19 @@ export async function tokenHashOf(lease: string | undefined): Promise<string | n
   return token === "" ? null : sha256Hex(token);
 }
 
+type ChangeKind = "TaskPublished" | "TaskClaimed" | "TaskReleased" | "TaskDone" | "TaskNoted";
+
+/** A change to a task, with its event's payload but for the version, which `taskEvent` adds. */
+export type TaskChange = {
+  [K in ChangeKind]: { kind: K; payload: Omit<EventPayloads[K], "version"> };
+}[ChangeKind];
+
 /**
  * An event about a task as it stands after the change. The payload says which version the change
  * made; which session it came from is the event's own to say.
  */
-export function taskEvent(
-  ctx: CallContext,
-  kind: EventKind,
-  task: Task,
-  payload: Record<string, unknown> = {},
-): EventDraft {
-  return eventOf(ctx, kind, task.id, { version: task.version, ...payload });
+export function taskEvent(ctx: CallContext, task: Task, change: TaskChange): EventDraft {
+  return eventOf(ctx, change.kind, task.id, { version: task.version, ...change.payload });
 }
 
 type Grant = Extract<ClaimDecision, { kind: "grant" }>;
@@ -93,7 +105,7 @@ export async function grantLease(
     ...(task.lease === null ? {} : { previous_holder: task.lease.holder }),
     lease_until: lease.expiresAt.toISOString(),
   };
-  await unit.append(taskEvent(ctx, "TaskClaimed", claimed, payload));
+  await unit.append(taskEvent(ctx, claimed, { kind: "TaskClaimed", payload }));
   return { task: claimed, token };
 }
 

@@ -94,13 +94,17 @@ function toSession(row: Pick<Selectable<Database["sessions"]>, (typeof COLUMNS)[
 }
 
 export class SqlSessions extends Repo implements SessionsRepo {
-  /** One person's sessions. */
-  private of(orgId: string, principalId: string) {
+  /** One person's sessions, with no column chosen yet. */
+  private mine(orgId: string, principalId: string) {
     return this.db
       .selectFrom("sessions")
-      .select(COLUMNS)
       .where("orgId", "=", orgId)
       .where("principalId", "=", principalId);
+  }
+
+  /** One person's sessions. */
+  private of(orgId: string, principalId: string) {
+    return this.mine(orgId, principalId).select(COLUMNS);
   }
 
   latestOf(key: SessionKey): Promise<Session | null> {
@@ -138,9 +142,9 @@ export class SqlSessions extends Repo implements SessionsRepo {
       .execute();
   }
 
-  /** An update of one session. */
-  private one(orgId: string, id: string) {
-    return this.db.updateTable("sessions").where("orgId", "=", orgId).where("id", "=", id);
+  /** An update of one session, on the store's connection or in a transaction. */
+  private one(orgId: string, id: string, db: Db = this.db) {
+    return db.updateTable("sessions").where("orgId", "=", orgId).where("id", "=", id);
   }
 
   async touch(
@@ -260,18 +264,8 @@ export class SqlSessions extends Repo implements SessionsRepo {
     await this.keepTurn(this.db, { orgId, sessionId, id, request, answer, at });
   }
 
-  /** One statement: the turn is kept only while the session holds fewer than `MOST_TURNS_KEPT`. */
-  private async keepTurn(
-    db: Db,
-    turn: {
-      orgId: string;
-      sessionId: string;
-      id: string;
-      request: string | null;
-      answer: string | null;
-      at: Date;
-    },
-  ): Promise<void> {
+  /** One statement: the turn's row is kept only while the session holds fewer than `MOST_TURNS_KEPT`. */
+  private async keepTurn(db: Db, turn: Selectable<Database["sessionTurns"]>): Promise<void> {
     const { orgId, sessionId, id, request, answer, at } = turn;
     await sql`
       insert into session_turns (org_id, session_id, id, request, answer, at)
@@ -335,30 +329,21 @@ export class SqlSessions extends Repo implements SessionsRepo {
       if (turns.length > 0) {
         await this.deleteTurns(trx, orgId, id).where("id", "in", turns).execute();
       }
-      await trx
-        .updateTable("sessions")
+      await this.one(orgId, id, trx)
         .set({ digestedAt: read.at, digestFailedAt: null, digestFailure: null, ...picks })
-        .where("orgId", "=", orgId)
-        .where("id", "=", id)
         .execute();
     });
   }
 
   async digestFailed(orgId: string, id: string, failure: DigestFailure): Promise<void> {
-    await this.db
-      .updateTable("sessions")
+    await this.one(orgId, id)
       .set({ digestFailedAt: failure.at, digestFailure: failure.reason })
-      .where("orgId", "=", orgId)
-      .where("id", "=", id)
       .execute();
   }
 
   async spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
-      await trx
-        .updateTable("sessions")
-        .where("orgId", "=", orgId)
-        .where("id", "=", id)
+      await this.one(orgId, id, trx)
         .set((eb) => ({
           modelInputTokens: eb("modelInputTokens", "+", tokens.input),
           modelOutputTokens: eb("modelOutputTokens", "+", tokens.output),
@@ -399,11 +384,8 @@ export class SqlSessions extends Repo implements SessionsRepo {
   }
 
   async picks(orgId: string, principalId: string, project: string): Promise<string[]> {
-    const newest = await this.db
-      .selectFrom("sessions")
+    const newest = await this.mine(orgId, principalId)
       .select("briefPicks")
-      .where("orgId", "=", orgId)
-      .where("principalId", "=", principalId)
       .where("project", "=", project)
       .where("briefPicks", "is not", null)
       .orderBy("digestedAt", "desc")

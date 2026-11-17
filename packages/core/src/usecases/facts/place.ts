@@ -13,6 +13,7 @@ import { changedMeanwhile, ToolFailure } from "../../failure.ts";
 import type { CorePorts } from "../../ports.ts";
 import {
   asPerson,
+  canShare,
   heldBack,
   holderOfFact,
   requireSharing,
@@ -55,7 +56,7 @@ export async function holdCited(
   cited: readonly string[],
   kept: readonly string[] = [],
 ): Promise<void> {
-  if (cited.length === 0 || place.caller.sharedAudienceId === null) return;
+  if (cited.length === 0 || !canShare(place.caller)) return;
   const shared = await place.shared();
   const added = cited.filter((id) => !kept.includes(id));
   const held = [
@@ -82,10 +83,13 @@ const KINDS = {
   withdrawn: { fact: "FactWithdrawn", task: "TaskWithdrawn" },
 } as const satisfies Record<string, { fact: EventKind; task: EventKind }>;
 
+/** Which way a move goes: out to the shared audience, or home to the person's own. */
+type Direction = keyof typeof KINDS;
+
 /** Writes a move in both logs it touches. The entry in the log a record leaves says so, for whoever reads both. */
 async function logMove(
   place: Place,
-  kinds: (typeof KINDS)[keyof typeof KINDS],
+  kinds: (typeof KINDS)[Direction],
   moved: { facts: readonly string[]; tasks: readonly string[] },
   logs: { left: UnitWrites; joined: UnitWrites },
 ): Promise<void> {
@@ -96,7 +100,7 @@ async function logMove(
   ];
   for (const { id, kind } of subjects) {
     await logs.left.append(eventBy(who, kind, id, { left: true }));
-    await logs.joined.append(eventBy(who, kind, id));
+    await logs.joined.append(eventBy(who, kind, id, {}));
   }
 }
 
@@ -115,62 +119,40 @@ async function citing(writes: UnitWrites, ids: readonly string[]): Promise<strin
 }
 
 /**
- * Moves a person's records from their own audience to the shared one, and then those of their
- * facts that only a citation of what moved held back. Returns how many moved.
+ * Moves a person's records between their own audience and the shared one, and then those of their
+ * facts the move changes the place of: going out (`shared`), those that only a citation of what
+ * moved held back; coming home (`withdrawn`), those of their shared facts that cite what moved.
+ * A fact coming home leaves other people's confirmations behind, and the shared facts that cite
+ * it are flagged: their source is no longer one their readers can open. Returns how many moved.
  */
-export async function share(
+export async function move(
   ports: MovePorts,
   place: Place,
   shared: UnitWrites,
   records: Records,
+  direction: Direction,
 ): Promise<{ facts: number; tasks: number }> {
   if (records.facts.length + records.tasks.length === 0) return { facts: 0, tasks: 0 };
-  const went = await place.own.move({
-    from: place.own.audienceId,
-    to: shared.audienceId,
-    facts: records.facts.map((fact) => fact.id),
-    tasks: records.tasks.map((task) => task.id),
-  });
-  await logMove(place, KINDS.shared, went, { left: place.own, joined: shared });
-  const { live, ...moved } = countOf(records, went);
-  // A fact that arrives looks for its author's duplicates here, and for a vector if it has none.
-  for (const fact of live) {
-    await enqueueFollowUps(ports, shared, fact.id, { embed: !fact.embedded, at: place.at });
-  }
-  const followed = await settle(ports, place, await citing(place.own, went.facts));
-  return { facts: moved.facts + followed, tasks: moved.tasks };
-}
-
-/**
- * Moves a person's records from the shared audience back to their own, and with them those of
- * their shared facts that cite what moved. Other people's confirmations do not go with a fact,
- * and the shared facts that cite it are flagged: their source is no longer one their readers can
- * open. Returns how many moved.
- */
-export async function withdraw(
-  ports: MovePorts,
-  place: Place,
-  shared: UnitWrites,
-  records: Records,
-): Promise<{ facts: number; tasks: number }> {
-  if (records.facts.length + records.tasks.length === 0) return { facts: 0, tasks: 0 };
-  for (const fact of records.facts) {
+  const home = direction === "withdrawn";
+  const [from, to] = home ? [shared, place.own] : [place.own, shared];
+  for (const fact of home ? records.facts : []) {
     await shared.review.clearConfirmations(fact.id, fact.author);
     if (fact.status === "confirmed") await shared.facts.setStatus(fact.id, "unconfirmed");
   }
   const went = await place.own.move({
-    from: shared.audienceId,
-    to: place.own.audienceId,
+    from: from.audienceId,
+    to: to.audienceId,
     facts: records.facts.map((fact) => fact.id),
     tasks: records.tasks.map((task) => task.id),
   });
-  await logMove(place, KINDS.withdrawn, went, { left: shared, joined: place.own });
-  for (const id of went.facts) await flagCiting(ports, shared, null, id);
+  await logMove(place, KINDS[direction], went, { left: from, joined: to });
+  for (const id of home ? went.facts : []) await flagCiting(ports, shared, null, id);
   const { live, ...moved } = countOf(records, went);
+  // A fact that arrives looks for its author's duplicates there, and for a vector if it has none.
   for (const fact of live) {
-    await enqueueFollowUps(ports, place.own, fact.id, { embed: !fact.embedded, at: place.at });
+    await enqueueFollowUps(ports, to, fact.id, { embed: !fact.embedded, at: place.at });
   }
-  const followed = await settle(ports, place, await citing(shared, went.facts));
+  const followed = await settle(ports, place, await citing(from, went.facts));
   return { facts: moved.facts + followed, tasks: moved.tasks };
 }
 
@@ -197,9 +179,22 @@ export async function settle(
     const want = await landingOf(place, fact.project, fact, await writes.facts.behind(fact.id));
     if (want === writes) continue;
     const records = { facts: [fact], tasks: [] };
-    moved += (await (want === place.own ? withdraw : share)(ports, place, shared, records)).facts;
+    const direction = want === place.own ? "withdrawn" : "shared";
+    moved += (await move(ports, place, shared, records, direction)).facts;
   }
   return moved;
+}
+
+/** Clears the fact's open flags of these kinds, and logs it when there were any. */
+export async function clearFlagsLogged(
+  unit: UnitWrites,
+  ctx: Pick<CallContext, "caller" | "session">,
+  fact: Fact,
+  kinds: readonly FlagKind[],
+): Promise<void> {
+  const count = await unit.review.clearFlags(fact.id, kinds);
+  if (count > 0)
+    await unit.append(eventOf(ctx, "FlagCleared", fact.id, { factId: fact.id, kinds, count }));
 }
 
 /** The flags a correction clears: a judgement of what the fact said, which it no longer says. */
@@ -226,11 +221,7 @@ async function rewrite(
   const hashes = { before: fact.contentHash, after: content.contentHash };
   await unit.append(eventOf(ctx, "FactRewritten", fact.id, hashes));
   // What it was said to contradict was its old wording, which is gone.
-  const cleared = await unit.review.clearFlags(fact.id, CLEARED_BY_A_CORRECTION);
-  if (cleared > 0) {
-    const what = { factId: fact.id, kinds: CLEARED_BY_A_CORRECTION, count: cleared };
-    await unit.append(eventOf(ctx, "FlagCleared", fact.id, what));
-  }
+  await clearFlagsLogged(unit, ctx, fact, CLEARED_BY_A_CORRECTION);
   await flagCiting(ports, unit, ctx.session.id, fact.id);
   const embed = vector === null || (vector === "kept" && !fact.embedded);
   await enqueueFollowUps(ports, unit, fact.id, { embed, at });
@@ -258,12 +249,12 @@ async function correctWhereItBelongs(
   const records = { facts: [fact], tasks: [] };
   let writes = held.writes;
   if (shared !== null && writes === shared && want === place.own) {
-    await withdraw(ports, place, shared, records);
+    await move(ports, place, shared, records, "withdrawn");
     writes = place.own;
   }
   await rewrite(ports, writes, ctx, fact, correction, place.at);
   if (shared !== null && writes === place.own && want === shared) {
-    await share(ports, place, shared, records);
+    await move(ports, place, shared, records, "shared");
     writes = shared;
   }
   return writes;

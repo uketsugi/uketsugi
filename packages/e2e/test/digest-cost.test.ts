@@ -190,6 +190,41 @@ describeUseCases("what the model step may spend", (w) => {
     expect(await w.store.sessions.turns(orgId, id)).toEqual([]);
   });
 
+  test("a reading the day's budget stops before its first piece waits whole, and nothing of the session is stamped read", async () => {
+    // What the piece costs by the estimate, read from the same words in another session.
+    const measuring = scripted({});
+    await readSession(measuring, 1, 15_900);
+    const [piece] = measuring.askedFor("digest.extract");
+    const cost = estimate((piece?.instructions.length ?? 0) + (piece?.material.length ?? 0));
+
+    const runner = scripted({});
+    const server = serverWith(w, runner);
+    await server.call("search_facts", { query: "how are webhooks retried" });
+    const { orgId, id } = await server.session();
+    await server.turn({ request: "q" });
+    await server.turn({ answer: `Answer 0: ${"b".repeat(15_900)}` });
+    // Room in the session for the piece but not for the estimate's whole reading, which then
+    // plans no piece and passes the day's check; the day then has room for no piece at all.
+    const spent = SESSION_TOKENS - (cost + RESERVE_TOKENS + 1_000);
+    await w.store.sessions.spent(orgId, id, { input: spent, output: 0 }, clock.now());
+    const used = await w.store.sessions.spentSince(new Date(clock.now().getTime() - day));
+    runner.dailyTokens = used + RESERVE_TOKENS + 500;
+    await server.end("Done.");
+    await server.drain();
+
+    expect(server.reports).toEqual([expect.objectContaining({ waited: true, read: 0 })]);
+    expect(runner.asked).toEqual([]);
+    expect((await server.session()).digestedAt).toBeNull();
+    expect(await w.store.sessions.turns(orgId, id)).toHaveLength(1);
+
+    // A day later the reading goes through, whole.
+    runner.dailyTokens = Number.MAX_SAFE_INTEGER;
+    clock.advance(day + 1);
+    await server.drain();
+    expect(runner.askedFor("digest.extract")).toHaveLength(1);
+    expect(await w.store.sessions.turns(orgId, id)).toEqual([]);
+  });
+
   test("a citation is held against what the model was sent: not against turns it was never shown, nor another piece's", async () => {
     let calls = 0;
     const runner = counting(

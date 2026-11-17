@@ -8,7 +8,7 @@ import type { CorePorts } from "../../ports.ts";
 import { scanFields, type Replacement } from "../../scan/scanner.ts";
 import type { UnitWrites } from "../../store-port.ts";
 import { seenBy } from "../../sharing.ts";
-import { onFact } from "./place.ts";
+import { clearFlagsLogged, onFact } from "./place.ts";
 import {
   classCitations,
   correctionOf,
@@ -81,11 +81,7 @@ async function confirm(
 ): Promise<void> {
   const person = ctx.caller.principalId;
   await unit.review.confirm({ factId: fact.id, person, at, ...check });
-  const cleared = await unit.review.clearFlags(fact.id, CLEARED_BY_A_CHECK);
-  if (cleared > 0) {
-    const what = { factId: fact.id, kinds: CLEARED_BY_A_CHECK, count: cleared };
-    await unit.append(eventOf(ctx, "FlagCleared", fact.id, what));
-  }
+  await clearFlagsLogged(unit, ctx, fact, CLEARED_BY_A_CHECK);
   if ((person === fact.author && fact.digestSession === null) || fact.status !== "unconfirmed")
     return;
   await unit.facts.setStatus(fact.id, "confirmed");

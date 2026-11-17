@@ -7,6 +7,7 @@
 import type { Citation as CitationView } from "@uketsugi/contracts";
 import type { Citation, ClassedCitation, ProjectRef } from "../domain.ts";
 import { invalidInput } from "../failure.ts";
+import { isRecord } from "../validate.ts";
 
 const COMMIT = /^(?:commit\s+)?([0-9a-f]{7,40})$/i;
 /** The shape of an id, in a syntax every regular-expression engine here reads; match it ignoring case. */
@@ -25,10 +26,6 @@ const MACHINE_PATH = /^(?:\/|~|[A-Za-z]:[\\/])|(?:^|\/)\.\.(?:\/|$)/;
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** The file a string names, if it has the shape of a path inside a repository. */

@@ -50,6 +50,12 @@ function notesIn(db: Db, scope: ReadScope) {
     .where(scoped(scope));
 }
 
+/** The notes of these tasks that the scope holds; null when no id among them can be a task's, and nothing is to be asked. */
+function notesAmong(db: Db, scope: ReadScope, taskIds: readonly string[]) {
+  const ids = uuidsOf(taskIds);
+  return ids.length === 0 ? null : notesIn(db, scope).where("taskId", "in", ids);
+}
+
 function leaseColumns(lease: Task["lease"]) {
   return {
     leaseTokenHash: lease === null ? null : toBytes(lease.tokenHash),
@@ -70,18 +76,20 @@ export class SqlUnitTasks extends UnitRepo implements UnitTasks {
     return taskIn(this.db, this.scope, id);
   }
 
-  async publishedBy(publisher: string, project: string): Promise<Task[]> {
-    const rows = await tasksIn(this.db, this.scope)
+  /** The unit's tasks by one publisher in one project. */
+  private by(publisher: string, project: string) {
+    return tasksIn(this.db, this.scope)
       .where("publisher", "=", publisher)
-      .where("project", "=", project)
-      .execute();
+      .where("project", "=", project);
+  }
+
+  async publishedBy(publisher: string, project: string): Promise<Task[]> {
+    const rows = await this.by(publisher, project).execute();
     return rows.map(toTask);
   }
 
   async findOpenByTitle(publisher: string, project: string, title: string): Promise<Task | null> {
-    const row = await tasksIn(this.db, this.scope)
-      .where("publisher", "=", publisher)
-      .where("project", "=", project)
+    const row = await this.by(publisher, project)
       .where("title", "=", title)
       .where("state", "<>", "done")
       .orderBy("createdAt")
@@ -190,21 +198,15 @@ export class SqlTasks extends Repo implements TasksRepo {
   }
 
   async notes(scope: ReadScope, taskIds: readonly string[]): Promise<TaskNote[]> {
-    const ids = uuidsOf(taskIds);
-    if (ids.length === 0) return [];
-    return notesIn(this.db, scope).where("taskId", "in", ids).orderBy("at").orderBy("id").execute();
+    const oldestFirst = notesAmong(this.db, scope, taskIds)?.orderBy("at").orderBy("id");
+    return (await oldestFirst?.execute()) ?? [];
   }
 
   async latestNotes(scope: ReadScope, taskIds: readonly string[]): Promise<TaskNote[]> {
-    const ids = uuidsOf(taskIds);
-    if (ids.length === 0) return [];
-    return notesIn(this.db, scope)
-      .where("taskId", "in", ids)
-      .distinctOn("taskId")
-      .orderBy("taskId")
-      .orderBy("at", "desc")
-      .orderBy("id", "desc")
-      .execute();
+    const newestOfEach = notesAmong(this.db, scope, taskIds)
+      ?.distinctOn("taskId")
+      .orderBy("taskId");
+    return (await newestOfEach?.orderBy("at", "desc").orderBy("id", "desc").execute()) ?? [];
   }
 
   async history(scope: ReadScope, taskId: string): Promise<TaskStep[]> {

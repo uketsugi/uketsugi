@@ -1,6 +1,7 @@
 import {
   isUuid,
   type Confirmation,
+  type EventKind,
   type Flag,
   type FlagKind,
   type NewFlag,
@@ -11,9 +12,20 @@ import {
   type StoredEvent,
   type UnitReview,
 } from "@uketsugi/core";
-import type { Selectable } from "kysely";
-import { actorColumns, actorOf, Repo, scoped, UnitRepo, uuidsOf } from "./codec.ts";
+import type { ExpressionBuilder, Selectable } from "kysely";
+import { actorColumns, actorOf, Repo, scoped, UnitRepo, uuidsOf, type Db } from "./codec.ts";
 import type { Database } from "./schema.ts";
+
+/** The open flags of these facts that the scope holds: what a reader is shown, and what a check or a redaction closes. */
+function openFlagsOf(scope: ReadScope, factIds: readonly string[]) {
+  return (eb: ExpressionBuilder<Database, "flags">) =>
+    eb.and([scoped(scope), eb("factId", "in", [...factIds]), eb("clearedAt", "is", null)]);
+}
+
+/** Closes these facts' open flags that the scope holds; a caller may narrow which. */
+export function closeFlags(db: Db, scope: ReadScope, factIds: readonly string[], at: Date) {
+  return db.updateTable("flags").set({ clearedAt: at }).where(openFlagsOf(scope, factIds));
+}
 
 function toFlag(row: Selectable<Database["flags"]>): Flag {
   const { raisedByPerson, raisedByJob, ...flag } = row;
@@ -25,9 +37,15 @@ function toRuling(row: Selectable<Database["rulings"]>): Ruling {
   return { ...ruling, decidedBy: actorOf(decidedByPerson, decidedByJob) };
 }
 
-export function toEvent(row: Selectable<Database["events"]>): StoredEvent {
+/**
+ * An event as its log holds it. The database keeps a payload as JSON of no particular shape: this
+ * is where it takes its kind's shape again, the one its writer was held to (`eventBy`).
+ */
+export function toEvent<K extends EventKind>(
+  row: Selectable<Database["events"]> & { kind: K },
+): StoredEvent<K> {
   const { actorPerson, actorJob, ...event } = row;
-  return { ...event, actor: actorOf(actorPerson, actorJob) };
+  return { ...event, actor: actorOf(actorPerson, actorJob) } as StoredEvent<K>;
 }
 
 /** Confirmations, flags and rulings inside a unit. */
@@ -78,13 +96,8 @@ export class SqlUnitReview extends UnitRepo implements UnitReview {
 
   async clearFlags(factId: string, kinds: readonly FlagKind[]): Promise<number> {
     if (kinds.length === 0) return 0;
-    const result = await this.db
-      .updateTable("flags")
-      .set({ clearedAt: this.target.at })
-      .where(scoped(this.scope))
-      .where("factId", "=", factId)
+    const result = await closeFlags(this.db, this.scope, [factId], this.target.at)
       .where("kind", "in", [...kinds])
-      .where("clearedAt", "is", null)
       .executeTakeFirst();
     return Number(result.numUpdatedRows);
   }
@@ -147,9 +160,7 @@ export class SqlReview extends Repo implements ReviewRepo {
     const rows = await this.db
       .selectFrom("flags")
       .selectAll()
-      .where(scoped(scope))
-      .where("factId", "in", ids)
-      .where("clearedAt", "is", null)
+      .where(openFlagsOf(scope, ids))
       .orderBy("at")
       .execute();
     return rows.map(toFlag);

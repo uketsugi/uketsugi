@@ -8,10 +8,10 @@
  */
 import type { Invitation, InviteRequest, PeopleList, TokenRevoked } from "@uketsugi/contracts";
 import type { Caller, Credential, CredentialKind } from "./domain.ts";
-import type { NewCredential } from "./store-port.ts";
+import type { NewCredential, PrincipalSeed } from "./store-port.ts";
 import { invalidInput, ToolFailure } from "./failure.ts";
 import { sha256Hex, toHex } from "./hash.ts";
-import { AuthError, type CorePorts, type Identity } from "./ports.ts";
+import { AuthError, type CorePorts, type Identity, type IdGen } from "./ports.ts";
 
 type DirectoryPorts = Pick<CorePorts, "store" | "clock" | "ids">;
 
@@ -20,15 +20,25 @@ const OWNER_SUBJECT = "local:owner";
 /** What the host's own person is called until they are named: on a host of one, nobody else reads it. */
 const UNNAMED = "you";
 
+/**
+ * The ids and names a new principal takes: a new organization's unless one is given, and the
+ * subject its identity provider knows it by, which may be made from the principal's own new id.
+ */
+export function principalSeed(
+  ids: IdGen,
+  person: { displayName: string; orgId?: string; subject: (principalId: string) => string },
+): PrincipalSeed {
+  const orgId = person.orgId ?? ids.uuid();
+  const principalId = ids.uuid();
+  const audienceId = ids.uuid();
+  const { displayName } = person;
+  return { subject: person.subject(principalId), displayName, orgId, principalId, audienceId };
+}
+
 /** The host's own person, created on first use with an organization of one and a private audience. */
 export function ensureOwner(ports: DirectoryPorts): Promise<Caller> {
-  return ports.store.directory.ensurePrincipal({
-    subject: OWNER_SUBJECT,
-    displayName: UNNAMED,
-    orgId: ports.ids.uuid(),
-    principalId: ports.ids.uuid(),
-    audienceId: ports.ids.uuid(),
-  });
+  const seed = principalSeed(ports.ids, { displayName: UNNAMED, subject: () => OWNER_SUBJECT });
+  return ports.store.directory.ensurePrincipal(seed);
 }
 
 /**
@@ -256,16 +266,14 @@ export async function invitePerson(
     };
   }
   await nameOperator(ports, operator, input.operator_name);
-  const holder = { orgId: operator.orgId, principalId: ports.ids.uuid() };
-  const seed = {
-    subject: `local:${holder.principalId}`,
+  const seed = principalSeed(ports.ids, {
     displayName: name,
-    ...holder,
-    audienceId: ports.ids.uuid(),
-  };
+    orgId: operator.orgId,
+    subject: (principalId) => `local:${principalId}`,
+  });
   const made = [
-    await mint(ports, holder, "agent", labelOf("agent", name, input.label)),
-    await mint(ports, holder, "person", labelOf("person", name, undefined)),
+    await mint(ports, seed, "agent", labelOf("agent", name, input.label)),
+    await mint(ports, seed, "person", labelOf("person", name, undefined)),
   ];
   const records = made.map(({ record }) => record);
   await directory.addPerson(seed, ports.ids.uuid(), records);

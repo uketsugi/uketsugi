@@ -12,7 +12,7 @@ import { isLive, type LiveFact } from "../facts/duplicates.ts";
 import { mergeDuplicates, MergeStale, notSetApart } from "../jobs/consolidate.ts";
 import type { CorePorts } from "../ports.ts";
 import { SEARCH_PROFILE } from "../search/fusion.ts";
-import { asPerson, holderOfFact } from "../sharing.ts";
+import { onHeldFacts } from "../sharing.ts";
 import { rankFacts } from "../usecases/facts/search.ts";
 import type { Reading } from "./candidates.ts";
 import { type Pair, type Verdict } from "./chores.ts";
@@ -131,13 +131,11 @@ export async function flagContradiction(
 ): Promise<number> {
   const { caller, project, session } = reading;
   const who = { caller, project: project.key, at: ports.clock.now(), by };
-  return asPerson(ports, who, async (place) => {
-    // The shared head first, if there is one: either fact may be there.
-    await place.shared();
+  return onHeldFacts(ports, who, pair, async (found) => {
     let raised = 0;
     for (const [factId, otherFact] of [pair, [pair[1], pair[0]]] as const) {
-      const held = await holderOfFact(place, factId);
-      if (held === null || !isLive(held.fact)) continue;
+      const held = found.get(factId);
+      if (held === undefined || !isLive(held.fact)) continue;
       const flag = { id: ports.ids.uuid(), factId, kind: "possible_contradiction" as const };
       if (!(await held.writes.review.raiseFlag({ ...flag, raisedBy: by }))) continue;
       const event = { actor: by, session: session.id };

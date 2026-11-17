@@ -22,6 +22,22 @@ import { forbidden } from "./failure.ts";
 import type { CorePorts } from "./ports.ts";
 import type { Unit, UnitWrites } from "./store-port.ts";
 
+/**
+ * Whether the caller has anyone to share with: false on a host with one person, where nothing is
+ * asked and everything is private. The one place that asks.
+ */
+export function canShare(caller: Caller): boolean {
+  return caller.sharedAudienceId !== null;
+}
+
+/** Who can see a record the reader can see: everyone on the server, or the reader alone. */
+export function audienceOf(
+  reader: Caller,
+  record: { readonly audienceId: string },
+): "private" | "shared" {
+  return record.audienceId === reader.sharedAudienceId ? "shared" : "private";
+}
+
 /** How a person treats a project, and whether that is their choice or the standing default. */
 export interface Standing {
   readonly treatment: Treatment;
@@ -31,7 +47,7 @@ export interface Standing {
 
 /** What a person's stored choice for a project means. Where there is nobody to share with, nothing is to be chosen. */
 export function standing(caller: Caller, choice: Treatment | null): Standing {
-  if (caller.sharedAudienceId === null) return { treatment: "private", chosen: true };
+  if (!canShare(caller)) return { treatment: "private", chosen: true };
   return { treatment: choice ?? "private", chosen: choice !== null };
 }
 
@@ -44,7 +60,7 @@ export async function standingOf(
   caller: Caller,
   project: string,
 ): Promise<Standing> {
-  if (caller.sharedAudienceId === null) return standing(caller, null);
+  if (!canShare(caller)) return standing(caller, null);
   return standing(
     caller,
     await ports.store.projects.choice(caller.orgId, caller.principalId, project),
@@ -70,6 +86,14 @@ export interface Place {
   shared(): Promise<UnitWrites | null>;
 }
 
+/** Whose write, in which project, at what instant, and who a move it makes is logged as (the person, by default). */
+export interface Who {
+  readonly caller: Caller;
+  readonly project: string;
+  readonly at: Date;
+  readonly by?: Actor;
+}
+
 /**
  * Runs a person's write in one project as one unit on their own audience, with their choice for
  * the project read inside it. Everything that decides where a record of theirs is goes through
@@ -77,7 +101,7 @@ export interface Place {
  */
 export function asPerson<T>(
   ports: Pick<CorePorts, "store">,
-  who: { caller: Caller; project: string; at: Date; by?: Actor },
+  who: Who,
   work: (place: Place) => Promise<T>,
 ): Promise<T> {
   const { caller, project, at, by = personActor(who.caller) } = who;
@@ -100,24 +124,36 @@ export async function sharedIfSharing(
   place: Place,
   project: string = place.project,
 ): Promise<UnitWrites | null> {
-  if (place.caller.sharedAudienceId === null) return null;
+  if (!canShare(place.caller)) return null;
   const treatment = project === place.project ? place.treatment : await place.own.choice(project);
   return treatment === "shared" ? place.shared() : null;
 }
 
 /**
- * Where a fact the caller may see is now: in their own audience or in the shared one. Null when
+ * Where a record the caller may see is now: in their own audience, or else in the shared one,
+ * whose head is taken only then. `read` finds the record in an audience's writes. Null when
  * neither holds it.
  */
-export async function holderOfFact(
+async function holderOf<T>(
   place: Place,
-  id: string,
-): Promise<{ writes: UnitWrites; fact: Fact } | null> {
-  const mine = await place.own.facts.get(id);
-  if (mine !== null) return { writes: place.own, fact: mine };
+  read: (writes: UnitWrites) => Promise<T | null>,
+): Promise<{ writes: UnitWrites; record: T } | null> {
+  const mine = await read(place.own);
+  if (mine !== null) return { writes: place.own, record: mine };
   const shared = await place.shared();
-  const theirs = shared === null ? null : await shared.facts.get(id);
-  return shared === null || theirs === null ? null : { writes: shared, fact: theirs };
+  const theirs = shared === null ? null : await read(shared);
+  return shared === null || theirs === null ? null : { writes: shared, record: theirs };
+}
+
+/** Where a fact the caller may see is now, and the writes of the audience that holds it. */
+export interface HeldFact {
+  readonly writes: UnitWrites;
+  readonly fact: Fact;
+}
+
+export async function holderOfFact(place: Place, id: string): Promise<HeldFact | null> {
+  const held = await holderOf(place, (writes) => writes.facts.get(id));
+  return held === null ? null : { writes: held.writes, fact: held.record };
 }
 
 /** The same for a task. */
@@ -125,11 +161,43 @@ export async function holderOfTask(
   place: Place,
   id: string,
 ): Promise<{ writes: UnitWrites; task: Task } | null> {
-  const mine = await place.own.tasks.get(id);
-  if (mine !== null) return { writes: place.own, task: mine };
-  const shared = await place.shared();
-  const theirs = shared === null ? null : await shared.tasks.get(id);
-  return shared === null || theirs === null ? null : { writes: shared, task: theirs };
+  const held = await holderOf(place, (writes) => writes.tasks.get(id));
+  return held === null ? null : { writes: held.writes, task: held.record };
+}
+
+/**
+ * Runs a write on some of a person's facts in one unit under their lock, each fact found again
+ * under it, where it is and as it stands by then: a move or a merge may have landed since it was
+ * read. `held` has the facts either audience holds, by id. The shared head, if there is one, is
+ * taken before any fact is looked for: the write may change rows that name shared facts, and a
+ * unit that took that head only later could wait on another person's withdrawal while it waits
+ * on this unit.
+ */
+export function onHeldFacts<T>(
+  ports: Pick<CorePorts, "store">,
+  who: Who,
+  ids: readonly string[],
+  work: (held: ReadonlyMap<string, HeldFact>, place: Place) => Promise<T>,
+): Promise<T> {
+  return asPerson(ports, who, async (place) => {
+    await place.shared();
+    const held = new Map<string, HeldFact>();
+    for (const id of ids) {
+      const found = await holderOfFact(place, id);
+      if (found !== null) held.set(id, found);
+    }
+    return work(held, place);
+  });
+}
+
+/** Which of these facts that the caller can see are the caller's own: what only their author may act on. */
+export async function ownFacts(
+  ports: Pick<CorePorts, "store">,
+  caller: Caller,
+  ids: readonly string[],
+): Promise<Set<string>> {
+  const facts = await ports.store.facts.getMany(scopeOf(caller), ids);
+  return new Set(facts.filter((fact) => fact.author === caller.principalId).map((fact) => fact.id));
 }
 
 /**
@@ -208,7 +276,7 @@ export async function privateBecause(
   fact: Fact,
 ): Promise<PrivateBecause | null> {
   const alone = fact.audienceId === reader.privateAudienceId;
-  if (reader.sharedAudienceId === null || !alone || !isLive(fact)) return null;
+  if (!canShare(reader) || !alone || !isLive(fact)) return null;
   if ((await standingOf(ports, reader, fact.project)).treatment !== "shared") return "project";
   const { facts } = ports.store;
   const mine = { orgId: reader.orgId, audienceIds: [reader.privateAudienceId] };
@@ -225,10 +293,10 @@ export async function seenBy(
   reader: Caller,
   id: string,
 ): Promise<{ audience?: "private" | "shared"; private_because?: PrivateBecause }> {
-  if (reader.sharedAudienceId === null) return {};
+  if (!canShare(reader)) return {};
   const fact = await ports.store.facts.get(scopeOf(reader), id);
   if (fact === null) return {};
-  if (fact.audienceId === reader.sharedAudienceId) return { audience: "shared" };
+  if (audienceOf(reader, fact) === "shared") return { audience: "shared" };
   const because = await privateBecause(ports, reader, fact);
   return { audience: "private", ...(because === null ? {} : { private_because: because }) };
 }

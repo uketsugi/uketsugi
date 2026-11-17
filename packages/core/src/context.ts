@@ -9,6 +9,7 @@ import type {
   ClaimedJob,
   EventDraft,
   EventKind,
+  EventPayloads,
   Fact,
   Project,
   ReadScope,
@@ -142,21 +143,21 @@ export async function leaveEmbedJob(
  * An event for a unit to append, by any actor: a person or a job. `payload` holds ids, codes and
  * hashes, never text. `session` is null when no tool call caused the event.
  */
-export function eventBy(
+export function eventBy<K extends EventKind>(
   by: { readonly actor: Actor; readonly session: string | null },
-  kind: EventKind,
+  kind: K,
   subject: string,
-  payload: Record<string, unknown> = {},
+  payload: EventPayloads[K],
 ): EventDraft {
   return { kind, subject, actor: by.actor, session: by.session, payload };
 }
 
 /** An event by the caller of a tool call, in the call's session. */
-export function eventOf(
+export function eventOf<K extends EventKind>(
   ctx: Pick<CallContext, "caller" | "session">,
-  kind: EventKind,
+  kind: K,
   subject: string,
-  payload: Record<string, unknown> = {},
+  payload: EventPayloads[K],
 ): EventDraft {
   return eventBy(
     { actor: personActor(ctx.caller), session: ctx.session.id },

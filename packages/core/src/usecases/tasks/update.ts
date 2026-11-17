@@ -12,7 +12,9 @@ import {
   leaseHeld,
   storable,
   personOf,
+  renewLease,
   taskEvent,
+  type TaskChange,
   taskIn,
   tokenHashOf,
   wholeView,
@@ -45,12 +47,14 @@ async function apply(
       text: ask.note,
     });
   }
-  const kind = state === "done" ? "TaskDone" : state === "claimed" ? "TaskNoted" : "TaskReleased";
-  const payload = {
-    ...(note === null ? {} : { note }),
-    ...(kind === "TaskReleased" ? { handed_off: state === "handed_off" } : {}),
-  };
-  await unit.append(taskEvent(ctx, kind, changed, payload));
+  const noted = note === null ? {} : { note };
+  const event: TaskChange =
+    state === "done"
+      ? { kind: "TaskDone", payload: noted }
+      : state === "claimed"
+        ? { kind: "TaskNoted", payload: noted }
+        : { kind: "TaskReleased", payload: { ...noted, handed_off: state === "handed_off" } };
+  await unit.append(taskEvent(ctx, changed, event));
   return changed;
 }
 
@@ -93,8 +97,7 @@ export async function updateTask(
           return { task: await apply(ports, ctx, unit, change), changed: true };
         }
         case "renew": {
-          const renewed = await unit.tasks.renew(task.id, leaseEnd(ports, at));
-          return { task: renewed ?? task, changed: false };
+          return { task: await renewLease(ports, unit, task, at), changed: false };
         }
         case "unchanged":
           return { task, changed: false };

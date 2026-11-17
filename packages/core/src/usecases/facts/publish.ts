@@ -87,8 +87,20 @@ async function correctOwn(
     created: false,
     citations: citations.map(citationView),
     supersedes: old.id,
+    ...(await resultTail(ports, ctx, draft, old.id)),
+  };
+}
+
+/** How a publish's result ends: what the scan replaced in the call's words, and who can see the fact. */
+async function resultTail(
+  ports: CorePorts,
+  ctx: CallContext,
+  draft: Pick<ReturnType<typeof scanned>, "replaced">,
+  id: string,
+) {
+  return {
     ...(draft.replaced.length === 0 ? {} : { redacted: draft.replaced }),
-    ...(await seenBy(ports, ctx.caller, old.id)),
+    ...(await seenBy(ports, ctx.caller, id)),
   };
 }
 
@@ -230,7 +242,6 @@ export async function publishFact(
     ...(similar.length === 0
       ? {}
       : { similar: similar.map((other) => ({ id: other.id, claim: other.claim })) }),
-    ...(draft.replaced.length === 0 ? {} : { redacted: draft.replaced }),
-    ...(await seenBy(ports, ctx.caller, fact.id)),
+    ...(await resultTail(ports, ctx, draft, fact.id)),
   };
 }

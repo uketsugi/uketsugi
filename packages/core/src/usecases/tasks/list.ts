@@ -24,10 +24,9 @@ export async function listTasks(
   const { status, limit } = params;
   const filter = { project: projectFilter(params.project, "tasks"), status, limit };
   const { matched, listed, viewer } = await readTasks(ports, { caller }, filter);
-  const { sharedAudienceId } = caller;
   return {
     tasks: listed.map(({ task, note }) =>
-      apiTask(task, note, viewer, { sharedAudienceId, whole: false }),
+      apiTask(task, note, viewer, { reader: caller, whole: false }),
     ),
     matched,
   };
@@ -42,6 +41,5 @@ export async function taskDetail(
   const task = await ports.store.tasks.get(scopeOf(caller), idOf(id));
   if (task === null) throw notFound("listed task", id);
   const { note, notes, history, viewer } = await readTask(ports, { caller }, task);
-  const { sharedAudienceId } = caller;
-  return { task: apiTask(task, note, viewer, { sharedAudienceId, whole: true }), notes, history };
+  return { task: apiTask(task, note, viewer, { reader: caller, whole: true }), notes, history };
 }

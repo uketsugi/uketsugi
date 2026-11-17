@@ -12,10 +12,10 @@ import type { Caller, Fact } from "../domain.ts";
 import { isLive } from "../facts/duplicates.ts";
 import { invalidInput, unsupported } from "../failure.ts";
 import type { CorePorts } from "../ports.ts";
-import { isPersonal, parseProject, resolveProject } from "../project.ts";
-import { asPerson, heldBack, type Place } from "../sharing.ts";
+import { isPersonal, projectNamed } from "../project.ts";
+import { asPerson, canShare, heldBack, type Place } from "../sharing.ts";
 import type { UnitWrites } from "../store-port.ts";
-import { share, withdraw } from "./facts/place.ts";
+import { move } from "./facts/place.ts";
 
 type MovePorts = Pick<CorePorts, "store" | "clock" | "ids" | "embedder">;
 
@@ -75,16 +75,28 @@ async function reconcile(
   };
   // A redacted fact stays where it was redacted while the project is shared: those who cited it
   // still open its stub.
-  const back = await withdraw(ports, place, shared, {
-    facts: sharing ? await heads(out, true) : out.map((chain) => chain.head),
-    tasks: tasks.out.filter((task) => !sharing || task.tracked),
-  });
+  const back = await move(
+    ports,
+    place,
+    shared,
+    {
+      facts: sharing ? await heads(out, true) : out.map((chain) => chain.head),
+      tasks: tasks.out.filter((task) => !sharing || task.tracked),
+    },
+    "withdrawn",
+  );
   if (!sharing) return back;
   const home = chainsOf(await place.own.facts.writtenBy(person, project));
-  const gone = await share(ports, place, shared, {
-    facts: await heads(home, false),
-    tasks: tasks.home.filter((task) => !task.tracked),
-  });
+  const gone = await move(
+    ports,
+    place,
+    shared,
+    {
+      facts: await heads(home, false),
+      tasks: tasks.home.filter((task) => !task.tracked),
+    },
+    "shared",
+  );
   return { facts: back.facts + gone.facts, tasks: back.tasks + gone.tasks };
 }
 
@@ -98,15 +110,14 @@ export async function chooseTreatment(
   caller: Caller,
   input: ProjectChoiceRequest,
 ): Promise<ProjectChoice> {
-  const ref = parseProject(input.project);
-  const project = ref === null ? null : await resolveProject(ports, caller, ref);
+  const project = await projectNamed(ports, caller, input.project);
   if (project === null) {
     throw invalidInput(
       `"${input.project}" does not name a project.`,
       "Choose one of your projects from the list.",
     );
   }
-  if (caller.sharedAudienceId === null) {
+  if (!canShare(caller)) {
     throw unsupported(
       "This server has one person, so there is nobody to share a project with.",
       "Whoever runs the server adds a person with `ukt invite <name>`; projects can be shared from then on.",

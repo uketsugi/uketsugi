@@ -16,15 +16,10 @@ import { liveHeads, nameOf, namesFor, scopeOf } from "../context.ts";
 import type { Caller, Fact } from "../domain.ts";
 import type { CorePorts } from "../ports.ts";
 import { footer } from "../render.ts";
-import type { HeldBack } from "../sharing.ts";
+import { audienceOf, canShare, type HeldBack } from "../sharing.ts";
 import { citationView } from "./citations.ts";
 
 type ReadPorts = Pick<CorePorts, "store">;
-
-/** Who can see a fact the reader can see: everyone on the server, or the reader alone. */
-function audienceOf(reader: Caller, fact: Fact): "private" | "shared" {
-  return fact.audienceId === reader.sharedAudienceId ? "shared" : "private";
-}
 
 /** The display id of each session a model wrote one of the facts from, by the session's id. */
 async function digestedFrom(
@@ -80,7 +75,7 @@ export async function factViews(
         trust: fact.status === "confirmed" ? ("reviewed" as const) : ("unreviewed" as const),
         author: nameOf(names, fact.author),
         ...(from === undefined ? {} : { from_session: from }),
-        ...(reader.sharedAudienceId === null ? {} : { audience: audienceOf(reader, fact) }),
+        ...(canShare(reader) ? { audience: audienceOf(reader, fact) } : {}),
         updated_at: fact.updatedAt.toISOString(),
         ...(checks.length === 0 ? {} : { confirmed_at: new Date(newest).toISOString() }),
         ...(head === undefined ? {} : { superseded_by: head }),
@@ -142,8 +137,13 @@ function byLine(fact: FactView): string {
   return `by ${fact.author}${model}`;
 }
 
+/** What a fact's flags add to its status, as a result and an export show it; nothing when it has none. */
+export function flaggedSuffix(flags: readonly string[]): string {
+  return flags.length === 0 ? "" : ` · flagged: ${flags.join(", ")}`;
+}
+
 function factLines(fact: FactView): string[] {
-  const flags = fact.flags.length === 0 ? "" : ` · flagged: ${fact.flags.join(", ")}`;
+  const flags = flaggedSuffix(fact.flags);
   const seen = fact.audience === undefined ? "" : ` · ${fact.audience}`;
   return [
     `${fact.id} · ${fact.claim}`,
@@ -206,32 +206,34 @@ function redactedLine(replaced: PublishFactResult["redacted"]): string[] {
 
 export function renderPublish(result: PublishFactResult): string {
   const verb = result.created ? "published" : "already published";
-  const head = `${result.supersedes === undefined ? verb : "corrected in place"} ${result.id}`;
+  const done = result.supersedes === undefined ? verb : "corrected in place";
+  const head = `${done} ${result.id} · ${result.status}`;
   const similar = (result.similar ?? []).map(
     (fact) =>
       `similar: ${fact.id} · ${fact.claim} (confirm that fact with update_fact if it says the same)`,
   );
-  return [
-    `${head} · ${result.status}`,
-    ...result.citations.map(
-      (citation, index) => `citation ${index + 1}: ${citationLine(citation)}`,
-    ),
-    ...similar,
-    ...redactedLine(result.redacted),
-    ...seenLine(result),
-    ...footer(result),
-  ].join("\n");
+  return [head, ...writtenLines(result, result.citations, similar)].join("\n");
 }
 
 export function renderUpdate(result: UpdateFactResult): string {
-  const flags = result.flags.length === 0 ? "" : ` · flagged: ${result.flags.join(", ")}`;
+  const head = `updated ${result.id} · ${result.status}${flaggedSuffix(result.flags)}`;
+  return [head, ...writtenLines(result, result.citations ?? [], [])].join("\n");
+}
+
+/**
+ * A write's result after its first line: its citations, numbered, the lines its tool adds, what
+ * the scan replaced, who can see the fact, and the footer.
+ */
+function writtenLines(
+  result: PublishFactResult | UpdateFactResult,
+  citations: readonly Citation[],
+  added: readonly string[],
+): string[] {
   return [
-    `updated ${result.id} · ${result.status}${flags}`,
-    ...(result.citations ?? []).map(
-      (citation, index) => `citation ${index + 1}: ${citationLine(citation)}`,
-    ),
+    ...citations.map((citation, index) => `citation ${index + 1}: ${citationLine(citation)}`),
+    ...added,
     ...redactedLine(result.redacted),
     ...seenLine(result),
     ...footer(result),
-  ].join("\n");
+  ];
 }

@@ -32,22 +32,22 @@ async function insertPrincipal(db: Db, seed: PrincipalSeed): Promise<void> {
     .returning("id")
     .executeTakeFirst();
   if (created === undefined) return;
-  await db
-    .insertInto("audiences")
-    .values({ orgId, id: audienceId, kind: "private", ownerId: principalId })
-    .execute();
-  await db.insertInto("audienceHead").values({ orgId, audienceId, lastSeq: 0 }).execute();
+  await insertAudience(db, { orgId, id: audienceId, kind: "private", ownerId: principalId });
 }
 
-/** An organization's shared audience with its head row, unless it has one: `audiences_one_shared`. */
-async function insertShared(db: Db, orgId: string, audienceId: string): Promise<void> {
+/**
+ * An audience with its head row, which every unit on it locks, unless an audience it would
+ * duplicate exists: an organization has one shared audience (`audiences_one_shared`).
+ */
+async function insertAudience(db: Db, audience: Selectable<Database["audiences"]>): Promise<void> {
   const created = await db
     .insertInto("audiences")
-    .values({ orgId, id: audienceId, kind: "shared", ownerId: null })
+    .values(audience)
     .onConflict((conflict) => conflict.doNothing())
     .returning("id")
     .executeTakeFirst();
   if (created === undefined) return;
+  const { orgId, id: audienceId } = audience;
   await db.insertInto("audienceHead").values({ orgId, audienceId, lastSeq: 0 }).execute();
 }
 
@@ -142,7 +142,8 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
   ): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
       await insertPrincipal(trx, seed);
-      await insertShared(trx, seed.orgId, sharedAudienceId);
+      const shared = { orgId: seed.orgId, id: sharedAudienceId, ownerId: null };
+      await insertAudience(trx, { ...shared, kind: "shared" });
       for (const credential of credentials) await insertCredential(trx, credential);
     });
   }
@@ -267,12 +268,12 @@ export class SqlProjects extends Repo implements ProjectsRepo {
     return (await this.of(orgId).where("key", "=", key).executeTakeFirst()) ?? null;
   }
 
-  async ensure(orgId: string, ref: ProjectRef, at: Date): Promise<Project> {
+  async ensure(orgId: string, ref: ProjectRef): Promise<Project> {
     const known = await this.find(orgId, ref.key);
     if (known !== null) return known;
     await this.db
       .insertInto("projects")
-      .values({ orgId, key: ref.key, kind: ref.kind, createdAt: at })
+      .values({ orgId, key: ref.key, kind: ref.kind })
       .onConflict((conflict) => conflict.columns(["orgId", "key"]).doNothing())
       .execute();
     const stored = await this.find(orgId, ref.key);

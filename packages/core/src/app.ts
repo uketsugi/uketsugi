@@ -22,7 +22,13 @@ import type { CallContext } from "./context.ts";
 import type { Caller, Session } from "./domain.ts";
 import { ToolFailure, internal } from "./failure.ts";
 import type { CorePorts, Identity } from "./ports.ts";
-import { isPersonal, parseProject, projectRefusal, resolveProject } from "./project.ts";
+import {
+  isPersonal,
+  parseProject,
+  projectNamed,
+  projectRefusal,
+  resolveProject,
+} from "./project.ts";
 import { createSessionInference, type ClientInfo, type SessionInference } from "./sessions.ts";
 import { standingOf } from "./sharing.ts";
 import { TOOL_TABLE, type Tool } from "./tools.ts";
@@ -50,17 +56,9 @@ export class UnknownToolError extends Error {
   }
 }
 
-/** What a transport needs of core: the tools, the caller of a request, and a call. */
-export interface App {
+/** What a transport needs of core: the tools, the caller of a request (the identity's), and a call. */
+export interface App extends Pick<Identity, "challenge" | "authenticate" | "signIn" | "current"> {
   readonly tools: readonly ToolDefinition[];
-  /** The `WWW-Authenticate` value of a 401. */
-  readonly challenge: string;
-  /** The caller of a bearer credential; rejects with `AuthError`. */
-  authenticate(bearer: string | undefined): Promise<Caller>;
-  /** The person a dashboard sign-in belongs to; rejects with `AuthError`. */
-  signIn(key: string): Promise<Caller>;
-  /** A caller who signed in earlier, as they stand now; null once their credential no longer holds. */
-  current(caller: Caller): Promise<Caller | null>;
   /** Runs one tool call. Rejects only with `UnknownToolError`. */
   callTool(
     caller: Caller,
@@ -214,8 +212,7 @@ export function createApp(ports: AppPorts, options: AppOptions = {}): App {
     signIn: (key) => ports.identity.signIn(key),
     current: (caller) => ports.identity.current(caller),
     async beginSession(caller, client, named) {
-      const ref = parseProject(named);
-      const project = ref === null ? null : await resolveProject(ports, caller, ref);
+      const project = await projectNamed(ports, caller, named);
       if (project === null) return null;
       const session = await pipeline.sessions.begin(caller, client, project.key);
       try {

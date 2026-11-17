@@ -6,7 +6,7 @@
 import { CITATION_WORD, type ApiFact } from "@uketsugi/contracts";
 import { scopeOf } from "../../context.ts";
 import type { Caller, Fact, ReadScope } from "../../domain.ts";
-import { apiFacts } from "../../facts/views.ts";
+import { apiFacts, flaggedSuffix } from "../../facts/views.ts";
 import type { CorePorts } from "../../ports.ts";
 import { parseProject } from "../../project.ts";
 import type { FactListQuery } from "../../store-port.ts";
@@ -39,7 +39,7 @@ export async function allFacts(
 
 /** A fact as a section of a project's document. */
 function section(fact: ApiFact): string {
-  const flags = fact.flags.length === 0 ? "" : ` · flagged: ${fact.flags.join(", ")}`;
+  const flags = flaggedSuffix(fact.flags);
   return [
     `## ${(fact.claim ?? "").replace(/\s+/g, " ").trim()}`,
     "",

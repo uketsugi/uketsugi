@@ -7,9 +7,9 @@ import { asPerson } from "../../sharing.ts";
 import {
   conflict,
   grantLease,
-  leaseEnd,
   leaseHeld,
   personOf,
+  renewLease,
   taskIn,
   tokenHashOf,
   viewerOf,
@@ -41,8 +41,8 @@ export async function claimTask(
       return { ...(await grantLease(ports, ctx, unit, task, decision.from, at)), renewed: false };
     }
     if (decision.kind === "renew") {
-      const renewed = await unit.tasks.renew(task.id, leaseEnd(ports, at));
-      return { task: renewed ?? task, token: input.lease?.trim() ?? "", renewed: true };
+      const renewed = await renewLease(ports, unit, task, at);
+      return { task: renewed, token: input.lease?.trim() ?? "", renewed: true };
     }
     return { task, refused: decision.kind };
   });

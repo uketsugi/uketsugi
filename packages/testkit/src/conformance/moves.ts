@@ -102,8 +102,8 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
     test("a person's choice for a project is theirs: kept, replaced, and listed with their own projects only", async () => {
       const { projects } = store;
       const [here, named] = [PROJECT, "me/notes"];
-      await projects.ensure(alice.orgId, { kind: "repository", key: here }, clock.now());
-      await projects.ensure(alice.orgId, { kind: "named", key: named }, clock.now());
+      await projects.ensure(alice.orgId, { kind: "repository", key: here });
+      await projects.ensure(alice.orgId, { kind: "named", key: named });
       const of = (who: Caller) => [who.orgId, who.principalId] as const;
       expect(await projects.choice(...of(alice), here)).toBeNull();
       await projects.choose(...of(alice), here, "shared");
@@ -234,7 +234,7 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
 
     test("a choice made in a unit is that person's, and commits or fails with the unit", async () => {
       const key = "github.com/acme/chosen-in-a-unit";
-      await store.projects.ensure(alice.orgId, { kind: "repository", key }, clock.now());
+      await store.projects.ensure(alice.orgId, { kind: "repository", key });
       const mine = [alice.orgId, alice.principalId, key] as const;
       await store.unit(asAlice(), async (unit) => {
         expect(await unit.choice(key)).toBeNull();

@@ -124,6 +124,22 @@ interface Section<T> {
   readonly shown: T[];
 }
 
+/**
+ * The leading items whose lines fit in `budget` under their heading, and the heading over them;
+ * nothing when none fits. The heading may name how many fit, so the room kept for it is that of
+ * the longest it can be.
+ */
+function section<T>(
+  items: readonly T[],
+  lines: readonly string[],
+  budget: number,
+  heading: { readonly longest: number; readonly over: (kept: number) => string },
+): Section<T> {
+  const kept = fitting(lines, budget - heading.longest - 1);
+  if (kept.length === 0) return { lines: [], shown: [] };
+  return { lines: [heading.over(kept.length), ...kept], shown: items.slice(0, kept.length) };
+}
+
 /** One group of tasks within a budget: its heading, then the tasks that fit. */
 function taskSection(
   name: string,
@@ -134,12 +150,10 @@ function taskSection(
   const views = tasks.slice(0, LIMITS.tasks).map((task) => briefTask(sources, task));
   // Each task reads as search_tasks shows it: its line, then its newest note and who wrote it.
   const lines = views.map((view) => `- ${taskLines(view, true).join("\n")}`);
-  const kept = fitting(lines, budget - counted(name, tasks.length, tasks.length + 1).length - 1);
-  if (kept.length === 0) return { lines: [], shown: [] };
-  return {
-    lines: [counted(name, kept.length, tasks.length), ...kept],
-    shown: views.slice(0, kept.length),
-  };
+  return section(views, lines, budget, {
+    longest: counted(name, tasks.length, tasks.length + 1).length,
+    over: (kept) => counted(name, kept, tasks.length),
+  });
 }
 
 /**
@@ -204,9 +218,10 @@ function factList(
   line: (fact: BriefFact) => string = factLine,
 ): Section<BriefFact> {
   const listed = facts.slice(0, LIMITS.published);
-  const kept = fitting(listed.map(line), budget - heading.length - 1);
-  if (kept.length === 0) return { lines: [], shown: [] };
-  return { lines: [heading, ...kept], shown: listed.slice(0, kept.length) };
+  return section(listed, listed.map(line), budget, {
+    longest: heading.length,
+    over: () => heading,
+  });
 }
 
 /** How the previous session ended: with a final note, or without one and what it left instead. */

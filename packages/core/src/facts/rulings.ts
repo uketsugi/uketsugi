@@ -18,14 +18,14 @@ import type {
   Actor,
   Caller,
   ClassedCitation,
-  EventKind,
+  EventPayloads,
   Fact,
   RulingDecision,
   StoredEvent,
 } from "../domain.ts";
 import { forbidden, notFound, unsupported } from "../failure.ts";
 import type { CorePorts } from "../ports.ts";
-import { asPerson, holderOfFact } from "../sharing.ts";
+import { onHeldFacts, ownFacts } from "../sharing.ts";
 import type { UnitWrites } from "../store-port.ts";
 import { settle } from "../usecases/facts/place.ts";
 import { citationHash, recite, type LiveFact } from "./duplicates.ts";
@@ -39,16 +39,12 @@ const RULINGS_SHOWN = 50;
 /** The longest chain followed: the schema lets none loop, and this ends the walk if one ever did. */
 const MAX_CHAIN = 100;
 
-/** What a merge's event holds, so that the merge can be undone: ids, a status and hashes. */
-export interface MergePayload {
-  readonly ruling: string;
-  /** The fact that survived. */
-  readonly by: string;
-  /** The merged fact's status before. */
-  readonly was: "confirmed" | "unconfirmed";
-  /** Hashes of the citations the survivor took from the merged fact. */
-  readonly taken: readonly string[];
-}
+type RulingKind = "FactSuperseded" | "RulingReverted";
+
+/** The event a ruling writes, but for the ruling's id, which `recordRuling` adds. */
+type RulingEvent = {
+  [K in RulingKind]: { kind: K; payload: Omit<EventPayloads[K], "ruling"> };
+}[RulingKind];
 
 /** Records one ruling in a unit, with the event that says what it did. */
 export async function recordRuling(
@@ -60,7 +56,7 @@ export async function recordRuling(
     by: Actor;
     reasons: readonly string[];
   },
-  event: { kind: EventKind; payload: Record<string, unknown> },
+  event: RulingEvent,
 ): Promise<void> {
   const { by, ...decided } = ruling;
   const payload = { ...event.payload, ruling: ruling.id };
@@ -82,13 +78,10 @@ export async function listRulings(
     decidedBy.kind === "person" ? [decidedBy.id] : [],
   );
   const about = [...new Set(rulings.map((ruling) => ruling.factId))];
-  const [names, facts] = await Promise.all([
+  const [names, own] = await Promise.all([
     namesFor(ports, caller, people),
-    ports.store.facts.getMany(scope, about),
+    ownFacts(ports, caller, about),
   ]);
-  const own = new Set(
-    facts.filter((fact) => fact.author === caller.principalId).map((fact) => fact.id),
-  );
   return {
     rulings: rulings.map(({ decidedBy, ...ruling }) => ({
       id: ruling.id,
@@ -105,15 +98,12 @@ export async function listRulings(
   };
 }
 
-function mergeOf(event: StoredEvent | undefined): MergePayload {
-  const payload = event?.payload as Partial<MergePayload> | undefined;
-  if (typeof payload?.by !== "string") throw new Error("a merge ruling's event names no survivor");
-  return {
-    ruling: payload.ruling ?? "",
-    by: payload.by,
-    was: payload.was === "confirmed" ? "confirmed" : "unconfirmed",
-    taken: payload.taken ?? [],
-  };
+/** A merge's event as it was written; a redaction may since have taken its list of hashes. */
+function mergeOf(
+  event: StoredEvent<"FactSuperseded"> | undefined,
+): EventPayloads["FactSuperseded"] {
+  if (event === undefined) throw new Error("a merge ruling's event names no survivor");
+  return { ...event.payload, taken: event.payload.taken ?? [] };
 }
 
 /** What one fact ahead of a merged fact holds because of that fact, and gives back. */
@@ -254,11 +244,9 @@ export async function revertRuling(
     );
   }
   const who = { caller, project: read.project, at: ports.clock.now() };
-  const reverted = await asPerson(ports, who, async (place) => {
-    // The shared head first, if there is one: what follows may write rows that name shared facts.
-    await place.shared();
-    const held = await holderOfFact(place, factId);
-    if (held === null || held.fact.claim === null) throw nothingToRestore();
+  const reverted = await onHeldFacts(ports, who, [factId], async (found, place) => {
+    const held = found.get(factId);
+    if (held === undefined || held.fact.claim === null) throw nothingToRestore();
     const { writes, fact: merged } = held;
     const id = ports.ids.uuid();
     if (!(await writes.review.revert(ruling.id, id))) return false;

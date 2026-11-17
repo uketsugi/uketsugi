@@ -312,7 +312,7 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
       const at = clock.now();
       const [here, hyphen] = [PROJECT, "github.com/acme-b/api"];
       for (const key of [here, hyphen]) {
-        await store.projects.ensure(bob.orgId, { kind: "repository", key }, at);
+        await store.projects.ensure(bob.orgId, { kind: "repository", key });
         await store.projects.choose(bob.orgId, bob.principalId, key, "private");
       }
       const listed = await store.projects.listOf(bob.orgId, bob.principalId);

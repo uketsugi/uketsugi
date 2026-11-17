@@ -4,14 +4,7 @@ import {
   type SearchFactsInput,
   type SearchFactsResult,
 } from "@uketsugi/contracts";
-import {
-  embedWithin,
-  idOf,
-  liveHeads,
-  scopeOf,
-  type CallContext,
-  type Outcome,
-} from "../../context.ts";
+import { embedWithin, liveHeads, scopeOf, type CallContext, type Outcome } from "../../context.ts";
 import type { Fact } from "../../domain.ts";
 import { factViews } from "../../facts/views.ts";
 import { invalidInput } from "../../failure.ts";
@@ -20,6 +13,7 @@ import type { SearchQuery } from "../../search-port.ts";
 import { ranksByFact, SEARCH_PROFILE } from "../../search/fusion.ts";
 import { confidenceOf, rankCandidates, type RankedCandidate } from "../../search/standing.ts";
 import { extractIdentifiers, normalizeText } from "../../text/analyze.ts";
+import { factInProject } from "./write.ts";
 
 type SearchOutcome = Outcome<SearchFactsResult>;
 
@@ -34,8 +28,8 @@ const EXPLAIN_LIMIT = 50;
 /** One fact by id, with the live fact at the head of its chain when it is superseded. */
 async function byId(ports: CorePorts, ctx: Asker, id: string): Promise<SearchOutcome> {
   const scope = scopeOf(ctx.caller);
-  const fact = await ports.store.facts.get(scope, idOf(id));
-  const chain = fact === null || fact.project !== ctx.project.key ? [] : [fact];
+  const fact = await factInProject(ports, ctx, id);
+  const chain = fact === null ? [] : [fact];
   const heads = await liveHeads(ports, scope, chain);
   const head = fact === null ? undefined : heads.get(fact.id);
   const live = head === undefined ? null : await ports.store.facts.get(scope, head);

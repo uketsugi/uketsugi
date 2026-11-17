@@ -22,9 +22,9 @@ import {
   takeCitations,
   type LiveFact,
 } from "../facts/duplicates.ts";
-import { MERGE, recordRuling, type MergePayload } from "../facts/rulings.ts";
+import { MERGE, recordRuling } from "../facts/rulings.ts";
 import type { CorePorts } from "../ports.ts";
-import { asPerson, holderOfFact } from "../sharing.ts";
+import { onHeldFacts } from "../sharing.ts";
 import type { UnitWrites } from "../store-port.ts";
 import { settle } from "../usecases/facts/place.ts";
 
@@ -103,9 +103,9 @@ async function merge(
     const took = takeCitations(citations, member, ids);
     citations = took.citations;
     await unit.facts.supersede(member.id, survivor.id);
-    const payload: Omit<MergePayload, "ruling"> = {
+    const payload = {
       by: survivor.id,
-      was: member.status === "confirmed" ? "confirmed" : "unconfirmed",
+      was: member.status === "confirmed" ? ("confirmed" as const) : ("unconfirmed" as const),
       taken: await Promise.all(took.taken.map(citationHash)),
     };
     const decided = { decision: MERGE, factId: member.id, by: ruling.by };
@@ -140,11 +140,10 @@ export async function mergeDuplicates(
   const caller = await ports.store.directory.callerOf(survivor.orgId, survivor.author);
   if (caller === null) throw new Error("the author of a fact is not a person of this server");
   const who = { caller, project: survivor.project, at: ports.clock.now(), by: ruling.by };
-  await asPerson(ports, who, async (place) => {
-    // The shared head first, if there is one: the survivor may take citations of shared facts.
-    await place.shared();
-    const held = await holderOfFact(place, survivor.id);
-    if (held === null) throw new MergeStale();
+  // The survivor may take citations of shared facts.
+  await onHeldFacts(ports, who, [survivor.id], async (found, place) => {
+    const held = found.get(survivor.id);
+    if (held === undefined) throw new MergeStale();
     await merge(ports, held.writes, { survivor, members, ruling }, place.at);
     await settle(ports, place, [survivor.id]);
   });

@@ -5,10 +5,10 @@
  */
 import { briefSources } from "../brief-sources.ts";
 import { composeBrief } from "../brief.ts";
-import { scopeOf } from "../context.ts";
 import type { CorePorts } from "../ports.ts";
 import { headOf } from "../render.ts";
 import { newSession } from "../sessions.ts";
+import { ownFacts } from "../sharing.ts";
 import type { Reading } from "./candidates.ts";
 import { chooseChore, chosenIn } from "./chores.ts";
 
@@ -38,10 +38,7 @@ export async function choosePicks(
   const { brief } = composeBrief(sources);
   if (brief.facts.length >= sources.factCount) return null;
   const pool = sources.facts.map((fact) => fact.id);
-  const stored = await ports.store.facts.getMany(scopeOf(caller), pool);
-  const own = new Set(
-    stored.filter((fact) => fact.author === caller.principalId).map((fact) => fact.id),
-  );
+  const own = await ownFacts(ports, caller, pool);
   const candidates = sources.facts.filter((fact) => own.has(fact.id));
   if (candidates.length < 2) return null;
   const chore = chooseChore(

@@ -229,6 +229,12 @@ async function judgeAndWrite(
   const near = (subject: number, verdict: "same" | "contradicts") =>
     heldAs(comparisons, verdicts, subject, verdict);
   const done: Written = { written: 0, merged: 0, flagged: 0 };
+  /** Flags the fact against each recorded fact the model said subject `index` contradicts. */
+  const flagContradicted = async (index: number, factId: string): Promise<void> => {
+    for (const other of near(index, "contradicts")) {
+      done.flagged += await flagContradiction(ports, reading, by, [factId, other.id]);
+    }
+  };
   const writer = {
     caller: reading.caller,
     project: reading.project.key,
@@ -244,16 +250,12 @@ async function judgeAndWrite(
       continue;
     }
     done.written += 1;
-    for (const other of near(index, "contradicts")) {
-      done.flagged += await flagContradiction(ports, reading, by, [stored.fact.id, other.id]);
-    }
+    await flagContradicted(index, stored.fact.id);
   }
   for (const [offset, fact] of published.entries()) {
     const index = drafts.length + offset;
     done.merged += await mergeSame(ports, reading, by, fact, near(index, "same"));
-    for (const other of near(index, "contradicts")) {
-      done.flagged += await flagContradiction(ports, reading, by, [fact.id, other.id]);
-    }
+    await flagContradicted(index, fact.id);
   }
   return done;
 }
@@ -361,11 +363,12 @@ async function read(run: Run): Promise<DigestReport> {
     day: { used: used + run.spent.input + run.spent.output, limit },
     ...more,
   });
-  const later = new Date(startedAt.getTime() + BUDGET_WAIT_MS);
-  if (asking && used + estimatedCost(pieces, room) + RESERVE_TOKENS > limit) {
-    await jobs.armDigest(session.orgId, session.id, later);
+  /** The reading waits as a whole, for a later one when the day's budget has room again. */
+  const waitWhole = async (): Promise<DigestReport> => {
+    await jobs.armDigest(session.orgId, session.id, new Date(startedAt.getTime() + BUDGET_WAIT_MS));
     return report({ waited: true });
-  }
+  };
+  if (asking && used + estimatedCost(pieces, room) + RESERVE_TOKENS > limit) return waitWhole();
   const recorded = published.map((fact) => fact.claim);
   // Neither the session's limit nor the day's budget is passed, by what the provider counts.
   const {
@@ -377,10 +380,7 @@ async function read(run: Run): Promise<DigestReport> {
     : { drafts: [], read: 0, stoppedBy: null };
   const turnsRead = pieces.slice(0, piecesRead).flat().length;
   // The day's budget ran out before anything was read: the reading waits as a whole, as above.
-  if (stoppedBy === "day" && turnsRead === 0) {
-    await jobs.armDigest(session.orgId, session.id, later);
-    return report({ waited: true });
-  }
+  if (stoppedBy === "day" && turnsRead === 0) return waitWhole();
   const written = asking ? await judgeAndWrite(run, drafts, published, refused) : nothing;
   const stopped = said.at(-1)?.answer ?? session.note?.text ?? "";
   const picks = asking

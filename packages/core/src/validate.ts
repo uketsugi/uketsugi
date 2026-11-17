@@ -35,7 +35,8 @@ const bodies = compileAll<ApiRequests>(new Ajv(SETTINGS), requests);
 /** A query string holds text only, so a number arrives as its digits. */
 const queries = compileAll<ApiRequests>(new Ajv({ ...SETTINGS, coerceTypes: true }), requests);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/** Whether a value that arrived as JSON is an object with keys: not null, and not a list. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

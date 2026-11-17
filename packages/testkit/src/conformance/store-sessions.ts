@@ -44,8 +44,8 @@ export function sessionCases(fixture: SessionFixture): void {
       ...UNREAD,
     };
     const ref = { kind: "repository" as const, key: PROJECT };
-    const first = await projects.ensure(person.orgId, ref, clock.now());
-    expect(await projects.ensure(person.orgId, ref, new Date(0))).toEqual(first);
+    const first = await projects.ensure(person.orgId, ref);
+    expect(await projects.ensure(person.orgId, ref)).toEqual(first);
     await sessions.open(session);
     expect(await sessions.latestOf(key)).toEqual(session);
     clock.advance(60_000);

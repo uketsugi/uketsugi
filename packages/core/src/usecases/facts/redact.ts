@@ -3,7 +3,7 @@ import type { Caller } from "../../domain.ts";
 import { giveBackOf } from "../../facts/rulings.ts";
 import { forbidden, notFound } from "../../failure.ts";
 import type { CorePorts } from "../../ports.ts";
-import { asPerson, holderOfFact } from "../../sharing.ts";
+import { onHeldFacts } from "../../sharing.ts";
 import { settle } from "./place.ts";
 import { flagCiting } from "./write.ts";
 
@@ -34,16 +34,13 @@ export async function redactFact(
   }
   const by = { actor: personActor(caller), session: null };
   const who = { caller, project: fact.project, at: ports.clock.now() };
-  await asPerson(ports, who, async (place) => {
-    // The shared head first, if there is one: what follows may write rows that name shared facts.
-    await place.shared();
-    // Found again under the lock: the fact may have changed audience, or been merged, since it was read.
-    const held = await holderOfFact(place, fact.id);
-    if (held === null) throw notFound("listed fact", input.id);
+  await onHeldFacts(ports, who, [fact.id], async (found, place) => {
+    const held = found.get(fact.id);
+    if (held === undefined) throw notFound("listed fact", input.id);
     const { writes } = held;
     const owed = await giveBackOf(writes, held.fact);
     for (const id of await writes.facts.redact(fact.id)) {
-      await writes.append(eventBy(by, "FactRedacted", id));
+      await writes.append(eventBy(by, "FactRedacted", id, {}));
       await flagCiting(ports, writes, null, id);
     }
     await owed.apply(ports, place.at);

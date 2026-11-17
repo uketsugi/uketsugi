@@ -170,6 +170,16 @@ export async function flagCiting(
   }
 }
 
+/** The fact an id names, where the caller can see it and it is of the call's project; null otherwise. */
+export async function factInProject(
+  ports: Pick<CorePorts, "store">,
+  ctx: Pick<CallContext, "caller" | "project">,
+  id: string,
+): Promise<Fact | null> {
+  const fact = await ports.store.facts.get(scopeOf(ctx.caller), idOf(id));
+  return fact === null || fact.project !== ctx.project.key ? null : fact;
+}
+
 /**
  * The fact a write names: one with its text, in the call's project, that nothing has replaced.
  * Each tool words the two refusals its own way: `absent` for a fact the caller cannot see here,
@@ -181,12 +191,9 @@ export async function liveFactOf(
   id: string,
   refusals: { absent(): ToolFailure; replaced(fact: Fact, head: string): ToolFailure },
 ): Promise<LiveFact> {
-  const scope = scopeOf(ctx.caller);
-  const fact = await ports.store.facts.get(scope, idOf(id));
-  if (fact === null || fact.claim === null || fact.project !== ctx.project.key) {
-    throw refusals.absent();
-  }
-  const head = (await liveHeads(ports, scope, [fact])).get(fact.id);
+  const fact = await factInProject(ports, ctx, id);
+  if (fact === null || fact.claim === null) throw refusals.absent();
+  const head = (await liveHeads(ports, scopeOf(ctx.caller), [fact])).get(fact.id);
   if (head !== undefined) throw refusals.replaced(fact, head);
   return { ...fact, claim: fact.claim };
 }

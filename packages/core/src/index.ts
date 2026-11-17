@@ -34,6 +34,7 @@ export {
   invitePerson,
   issueToken,
   listPeople,
+  principalSeed,
   replaceTokens,
   revokeToken,
   RevokedTokenError,

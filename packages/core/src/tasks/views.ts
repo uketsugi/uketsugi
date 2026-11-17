@@ -14,8 +14,9 @@ import type {
   UpdateTaskResult,
 } from "@uketsugi/contracts";
 import { nameOf } from "../context.ts";
-import type { Session, Task, TaskLease, TaskNote } from "../domain.ts";
+import type { Caller, Session, Task, TaskLease, TaskNote } from "../domain.ts";
 import { footer, headOf } from "../render.ts";
+import { audienceOf } from "../sharing.ts";
 import type { TaskStep } from "../store-port.ts";
 import { leaseStanding } from "./lease.ts";
 
@@ -90,19 +91,19 @@ export function taskView(
 }
 
 /**
- * A task as the dashboard shows it: the same view, with its project, when it was published and
- * whether it is in `sharedAudienceId`, the audience everyone on the server sees.
+ * A task as the dashboard shows it to its reader: the same view, with its project, when it was
+ * published and who can see it.
  */
 export function apiTask(
   task: Task,
   note: TaskNote | null,
   viewer: Viewer,
-  shown: { readonly sharedAudienceId: string | null; readonly whole: boolean },
+  shown: { readonly reader: Caller; readonly whole: boolean },
 ): ApiTask {
   return {
     ...taskView(task, note, viewer, shown.whole),
     project: task.project,
-    audience: task.audienceId === shown.sharedAudienceId ? "shared" : "private",
+    audience: audienceOf(shown.reader, task),
     created_at: task.createdAt.toISOString(),
   };
 }

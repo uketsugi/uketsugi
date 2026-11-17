@@ -32,7 +32,9 @@ async function insert(
   });
   const task = await unit.tasks.get(id);
   if (task === null) throw new Error("a published task was not readable inside its own unit");
-  await unit.append(taskEvent(ctx, "TaskPublished", task, { tracked: task.tracked }));
+  await unit.append(
+    taskEvent(ctx, task, { kind: "TaskPublished", payload: { tracked: task.tracked } }),
+  );
   return task;
 }
 

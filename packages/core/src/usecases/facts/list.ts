@@ -89,7 +89,7 @@ export async function factDetail(
   if (view === undefined) throw notFound("listed fact", id);
   const people = (actor: Actor) => (actor.kind === "person" ? [actor.id] : []);
   // A move is written in the log it leaves and in the log it joins: its author reads both, once.
-  const shown = events.filter((event) => event.payload.left !== true);
+  const shown = events.filter((event) => !("left" in event.payload && event.payload.left));
   const names = await namesFor(ports, caller, [
     ...confirmations.map((entry) => entry.person),
     ...shown.flatMap((event) => people(event.actor)),

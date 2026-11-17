@@ -30,7 +30,7 @@ export function describeModelStepConformance(name: string, harness: StoreHarness
 
     /** A session of a person's in a project, opened now. */
     async function open(caller: Caller, project = PROJECT): Promise<Session> {
-      await store.projects.ensure(caller.orgId, { kind: "repository", key: project }, clock.now());
+      await store.projects.ensure(caller.orgId, { kind: "repository", key: project });
       const who = { orgId: caller.orgId, principalId: caller.principalId };
       const key = { ...who, clientName: "claude-code", conversationId: ids.uuid(), project };
       const session = newSession(key, ids.uuid(), "2.1.325", clock.now());

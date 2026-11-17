@@ -13,7 +13,7 @@
  * - A live lease is taken from its holder only by the same person asking to take it over.
  * - A change that was already applied changes nothing, whichever version it names.
  */
-import type { Task, TaskNote, TaskState } from "../domain.ts";
+import type { ClaimedFrom, Task, TaskNote, TaskState } from "../domain.ts";
 
 /** How long a lease lasts when the server is not told otherwise: fifteen minutes. */
 export const DEFAULT_TASK_LEASE_MS = 15 * 60 * 1000;
@@ -44,7 +44,7 @@ export interface ClaimAsk {
 
 export type ClaimDecision =
   /** A new lease with a new token. `from` is where the task stood. */
-  | { readonly kind: "grant"; readonly from: "open" | "handed_off" | "lapsed" | "take_over" }
+  | { readonly kind: "grant"; readonly from: ClaimedFrom }
   /** The caller passed the lease the task holds: the same lease, with a later end. */
   | { readonly kind: "renew" }
   /** A live lease that is not the caller's. */

@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readdir, rename, rm, utimes, writeFile } from "node:fs/
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { scopeOf, type Fact } from "@uketsugi/core";
-import { sql } from "kysely";
+import { PostgresDialect, sql } from "kysely";
+import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { keepUpgradeSnapshot, lockDataDir } from "../src/data-dir.ts";
 import { startEngine, upgrade, type Engine } from "../src/embedded.ts";
@@ -13,12 +14,56 @@ import {
   restoreEmbeddedStore,
   type EmbeddedStore,
 } from "../src/index.ts";
+import { connect, type Db } from "../src/codec.ts";
 import { migrate, migrationState, MIGRATIONS } from "../src/migrations.ts";
-import { fakeUuid } from "@uketsugi/testkit";
+import { SqlReview } from "../src/review.ts";
+import { createTestDatabase, fakeUuid, onTestServer, TEST_POSTGRES_URL } from "@uketsugi/testkit";
 import { publishSample, sampleOwner } from "./support/sample.ts";
 
 const root = await mkdtemp(join(tmpdir(), "uketsugi-hosting-"));
 afterAll(() => rm(root, { recursive: true, force: true }));
+
+/** Each released version, and the first migration name it did not have. */
+const RELEASES = [
+  ["0.1.0", "0002"],
+  ["0.2.0", "0003"],
+] as const;
+
+/**
+ * Migrates `db` to the migrations a release had, writes a project, a fact and two flags raised
+ * in the reverse of their ids' order, migrates to the newest, and checks that every row is
+ * there, that a project carries no date, and that the flags still come back in the order raised.
+ */
+async function upgradeKeepsRows(db: Db, below: string): Promise<void> {
+  const released = Object.entries(MIGRATIONS).filter(([name]) => name < below);
+  await migrate(db, Object.fromEntries(released));
+  const [org, audience, fact] = [fakeUuid(0, 1), fakeUuid(0, 3), fakeUuid(1, 1)];
+  const [later, earlier] = [fakeUuid(2, 1), fakeUuid(2, 2)];
+  await sql`insert into projects (org_id, key, kind, created_at)
+    values (${org}, 'github.com/acme/api', 'repository', now())`.execute(db);
+  await sql`
+    insert into facts (org_id, id, audience_id, project, claim, status, author,
+                       content_hash, claim_hash, created_at, updated_at)
+    values (${org}, ${fact}, ${audience}, 'github.com/acme/api', 'Kept', 'unconfirmed',
+            ${fakeUuid(0, 2)}, '\\x00', '\\x00', now(), now())`.execute(db);
+  await sql`
+    insert into flags (org_id, id, audience_id, fact_id, kind, raised_by_job, at)
+    values (${org}, ${earlier}, ${audience}, ${fact}, 'marked_stale', 'consolidate',
+            '2026-01-01T00:00:00Z'),
+           (${org}, ${later}, ${audience}, ${fact}, 'possible_duplicate', 'consolidate',
+            '2026-01-02T00:00:00Z')`.execute(db);
+  await migrate(db);
+
+  expect(await migrationState(db)).toMatchObject({ pending: [] });
+  expect(await db.selectFrom("projects").selectAll().execute()).toEqual([
+    { orgId: org, key: "github.com/acme/api", kind: "repository" },
+  ]);
+  expect(await db.selectFrom("facts").select(["id", "claim"]).execute()).toEqual([
+    { id: fact, claim: "Kept" },
+  ]);
+  const flags = await new SqlReview(db).openFlags({ orgId: org, audienceIds: [audience] }, [fact]);
+  expect(flags.map((flag) => flag.id)).toEqual([earlier, later]);
+}
 
 describe("backup and restore", () => {
   const [from, to, file] = [join(root, "from"), join(root, "to"), join(root, "out", "one.tgz")];
@@ -124,7 +169,7 @@ describe("a store that a newer version opens", () => {
   /** What a later version adds to today's migrations: one that makes a table. */
   const newer = {
     ...MIGRATIONS,
-    "0004_next": {
+    "0005_next": {
       async up(db: Parameters<typeof migrate>[0]) {
         await sql`create table next_thing (id int)`.execute(db);
       },
@@ -146,18 +191,18 @@ describe("a store that a newer version opens", () => {
     expect(await migrationState(engine.db, newer)).toMatchObject({ pending: [] });
     expect(await engine.db.selectFrom("facts").select("id").execute()).toEqual([{ id: kept }]);
     await engine.close();
-    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0004_next.tgz"]);
+    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0005_next.tgz"]);
   });
 
   test("keeps the snapshots of its three newest upgrades, and every file that is not one", async () => {
     const backups = join(dataDir, BACKUPS_DIR);
     await writeFile(join(backups, "uketsugi-20260101T000000Z.tgz"), "a person's own backup");
-    for (const name of ["0005_more", "0006_again", "0007_last"])
+    for (const name of ["0006_more", "0007_again", "0008_last"])
       await keepUpgradeSnapshot(dataDir, name, new Blob(["as it was"]));
     expect((await readdir(backups)).sort()).toEqual([
-      "before-0005_more.tgz",
-      "before-0006_again.tgz",
-      "before-0007_last.tgz",
+      "before-0006_more.tgz",
+      "before-0007_again.tgz",
+      "before-0008_last.tgz",
       "uketsugi-20260101T000000Z.tgz",
     ]);
   });
@@ -210,6 +255,12 @@ describe("on an engine of its own, in memory", () => {
     expect(await engine.db.selectFrom("sessionTurns").selectAll().execute()).toEqual([]);
   });
 
+  for (const [release, below] of RELEASES) {
+    test(`a store that ${release} made, holding a project, a fact and two flags, keeps them through every later migration`, async () => {
+      await upgradeKeepsRows(engine.db, below);
+    });
+  }
+
   test("a store made by a build from before the first release is refused by name, in words", async () => {
     // Before 0.1.0 the one migration was edited in place, under a new name each time. A store one
     // of those edits made is refused, not opened to fail later on a column it lacks.
@@ -218,4 +269,22 @@ describe("on an engine of its own, in memory", () => {
       /^This store was made by another build of uketsugi, with a schema this build cannot read .+0001_init is missing.+ Nothing was changed/,
     );
   });
+});
+
+describe.runIf(TEST_POSTGRES_URL !== "")("on a database of its own, on a server", () => {
+  for (const [release, below] of RELEASES) {
+    test(`a store that ${release} made, holding a project, a fact and two flags, keeps them through every later migration`, async () => {
+      const database = await createTestDatabase();
+      await onTestServer("create extension vector; create extension pg_trgm", database.name);
+      const db = connect(
+        new PostgresDialect({ pool: new pg.Pool({ connectionString: database.url }) }),
+      );
+      try {
+        await upgradeKeepsRows(db, below);
+      } finally {
+        await db.destroy();
+        await database.drop();
+      }
+    });
+  }
 });

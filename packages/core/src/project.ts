@@ -3,7 +3,7 @@ import { scopeOf } from "./context.ts";
 import type { Caller, PersonProject, Project, ProjectRef } from "./domain.ts";
 import { invalidInput, projectRequired, ToolFailure } from "./failure.ts";
 import type { CorePorts } from "./ports.ts";
-import { standing } from "./sharing.ts";
+import { canShare, standing } from "./sharing.ts";
 
 const REPOSITORY = /^[a-z0-9._-]+\.[a-z0-9._-]+(\/[a-z0-9._-]+){2}$/;
 const NAMED = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
@@ -80,9 +80,19 @@ export async function resolveProject(
   ref: ProjectRef,
 ): Promise<Project | null> {
   const { projects } = ports.store;
-  if (ref.kind === "repository") return projects.ensure(caller.orgId, ref, ports.clock.now());
+  if (ref.kind === "repository") return projects.ensure(caller.orgId, ref);
   const made = await projects.choice(caller.orgId, caller.principalId, ref.key);
   return made === null ? null : projects.find(caller.orgId, ref.key);
+}
+
+/** The project a piece of text names, as `parseProject` reads it and `resolveProject` finds it; null for none. */
+export async function projectNamed(
+  ports: ProjectPorts,
+  caller: Caller,
+  text: unknown,
+): Promise<Project | null> {
+  const ref = parseProject(text);
+  return ref === null ? null : resolveProject(ports, caller, ref);
 }
 
 /** The person's named projects. */
@@ -156,7 +166,7 @@ export async function createNamedProject(
     });
   }
   const displayName = input.name?.trim() || null;
-  const project = await projects.ensure(caller.orgId, ref, ports.clock.now());
+  const project = await projects.ensure(caller.orgId, ref);
   // Its maker's choice is what makes it one of their projects before any session names it.
   const { orgId, principalId } = caller;
   await projects.choose(orgId, principalId, project.key, "private", displayName ?? undefined);
@@ -187,5 +197,5 @@ export async function listProjects(
   const rows = (await projects.listOf(caller.orgId, caller.principalId)).map(async (project) =>
     apiProject(caller, project, await facts.count(scope, project.key)),
   );
-  return { projects: await Promise.all(rows), sharing: caller.sharedAudienceId !== null };
+  return { projects: await Promise.all(rows), sharing: canShare(caller) };
 }

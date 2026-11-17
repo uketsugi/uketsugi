@@ -28,6 +28,7 @@ import type {
   Credential,
   CredentialKind,
   EventDraft,
+  EventKind,
   Fact,
   FactContent,
   Flag,
@@ -111,7 +112,7 @@ export interface UnitFacts {
    * it took, are read from, inside the unit that acts on them. None for a fact this audience does
    * not hold.
    */
-  merges(id: string): Promise<StoredEvent[]>;
+  merges(id: string): Promise<StoredEvent<"FactSuperseded">[]>;
   /** The author's live fact in this project with this normalized-claim hash, if any: how a repeated publish is found. */
   findByClaimHash(author: string, project: string, claimHash: string): Promise<Fact | null>;
   /** Inserts the fact as `unconfirmed`, with its search columns, its identifiers and the facts it cites. */
@@ -290,7 +291,9 @@ export interface TaskListQuery {
 }
 
 /** One step of a task's life as the audience's log holds it: ids and codes, never text. */
-export type TaskStep = Pick<StoredEvent, "seq" | "at" | "kind" | "actor" | "session" | "payload">;
+export type TaskStep = {
+  [K in EventKind]: Pick<StoredEvent<K>, "seq" | "at" | "kind" | "actor" | "session" | "payload">;
+}[EventKind];
 
 /** Tasks outside a unit. Whether a lease has expired is the reader's to judge against the clock. */
 export interface TasksRepo {
@@ -469,7 +472,7 @@ export interface SessionsRepo {
 export interface ProjectsRepo {
   find(orgId: string, key: string): Promise<Project | null>;
   /** The project with this key, created if it does not exist yet. */
-  ensure(orgId: string, ref: ProjectRef, at: Date): Promise<Project>;
+  ensure(orgId: string, ref: ProjectRef): Promise<Project>;
   /**
    * The projects one person works in, by key: those a session of theirs made a call in or left a
    * note in, and those they made a choice for. A project where a session only began is not one
@@ -502,15 +505,9 @@ export interface PrincipalSeed {
   readonly audienceId: string;
 }
 
-/** A credential to store: its record and the SHA-256 of its token, in hex. */
-export interface NewCredential {
-  readonly orgId: string;
-  readonly id: string;
-  readonly principalId: string;
-  readonly kind: CredentialKind;
-  readonly label: string;
+/** A credential to store: its record as made, and the SHA-256 of its token, in hex. */
+export interface NewCredential extends Omit<Credential, "lastUsedAt" | "revokedAt"> {
   readonly tokenHash: string;
-  readonly createdAt: Date;
 }
 
 /** Principals, their credentials and their audiences. */

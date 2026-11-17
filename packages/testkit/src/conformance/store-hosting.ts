@@ -139,7 +139,7 @@ export function hostingCases(fixture: HostingFixture): void {
     const at = fixture.now();
     const wider = { added: "by a later version of the record" };
     const project = "github.com/acme/wider";
-    await store.projects.ensure(owner.orgId, { kind: "repository", key: project, ...wider }, at);
+    await store.projects.ensure(owner.orgId, { kind: "repository", key: project, ...wider });
     const session = {
       orgId: owner.orgId,
       principalId: owner.principalId,

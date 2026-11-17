@@ -240,7 +240,81 @@ export const EVENT_KINDS = [
 /** What happened to a record. An event holds ids, kinds and hashes, never text. */
 export type EventKind = (typeof EVENT_KINDS)[number];
 
-/** An event to append in a unit; the unit gives it the next sequence of its audience. */
+/** Where a task stood when a new lease was granted on it. */
+export type ClaimedFrom = "open" | "handed_off" | "lapsed" | "take_over";
+
+/** A move's payload. The entry in the log a record leaves says so; the one in the log it joins is empty. */
+type Moved = { readonly left?: true };
+
+/** A task's change: the version it made. */
+type Versioned = { readonly version: number };
+
+/** A change under a task's lease: the version it made, and the note the call added, if any. */
+type Noted = Versioned & { readonly note?: string };
+
+/** What each kind of event holds: ids, codes and hashes, never text. */
+export interface EventPayloads {
+  readonly FactPublished: {
+    readonly id: string;
+    readonly contentHash: string;
+    readonly claimHash: string;
+  };
+  /** The text's hash before a correction and after. */
+  readonly FactRewritten: { readonly before: string; readonly after: string };
+  /** A merge, so that it can be undone. */
+  readonly FactSuperseded: {
+    readonly ruling: string;
+    /** The fact that survived. */
+    readonly by: string;
+    /** The merged fact's status before. */
+    readonly was: "confirmed" | "unconfirmed";
+    /** Hashes of the citations the survivor took from the merged fact. */
+    readonly taken: readonly string[];
+  };
+  readonly FactConfirmed: { readonly id: string; readonly person: string };
+  readonly FactRedacted: Readonly<Record<string, never>>;
+  readonly FactShared: Moved;
+  readonly FactWithdrawn: Moved;
+  /** `otherFact`: the fact it contradicts, or the source that changed under it. */
+  readonly FlagRaised: {
+    readonly id: string;
+    readonly factId: string;
+    readonly kind: FlagKind;
+    readonly otherFact?: string;
+  };
+  readonly FlagCleared: {
+    readonly factId: string;
+    readonly kinds: readonly FlagKind[];
+    readonly count: number;
+  };
+  readonly RulingReverted: { readonly ruling: string; readonly reverts: string };
+  readonly TaskPublished: Versioned & { readonly tracked: boolean };
+  /** `from`: where the task stood; `previous_holder`: whose lease it replaced. */
+  readonly TaskClaimed: Versioned & {
+    readonly from: ClaimedFrom;
+    readonly previous_holder?: string;
+    readonly lease_until: string;
+  };
+  readonly TaskReleased: Noted & { readonly handed_off: boolean };
+  readonly TaskDone: Noted;
+  readonly TaskNoted: Noted;
+  readonly TaskShared: Moved;
+  readonly TaskWithdrawn: Moved;
+}
+
+/**
+ * The keys of a payload that hold a hash of a fact's text. Redacting a fact takes them out of
+ * every event about it, so an event read back may lack them.
+ */
+export const EVENT_HASH_KEYS = ["contentHash", "claimHash", "before", "after", "taken"] as const;
+
+type Redactable<P> = Omit<P, (typeof EVENT_HASH_KEYS)[number]> &
+  Partial<Pick<P, Extract<keyof P, (typeof EVENT_HASH_KEYS)[number]>>>;
+
+/**
+ * An event to append in a unit; the unit gives it the next sequence of its audience. Its payload
+ * is the kind's (`EventPayloads`) when it is made by `eventBy` or `eventOf`.
+ */
 export interface EventDraft {
   readonly kind: EventKind;
   readonly subject: string;
@@ -250,12 +324,17 @@ export interface EventDraft {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
-export interface StoredEvent extends EventDraft {
-  readonly orgId: string;
-  readonly audienceId: string;
-  readonly seq: number;
-  readonly at: Date;
-}
+/** An event as its log holds it, one kind at a time: its payload is its kind's, less any hash a redaction took. */
+export type StoredEvent<K extends EventKind = EventKind> = {
+  readonly [P in K]: Omit<EventDraft, "kind" | "payload"> & {
+    readonly kind: P;
+    readonly payload: Redactable<EventPayloads[P]>;
+    readonly orgId: string;
+    readonly audienceId: string;
+    readonly seq: number;
+    readonly at: Date;
+  };
+}[K];
 
 export const JOB_KINDS = ["embed", "consolidate", "digest"] as const;
 

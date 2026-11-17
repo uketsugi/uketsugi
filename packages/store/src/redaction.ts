@@ -7,15 +7,15 @@
  * entries by their subject in whichever log holds them, and only for facts the scope was first
  * seen to hold.
  */
-import type { ReadScope, UnitTarget } from "@uketsugi/core";
+import { EVENT_HASH_KEYS, type ReadScope, type UnitTarget } from "@uketsugi/core";
 import { sql } from "kysely";
 import { behindOf } from "./chain.ts";
 import { scoped, type Db } from "./codec.ts";
+import { writeDerived } from "./derived.ts";
+import { closeFlags } from "./review.ts";
 
 /** What stands where a redacted fact's hashes were: a hash of a text can be tested against a guess of it. */
 const NO_HASH = new Uint8Array(32);
-/** The keys of an event's payload that hold a hash of the text the event describes. */
-const HASH_KEYS = ["contentHash", "claimHash", "before", "after", "taken"];
 
 /**
  * Redacts the fact and every fact superseded by it, directly or through others: a chain's earlier
@@ -47,24 +47,17 @@ export async function redactFacts(db: Db, target: UnitTarget, id: string): Promi
     .where("id", "in", ids)
     .execute();
   // Identifiers, and the facts it cited.
-  await db.deleteFrom("factIdents").where("orgId", "=", orgId).where("factId", "in", ids).execute();
-  await db.deleteFrom("citedFacts").where("orgId", "=", orgId).where("factId", "in", ids).execute();
+  await writeDerived(db, orgId, ids, { idents: [], citedFacts: [] });
   // Confirmations: what a person wrote of their check.
   await db.deleteFrom("confirmations").where(scoped(scope)).where("factId", "in", ids).execute();
   // The fact's open flags close.
-  await db
-    .updateTable("flags")
-    .set({ clearedAt: at })
-    .where(scoped(scope))
-    .where("factId", "in", ids)
-    .where("clearedAt", "is", null)
-    .execute();
+  await closeFlags(db, scope, ids, at).execute();
   // Pending jobs about the fact.
   await db.deleteFrom("outbox").where(scoped(scope)).where("subject", "in", ids).execute();
   // Events: the hashes of the text they described, in every log.
   await db
     .updateTable("events")
-    .set({ payload: sql<string>`payload - ${HASH_KEYS}::text[]` })
+    .set({ payload: sql<string>`payload - ${EVENT_HASH_KEYS}::text[]` })
     .where("orgId", "=", orgId)
     .where("subject", "in", ids)
     .execute();

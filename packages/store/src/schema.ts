@@ -48,7 +48,6 @@ export interface Database {
     orgId: string;
     key: string;
     kind: ProjectRef["kind"];
-    createdAt: Date;
   };
   projectChoices: {
     orgId: string;
