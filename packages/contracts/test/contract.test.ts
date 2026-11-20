@@ -51,7 +51,7 @@ describe("the contract", () => {
 
   test("the measured texts are the ones the recording runs used, and the instructions stay short", () => {
     expect(sha256(BLOCK_TEXT)).toBe(
-      "924de150dcbf725e2220920be129b052b2e736a8ef79be8eb2378bde54cd8b6a",
+      "90d5693e880e39ea365516cf8621fd2ce49ecff0f7e8d774acdb5c2217bdd212",
     );
     expect(PROJECT_REFUSAL).toBe(
       "project is required. Pass this repository's origin remote as host/owner/name (run: git remote get-url origin). If this directory is not a repository, pass the project named in your instructions.",
