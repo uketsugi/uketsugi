@@ -79,6 +79,13 @@ export function unitText(command: readonly string[], home: Home): string {
     `ExecStart=${[...command, "serve"].map(unitWord).join(" ")}${servedBy(home)}`,
     "Restart=on-failure",
     "RestartSec=5",
+    // `ukt serve` ends once its store is closed, a run of syncs that took 187 s on a disk under
+    // other writes. The manager's default of 90 s would kill it mid-close, and the next start
+    // would then recover a store that was cut off. Ten minutes still ends a server that hangs.
+    // This covers `systemctl --user stop`, `restart` and an upgrade. It does not cover the
+    // machine's shutdown or the last logout, where the user manager itself is stopped after its
+    // own 120 s (`user@.service`) whatever this unit says.
+    "TimeoutStopSec=600",
     "",
     "[Install]",
     "WantedBy=default.target",

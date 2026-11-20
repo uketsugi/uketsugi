@@ -39,6 +39,8 @@ export const CLIENT = { name: "use-cases", version: null, conversationId: null }
 /** A store of the test's own, and what lets go of it. */
 interface Host {
   readonly store: Store;
+  /** The database on the test server, where the store is in one. */
+  readonly database?: string;
   close(): Promise<void>;
 }
 
@@ -52,6 +54,7 @@ async function onServer(): Promise<Host> {
   const local = await openLocalPorts({ databaseUrl: database.url });
   return {
     store: local.ports.store,
+    database: database.name,
     async close() {
       await local.close();
       await database.drop();
@@ -69,6 +72,8 @@ interface Opened {
 }
 
 export interface World extends Opened {
+  /** The database on the test server that the host's store is in; null on the embedded store, which has one connection. */
+  readonly database: string | null;
   readonly clock: FakeClock;
   readonly ids: FakeIdGen;
   readonly embedder: FakeEmbedder;
@@ -133,6 +138,9 @@ function worldOn(open: () => Promise<Host>): World {
   afterAll(() => host?.close());
 
   return {
+    get database() {
+      return host?.database ?? null;
+    },
     clock,
     ids,
     embedder,

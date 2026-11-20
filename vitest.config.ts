@@ -22,8 +22,7 @@ import { HANG_GUARD_MS } from "./packages/testkit/src/guard.ts";
  * with other work beside it (a load average of 10 to 23) tests that start an engine of their own
  * and take 1 to 1.6 s alone took 4 to 5 s, and at times past 15, which a limit that decided turned
  * into twenty failed files in code no one had touched. A wait inside a test polls for its state
- * and gives up after the same guard (`HANG_GUARD_MS`, which the web tests read from the
- * environment this sets).
+ * and gives up after the same guard (`HANG_GUARD_MS`, which the web tests import).
  *
  * The engine's disk syncs are dropped in every test file but the one about them (`no-disk-sync.ts`).
  */
@@ -38,6 +37,5 @@ export default defineConfig({
     maxWorkers: "50%",
     testTimeout: HANG_GUARD_MS,
     hookTimeout: HANG_GUARD_MS,
-    env: { UKT_HANG_GUARD_MS: String(HANG_GUARD_MS) },
   },
 });

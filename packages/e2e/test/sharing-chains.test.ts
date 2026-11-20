@@ -20,6 +20,7 @@ import {
 import { expect, test } from "vitest";
 import { CHECKABLE, sharedWorld } from "./sharing-world.ts";
 import { describeUseCases } from "./use-case-world.ts";
+import { waitingOnHeldUnit } from "./held-unit.ts";
 
 const P = (name: string): string => `github.com/acme/chains-${name}`;
 const SECRET = "REDACT-ME";
@@ -65,6 +66,10 @@ describeUseCases("chains of facts between a person and everyone", (w) => {
         }),
     };
     return { ports: { ...s.ports, store }, atRecite, release: () => release() };
+  };
+  const watched = () => {
+    const watching = waitingOnHeldUnit(s.ports.store, w.database);
+    return { ports: { ...s.ports, store: watching.store }, waiting: watching.waiting };
   };
   const settled = (work: Promise<unknown>): Promise<string> =>
     work.then(
@@ -254,10 +259,11 @@ describeUseCases("chains of facts between a person and everyone", (w) => {
           : redactFact(held.ports, s.ann, { id: first.id }),
       );
       await held.atRecite;
+      const withdrawal = watched();
       const withdrawing = settled(
-        chooseTreatment(s.ports, s.bob, { project: his, treatment: "private" }),
+        chooseTreatment(withdrawal.ports, s.bob, { project: his, treatment: "private" }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await withdrawal.waiting();
       held.release();
 
       expect({ giveBack: await giving, withdrawal: await withdrawing }).toEqual({
@@ -290,10 +296,11 @@ describeUseCases("chains of facts between a person and everyone", (w) => {
 
     const merging = settled(w.runJobs(held.ports));
     await held.atRecite;
+    const withdrawal = watched();
     const withdrawing = settled(
-      chooseTreatment(s.ports, s.bob, { project: his, treatment: "private" }),
+      chooseTreatment(withdrawal.ports, s.bob, { project: his, treatment: "private" }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await withdrawal.waiting();
     held.release();
 
     expect({ merge: await merging, withdrawal: await withdrawing }).toEqual({

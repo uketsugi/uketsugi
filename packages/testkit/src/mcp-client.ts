@@ -51,7 +51,8 @@ export async function connectMcp(options: McpConnectOptions): Promise<McpTestCli
   const client = new Client(options.client ?? { name: "uketsugi-testkit", version: "0.0.0" }, {
     versionNegotiation: { mode: protocol === "2026-07-28" ? { pin: protocol } : "legacy" },
   });
-  const headers = options.token === undefined ? {} : { authorization: `Bearer ${options.token}` };
+  const headers: Record<string, string> =
+    options.token === undefined ? {} : { authorization: `Bearer ${options.token}` };
   await client.connect(
     new StreamableHTTPClientTransport(new URL(options.url), { requestInit: { headers } }),
   );

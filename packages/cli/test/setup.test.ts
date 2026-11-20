@@ -85,6 +85,11 @@ describe("ukt setup on a machine with a service manager", () => {
     expect(plan).toContain(`${dirname(machine.unitFile)}/default.target.wants) and start it.`);
     expect(plan).toContain(`                  ExecStart=${LAUNCHER} serve --data-dir ${dataDir}`);
     expect(plan).toContain("                  Restart=on-failure");
+    // A stop gives the server time to close its store, which takes minutes on a busy disk.
+    const stopSeconds = /^TimeoutStopSec=(\d+)$/m.exec(
+      unitText([LAUNCHER], resolveHome(dataDir, env)),
+    );
+    expect(Number(stopSeconds?.[1])).toBeGreaterThanOrEqual(600);
     // A server that cannot start is not started for good.
     expect(plan).toContain("                  StartLimitBurst=5");
     // Lingering is off for this account: the plan says what that means and what changes it.
