@@ -4,6 +4,7 @@
  * (the server at 127.0.0.1:7410, which is the README's address, the model API at 7420). Outside, each
  * case's server and forwarder take a port the system assigns, so cases can run side by side.
  */
+import { createServer } from "node:net";
 import { join } from "node:path";
 import { run, type Finished } from "./process.ts";
 import type { Tools } from "./preflight.ts";
@@ -76,4 +77,28 @@ export class Environment {
     for (const relay of this.relays) relay.close();
     this.relays.length = 0;
   }
+}
+
+const handedOut = new Set<number>();
+
+/** A port on loopback that nothing holds now and no other case of this run was just given. */
+export async function freePort(): Promise<number> {
+  for (;;) {
+    const port = await probePort();
+    if (!handedOut.has(port)) {
+      handedOut.add(port);
+      return port;
+    }
+  }
+}
+
+function probePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      server.close(() => resolve(port));
+    });
+  });
 }

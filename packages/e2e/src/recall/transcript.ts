@@ -2,11 +2,12 @@
  * Reads a Claude Code session's stream-json transcript (the harness's `--output-format stream-json
  * --verbose --include-hook-events`) into what a measure needs and nothing else:
  * - `init`: what the harness reports it started with (model, version, MCP servers, plugins);
- * - `deliveries`: the decoded text of every hook output and every tool result, with the turn that
- *   produced it. A turn is one assistant message; a hook that ran before the first has turn 0, and a
- *   tool result has the turn of the call it answers, so a delivery of turn t can inform turns after t;
- * - `calls`: every tool call with its turn and event index;
- * - `firstSourceWrite`: the first call that writes a file of the project (see `isSourceWrite`).
+ * - `deliveries`: every hook output and every tool result, as the text the agent was given (the JSON
+ *   envelopes taken off, `decode`), with the line it stands at and the turn that produced it. A line
+ *   is counted as the runner counts it: every line that parses, from 1. A turn is one assistant
+ *   message; a hook before the first has turn 0, and a tool result has the turn of the call it answers;
+ * - `calls`: every tool call with its line and turn.
+ * Which of the deliveries a memory product made is the product's to say (its adapter).
  */
 export interface Init {
   readonly model: string | null;
@@ -16,17 +17,20 @@ export interface Init {
 }
 
 export interface Delivery {
-  /** Index of the transcript line that carried it. */
-  readonly index: number;
+  /** The line of the transcript it stands at. */
+  readonly line: number;
   readonly turn: number;
   readonly via: "hook" | "tool";
   /** The hook's name, or the tool's. */
   readonly name: string;
+  /** The tool call's input, for a tool result. */
+  readonly input: Record<string, unknown>;
+  /** The decoded records, one a line. */
   readonly text: string;
 }
 
 export interface ToolCall {
-  readonly index: number;
+  readonly line: number;
   readonly turn: number;
   readonly id: string;
   readonly name: string;
@@ -37,22 +41,6 @@ export interface Transcript {
   readonly init: Init | undefined;
   readonly deliveries: readonly Delivery[];
   readonly calls: readonly ToolCall[];
-  readonly firstSourceWrite: ToolCall | undefined;
-}
-
-const FILE_WRITES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-/** Shell commands that edit a file in place: sed -i, patch, git apply, tee, a redirect to a path that is not scratch, and Python's file writes (the model edits through
- * the shell as often as through the editing tools). */
-const SHELL_WRITE =
-  /\bsed\b[^|;&\n]*\s-[A-Za-z]*i|\bpatch\b|\bgit\s+apply\b|\btee\s+(?!\/(?:tmp|dev)\b)|(?<![0-9&>])>{1,2}\s*(?!&|\/(?:tmp|dev)\b)[^\s&|]|\bopen\([^)]*['"][wa]b?['"]|\.write(?:_text|_bytes)?\(/;
-
-/** A write to the project: a file tool aimed away from scratch space, or a shell command that edits in place. */
-export function isSourceWrite(name: string, input: Record<string, unknown>): boolean {
-  if (FILE_WRITES.has(name)) {
-    const path = input["file_path"] ?? input["notebook_path"];
-    return typeof path !== "string" || !path.startsWith("/tmp/");
-  }
-  return name === "Bash" && SHELL_WRITE.test(str(input["command"]));
 }
 
 type Json = Record<string, unknown>;
@@ -60,25 +48,78 @@ type Json = Record<string, unknown>;
 const str = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
 const blocksOf = (value: unknown): Json[] => (Array.isArray(value) ? (value as Json[]) : []);
+const isObject = (value: unknown): value is Json =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A tool result's text, whether the harness gave a string or a list of blocks. */
-function resultText(content: unknown): string {
-  if (typeof content === "string") return content;
-  return blocksOf(content)
-    .map((block) => (typeof block === "string" ? block : str(block["text"])))
-    .join("\n");
+/** The characters Python's `str.splitlines()` ends a line at, so that both sides of the port cut the same records. */
+const LINE_ENDS = new Set([0x0a, 0x0d, 0x0b, 0x0c, 0x1c, 0x1d, 0x1e, 0x85, 0x2028, 0x2029]);
+
+export function splitLines(text: string): string[] {
+  const lines: string[] = [];
+  let from = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (!LINE_ENDS.has(text.charCodeAt(i))) continue;
+    lines.push(text.slice(from, i));
+    if (text.charCodeAt(i) === 0x0d && text.charCodeAt(i + 1) === 0x0a) i += 1;
+    from = i + 1;
+  }
+  if (from < text.length) lines.push(text.slice(from));
+  return lines;
 }
 
-/** A hook's output as the agent sees it: the `additionalContext` of its JSON output, else its text. */
-function hookText(output: string): string {
-  try {
-    const parsed = JSON.parse(output) as { hookSpecificOutput?: { additionalContext?: unknown } };
-    const context = parsed.hookSpecificOutput?.additionalContext;
-    if (typeof context === "string") return context;
-  } catch {
-    // plain text
+/** The text a decoded JSON value holds: a fact as one line, any other string by its lines; a string that is JSON is opened. */
+export function* strings(value: unknown): Generator<string> {
+  if (typeof value === "string") {
+    let inner: unknown;
+    try {
+      inner = JSON.parse(value);
+    } catch {
+      inner = undefined;
+    }
+    if (isObject(inner) || Array.isArray(inner)) yield* strings(inner);
+    else yield* splitLines(value).filter((l) => l.trim() !== "");
+  } else if (Array.isArray(value)) {
+    for (const v of value) yield* strings(v);
+  } else if (isObject(value)) {
+    if ("claim" in value) {
+      const parts = ["id", "claim", "detail", "question"].map((k) => {
+        const v = value[k];
+        return typeof v === "string"
+          ? v
+          : typeof v === "number" || typeof v === "boolean"
+            ? v
+              ? String(v)
+              : ""
+            : "";
+      });
+      yield parts.join(" ").trim();
+    } else {
+      for (const v of Object.values(value)) yield* strings(v);
+    }
   }
-  return output;
+}
+
+/** The records of a delivery's content: a hook's output (JSON with the context in `hookSpecificOutput`), a result's text blocks, or plain text. */
+export function decode(raw: unknown): string[] {
+  if (typeof raw === "string") {
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return [...strings(raw)];
+    }
+    if (isObject(data) && "hookSpecificOutput" in data) {
+      const context = (data["hookSpecificOutput"] as Json | null)?.["additionalContext"];
+      return [...strings(context === undefined || context === null ? "" : context)];
+    }
+    return [...strings(data)];
+  }
+  if (Array.isArray(raw)) {
+    return raw.flatMap((block) =>
+      decode(isObject(block) && "text" in block ? block["text"] : block),
+    );
+  }
+  return [...strings(raw)];
 }
 
 function initOf(event: Json): Init {
@@ -96,7 +137,7 @@ function initOf(event: Json): Init {
   };
 }
 
-/** Collects a transcript's events one by one, keeping the turn count. */
+/** Collects a transcript's events one by one, keeping the line and turn counts. */
 class Reader {
   init: Init | undefined;
   readonly deliveries: Delivery[] = [];
@@ -105,30 +146,48 @@ class Reader {
   private lastMessage = "";
   private readonly callOf = new Map<string, ToolCall>();
 
-  event(index: number, event: Json): void {
+  event(line: number, event: Json): void {
     const message = (event["message"] ?? {}) as Json;
     const content = blocksOf(message["content"]);
     if (event["type"] === "assistant")
-      this.assistant(index, str(message["id"], String(index)), content);
-    else if (event["type"] === "user") this.results(index, content);
-    else if (event["type"] === "system") this.system(index, event);
+      this.assistant(line, str(message["id"], String(line)), content);
+    else if (event["type"] === "user") this.results(line, content);
+    else if (event["type"] === "system") this.system(line, event);
+    else if (event["type"] === "attachment")
+      this.attachment(line, (event["attachment"] ?? {}) as Json);
   }
 
-  private system(index: number, event: Json): void {
+  private push(
+    line: number,
+    via: Delivery["via"],
+    name: string,
+    input: Json,
+    records: string[],
+  ): void {
+    const text = records.join("\n");
+    if (text.trim() !== "") this.deliveries.push({ line, turn: this.turn, via, name, input, text });
+  }
+
+  private system(line: number, event: Json): void {
     if (event["subtype"] === "init") this.init = initOf(event);
-    if (event["subtype"] !== "hook_response") return;
-    const output = str(event["output"]) || str(event["stdout"]);
-    if (output.trim() === "") return;
-    const name = str(event["hook_name"]) || str(event["hook_event"], "hook");
-    this.deliveries.push({ index, turn: this.turn, via: "hook", name, text: hookText(output) });
+    const output = event["output"];
+    if (event["subtype"] !== "hook_response" || !output) return;
+    const name = str(event["hook_name"]);
+    this.push(line, "hook", name, {}, decode(output));
   }
 
-  private assistant(index: number, id: string, content: Json[]): void {
+  private attachment(line: number, attachment: Json): void {
+    if (!str(attachment["type"]).startsWith("hook")) return;
+    const content = attachment["content"] || attachment["stdout"] || "";
+    this.push(line, "hook", str(attachment["hookName"]), {}, decode(content));
+  }
+
+  private assistant(line: number, id: string, content: Json[]): void {
     if (id !== this.lastMessage) this.turn += 1;
     this.lastMessage = id;
     for (const block of content.filter((b) => b["type"] === "tool_use")) {
       const call: ToolCall = {
-        index,
+        line,
         turn: this.turn,
         id: str(block["id"]),
         name: str(block["name"]),
@@ -139,47 +198,39 @@ class Reader {
     }
   }
 
-  private results(index: number, content: Json[]): void {
+  private results(line: number, content: Json[]): void {
     for (const block of content.filter((b) => b["type"] === "tool_result")) {
       const call = this.callOf.get(str(block["tool_use_id"]));
+      if (call === undefined) continue;
       this.deliveries.push({
-        index,
-        turn: call?.turn ?? this.turn,
+        line,
+        turn: call.turn,
         via: "tool",
-        name: call?.name ?? "",
-        text: resultText(block["content"]),
+        name: call.name,
+        input: call.input,
+        text: decode(block["content"]).join("\n"),
       });
     }
   }
 }
 
+/** The transcript of one step. A line that does not parse is not counted. */
 export function parseTranscript(text: string): Transcript {
   const reader = new Reader();
-  for (const [index, line] of text.split("\n").entries()) {
+  let line = 0;
+  for (const raw of text.split("\n")) {
+    let event: unknown;
     try {
-      reader.event(index, JSON.parse(line) as Json);
+      event = JSON.parse(raw);
     } catch {
-      // a line that is not an event (the last, cut short)
+      continue;
     }
+    line += 1;
+    if (isObject(event)) reader.event(line, event);
   }
-  const firstSourceWrite = reader.calls.find((c) => isSourceWrite(c.name, c.input));
   return {
     init: reader.init,
-    deliveries: reader.deliveries,
+    deliveries: reader.deliveries.filter((d) => d.text.trim() !== ""),
     calls: reader.calls,
-    firstSourceWrite,
   };
-}
-
-/** True when one transcript line is an assistant message that calls a source write: what quick mode stops a session on. */
-export function writesSource(line: string): boolean {
-  try {
-    const event = JSON.parse(line) as { type?: string; message?: { content?: Json[] } };
-    const blocks = event.type === "assistant" ? (event.message?.content ?? []) : [];
-    return blocks.some(
-      (b) => b["type"] === "tool_use" && isSourceWrite(str(b["name"]), (b["input"] ?? {}) as Json),
-    );
-  } catch {
-    return false;
-  }
 }

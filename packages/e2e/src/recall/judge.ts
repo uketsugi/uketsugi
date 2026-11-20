@@ -17,6 +17,19 @@ export interface Judgement {
   readonly passed: boolean;
   readonly code: number | null;
   readonly tail: string;
+  /** Each test's outcome by node id (passed, failed, error, skipped ...), read from pytest's `-rA` summary. */
+  readonly tests: Readonly<Record<string, string>>;
+}
+
+const OUTCOME = /^(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS) (\S.*?)(?: - .*)?$/;
+
+export function outcomes(output: string): Record<string, string> {
+  const found: Record<string, string> = {};
+  for (const line of output.split("\n")) {
+    const m = OUTCOME.exec(line);
+    if (m?.[1] !== undefined && m[2] !== undefined) found[m[2]] = m[1].toLowerCase();
+  }
+  return found;
 }
 
 export interface JudgeContext {
@@ -59,7 +72,7 @@ export async function judge(context: JudgeContext, task: string, tree: string): 
       PYTHONDONTWRITEBYTECODE: "1",
       TMPDIR: "/home/demo",
     },
-    cmd: spec.testCmd,
+    cmd: spec.testCmd.includes("pytest") ? [...spec.testCmd, "-rA"] : spec.testCmd,
   });
   const finished = await run(sandbox.command, sandbox.args, {
     env: sandbox.env,
@@ -73,5 +86,6 @@ export async function judge(context: JudgeContext, task: string, tree: string): 
     passed: finished.code === 0,
     code: finished.code,
     tail: (finished.stdout + finished.stderr).slice(-1500),
+    tests: outcomes(finished.stdout),
   };
 }

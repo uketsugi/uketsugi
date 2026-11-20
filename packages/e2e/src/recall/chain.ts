@@ -4,7 +4,7 @@
  * `rebuildChain` proves the rebuild is the chain by comparing all 24 trees with `trees.json`.
  * `makeTree` gives a session a clone whose history ends at one commit, so that nothing later is in it.
  */
-import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { appendFile, cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./process.ts";
@@ -15,6 +15,8 @@ export interface Task {
   readonly prompt: string;
   readonly tests: readonly string[];
   readonly testCmd: readonly string[];
+  /** Words said to the agent after this task passes. */
+  readonly sayAfterPass?: string;
 }
 
 export interface ChainData {
@@ -23,6 +25,8 @@ export interface ChainData {
   readonly env: Readonly<Record<string, string>>;
   readonly followup: string;
   readonly maxFollowups: number;
+  /** Build outputs that are not an agent's edit of the source. */
+  readonly exclude: readonly string[];
   readonly helper: { readonly name: string; readonly script: string; readonly port: number };
   readonly tasks: Readonly<Record<string, Task>>;
 }
@@ -140,12 +144,33 @@ export async function makeTree(
   ]);
   await git(dest, "remote", "set-url", "origin", chain.repo.origin);
   await git(dest, "branch", "-m", branch, "main");
-  await rm(join(dest, ".git", "logs"), { recursive: true, force: true });
+  await scrub(dest, rebuilt.mirror);
+}
+
+/** Takes out of `.git` what names the mirror (the clone's and the fetch's reflog entries, FETCH_HEAD). */
+async function scrub(tree: string, mirror: string): Promise<void> {
+  await rm(join(tree, ".git", "logs"), { recursive: true, force: true });
   for (const name of ["FETCH_HEAD", "ORIG_HEAD"])
-    await rm(join(dest, ".git", name), { force: true });
-  const left = await run("grep", ["-rl", "--", rebuilt.mirror, join(dest, ".git")], {
-    allowFailure: true,
-  });
+    await rm(join(tree, ".git", name), { force: true });
+  const left = await run("grep", ["-rl", "--", mirror, join(tree, ".git")], { allowFailure: true });
   if (left.stdout.trim() !== "")
     throw new Error(`the mirror's path is still in ${left.stdout.trim()}`);
+}
+
+/** The tree moved in place to `sha`, as when the project has moved on: what the session left is dropped. */
+export async function resetTree(rebuilt: Rebuilt, sha: string, tree: string): Promise<void> {
+  const branch = `bench/${sha.slice(0, 12)}`;
+  await git(rebuilt.mirror, "branch", "-f", branch, sha);
+  await git(tree, "fetch", "-q", "--no-tags", `file://${rebuilt.mirror}`, branch);
+  await git(tree, "reset", "-q", "--hard", "FETCH_HEAD");
+  await git(tree, "clean", "-qfdx");
+  await scrub(tree, rebuilt.mirror);
+}
+
+/** What building ergo leaves in a tree is not an agent's edit of the source. */
+export async function excludeBuildOutputs(
+  tree: string,
+  patterns: readonly string[],
+): Promise<void> {
+  await appendFile(join(tree, ".git", "info", "exclude"), `${patterns.join("\n")}\n`);
 }

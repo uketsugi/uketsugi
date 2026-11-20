@@ -25,6 +25,8 @@ export interface Prepared {
   readonly home: string;
   /** Every task was red at its parent and green at its squash. */
   readonly verified: boolean;
+  /** What judging a tree in the sandbox needs. */
+  readonly judge: JudgeContext;
 }
 
 const say = (line: string): void => console.log(line);
@@ -68,18 +70,22 @@ export async function prepare(
   tools: Tools,
   chain: ChainData,
   ergo: string,
+  verify = true,
 ): Promise<Prepared> {
   say(`workspace ${workspace.path}`);
   say(`cloning ergo from ${ergo}, rebuilding the chain`);
   const rebuilt = await rebuildChain(chain, ergo, workspace.at("mirror"));
-  say("judging every task at its parent and at its squash, in the sandbox");
   const context: JudgeContext = {
     chain,
     tools,
     workspace: workspace.path,
     hide: [workspace.path, REPOSITORY],
   };
-  const verified = await judgeChain(context, rebuilt, workspace);
+  let verified = true;
+  if (verify) {
+    say("judging every task at its parent and at its squash, in the sandbox");
+    verified = await judgeChain(context, rebuilt, workspace);
+  }
   say("building the working tree");
   const build = await describeBuild(REPOSITORY);
   const release = await buildRelease(workspace);
@@ -88,5 +94,5 @@ export async function prepare(
   say(
     `installed: ukt --version ${version} (commit ${build.head.slice(0, 12)}${build.dirty ? ", dirty" : ""})`,
   );
-  return { chain, rebuilt, release, build, version, home, verified };
+  return { chain, rebuilt, release, build, version, home, verified, judge: context };
 }

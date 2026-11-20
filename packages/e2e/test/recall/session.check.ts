@@ -14,7 +14,8 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { adapterFor } from "../../src/recall/adapters.ts";
 import type { AdapterContext } from "../../src/recall/adapter.ts";
-import { openCase, type OpenCase } from "../../src/recall/case.ts";
+import { Case } from "../../src/recall/case.ts";
+import { treeStatus } from "../../src/recall/firstwrite.ts";
 import { preflight, type Tools } from "../../src/recall/preflight.ts";
 import { buildRelease, installRelease, type Release } from "../../src/recall/release.ts";
 import { assertNoSecrets, signInToken } from "../../src/recall/session.ts";
@@ -28,7 +29,7 @@ let workspace: Workspace;
 let tools: Tools;
 let context: AdapterContext;
 let tree = "";
-const opened: OpenCase[] = [];
+const opened: Case[] = [];
 
 /** The release of the working tree, built now; or, to save the build on a rerun, the one in UKT_RECALL_RELEASE (a folder with install.sh and the tarball). */
 async function releaseToUse(workspace: Workspace): Promise<Release> {
@@ -72,18 +73,25 @@ afterAll(async () => {
   await workspace.close();
 });
 
-async function ask(one: OpenCase, config: string, prompt: string, stopAtSourceWrite = false) {
+async function ask(one: Case, config: string, prompt: string, quick = false) {
   const row = adapter.session(config);
   let resume: string | null = null;
   if (row.firstMessage !== undefined) {
     resume = (await one.session({ name: "s", tree, prompt: row.firstMessage })).sessionId;
   }
-  return one.session({ name: "s", tree, prompt, resume, stopAtSourceWrite });
+  const baseline = quick ? await treeStatus(tree) : undefined;
+  return one.session({
+    name: "s",
+    tree,
+    prompt,
+    resume,
+    ...(baseline === undefined ? {} : { baseline, stopAtFirstWrite: true }),
+  });
 }
 
 describe.each(["activate", "setup", "plugin"])("configuration %s", (config) => {
   test("is set up as its row says, and a Haiku session finds memory", async () => {
-    const one = await openCase(adapter, context, tools, config, config);
+    const one = await Case.open({ adapter, context, tools, config: config, name: config });
     opened.push(one);
 
     const result = await ask(one, config, ASK);
@@ -97,7 +105,7 @@ describe.each(["activate", "setup", "plugin"])("configuration %s", (config) => {
     if (config === "setup") {
       expect(readFileSync(join(one.home, ".claude", "CLAUDE.md"), "utf8")).toContain("uketsugi");
     }
-    const delivered = adapter.deliveries(result.transcript, config);
+    const delivered = adapter.deliveries(result.transcript);
     const calledMemory = result.transcript.calls.some((c) => /uketsugi/.test(c.name));
     expect(delivered.length > 0 || calledMemory).toBe(true);
     expect(one.forwarder.records.length).toBeGreaterThan(0);
@@ -106,7 +114,7 @@ describe.each(["activate", "setup", "plugin"])("configuration %s", (config) => {
 
 describe("quick mode", () => {
   test("ends a session at its first write and still counts its tokens", async () => {
-    const one = await openCase(adapter, context, tools, "activate", "quick");
+    const one = await Case.open({ adapter, context, tools, config: "activate", name: "quick" });
     opened.push(one);
 
     const result = await ask(
@@ -117,7 +125,7 @@ describe("quick mode", () => {
     );
 
     expect(result.killed).toBe(true);
-    expect(result.transcript.firstSourceWrite).toBeDefined();
+    expect(result.firstWrite).not.toBeNull();
     const output = one.forwarder.records.reduce((sum, r) => sum + r.usage.output, 0);
     expect(output).toBeGreaterThan(0);
   });
@@ -139,7 +147,13 @@ describe("the model step", () => {
   test("plugin-capture runs on the key file, which the suite never holds; its spend is reported", async () => {
     if (context.llmKeyFile === undefined)
       throw new Error("set UKT_RECALL_LLM_KEY_FILE to the model step's key file");
-    const one = await openCase(adapter, context, tools, "plugin-capture", "capture");
+    const one = await Case.open({
+      adapter,
+      context,
+      tools,
+      config: "plugin-capture",
+      name: "capture",
+    });
     opened.push(one);
 
     await ask(

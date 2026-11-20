@@ -17,6 +17,8 @@ export interface ServerOptions {
   readonly releaseHome: string;
   readonly dataDir: string;
   readonly modelDir: string;
+  /** The port to listen on; 0 for one the system assigns. */
+  readonly port: number;
   readonly modelStep?: {
     readonly model: string;
     readonly keyFile: string;
@@ -38,7 +40,7 @@ const WITH_KEY =
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   await mkdir(options.dataDir, { recursive: true });
   const ukt = join(options.releaseHome, ".local", "bin", "ukt");
-  const serve = [ukt, "serve", "--port", "0", "--json"];
+  const serve = [ukt, "serve", "--port", String(options.port), "--json"];
   const env: Record<string, string> = {
     HOME: options.dataDir,
     PATH: "/usr/bin:/bin",

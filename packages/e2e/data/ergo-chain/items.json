@@ -2,21 +2,21 @@
   "D1": {
     "kind": "person",
     "statement": "Anything new ChanServ shows with a date and time uses RFC 3339 in UTC (`2026-11-17T09:30:00Z`); the notes list keeps `YYYY-MM-DD HH:MM UTC`.",
-    "plant": "T2",
-    "probe": "T3",
+    "plant": ["T2"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T3": ["benchtests/test_t3_greeting_history.py::test_new_output_uses_rfc3339"],
       "T4": ["benchtests/test_t4_freeze.py::test_info_says_since_when_in_rfc3339"],
       "T7": ["benchtests/test_t7_info.py::test_info_dates_are_rfc3339_in_utc"],
       "T11": ["benchtests/test_t11_report.py::test_the_report_dates_are_rfc3339"]
     },
-    "pattern": "RFC ?-?3339|\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ"
+    "pattern": "ChanServ[^.\\n]{0,100}RFC ?-?3339|RFC ?-?3339[^.\\n]{0,100}(ChanServ|\\bCS\\b|date and time)|09:30:00Z"
   },
   "D2": {
     "kind": "person",
     "statement": "Every use of a staff-only command sends `STAFF <account> <COMMAND> <#channel>` on the channels server-notice mask.",
-    "plant": "T1",
-    "probe": "T4",
+    "plant": ["T1"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T4": ["benchtests/test_t4_freeze.py::test_other_operators_are_told"],
       "T11": [
@@ -26,13 +26,13 @@
         "benchtests/test_t12_clean_slate.py::test_staff_closing_sends_the_staff_notice_to_the_other_operators"
       ]
     },
-    "pattern": "STAFF\\s*<|`STAFF|staff.{0,40}server[- ]notice|channels? (server[- ])?notice mask|notice mask.{0,30}channels"
+    "pattern": "STAFF\\s*<account>|`STAFF\\s*<|staff-only command[^.\\n]{0,120}(server[- ]notice|snomask)|(server[- ]notice|snomask)[^.\\n]{0,120}staff-only command"
   },
   "D3": {
     "kind": "person",
     "statement": "Whatever tells a founder about an action by staff names them only as `network staff`.",
-    "plant": "T2",
-    "probe": "T3",
+    "plant": ["T2"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T3": ["benchtests/test_t3_greeting_history.py::test_founders_see_staff_as_network_staff"],
       "T4": ["benchtests/test_t4_freeze.py::test_founders_are_not_told_which_staff_member"],
@@ -45,8 +45,8 @@
   "D4": {
     "kind": "person",
     "statement": "Every mail: subject starts `[<network name>]`, plain text, last line `-- <network name> staff`.",
-    "plant": "T4",
-    "probe": "T6",
+    "plant": ["T4"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T6": ["benchtests/test_t6_expiry.py::test_warning_and_expiry_mails"],
       "T9": [
@@ -64,8 +64,8 @@
   "D5": {
     "kind": "reversal",
     "statement": "Expiry defaults: 60 days and a 7-day warning (T6 prompt), then 90 and 14 (said after T8 passes: 'whoever next works on expiry should make those the defaults').",
-    "plant": "T8",
-    "probe": "T9",
+    "plant": ["T6", "T8"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T9": [
         "benchtests/test_t9_successor.py::test_the_successor_is_told_how_long_an_unused_channel_is_kept"
@@ -75,14 +75,14 @@
         "benchtests/test_t12_clean_slate.py::test_the_founder_is_told_how_long_a_new_registration_is_kept"
       ]
     },
-    "pattern": "90[- ]days|90 and 14|14[- ]day|unused channels get 90",
-    "sayAfterPass": "Noted for later, not for now: the board met, and from the next release unused channels get 90 days, with the warning going out 14 days before. Whoever next works on expiry should make those the defaults."
+    "pattern": "90[- ]days?|90 and 14|14[- ]day|unused channels get 90",
+    "old": "60[- ]days?|60 and 7|7[- ]day"
   },
   "P1": {
     "kind": "person",
     "statement": "Unsolicited ChanServ messages are NOTICEs starting `[#Channel] `.",
-    "plant": "T1",
-    "probe": "T6",
+    "plant": ["T1"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T6": [
         "benchtests/test_t6_expiry.py::test_an_online_founder_is_told_when_the_warning_goes_out",
@@ -100,26 +100,26 @@
         "benchtests/test_t12_clean_slate.py::test_the_founders_notice_is_in_the_house_style"
       ]
     },
-    "pattern": "\\[#Channel\\]|\\[#\\w+\\] |square brackets|house style"
+    "pattern": "(start|begin)\\w*[^.\\n]{0,40}\\[#[A-Za-z]+\\]|(?-i:\\[#Channel\\])"
   },
   "D8": {
     "kind": "probe",
     "statement": "The server cuts every line it sends at 512 bytes, with no error: long text a user typed (greeting, reason, note, history entry) must go out as several NOTICEs.",
-    "plant": "T1",
-    "probe": "T4",
+    "plant": ["T1"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T1": ["benchtests/test_t1_greeting.py::test_a_long_greeting_arrives_whole"],
       "T4": ["benchtests/test_t4_freeze.py::test_a_long_reason_is_shown_whole"],
       "T7": ["benchtests/test_t7_info.py::test_a_long_greeting_is_shown_whole"],
       "T11": ["benchtests/test_t11_report.py::test_a_long_note_is_shown_whole_in_the_report"]
     },
-    "pattern": "512[- ]?byte|several NOTICE|split.{0,40}NOTICE|NOTICE.{0,40}(split|several)|cut.{0,20}512|512.{0,40}(cut|truncat)"
+    "pattern": "(512|line limit|too long|MaxLineLen).{0,80}(several|multiple|separate|split).{0,30}NOTICE|(several|multiple|separate|split).{0,30}NOTICEs?.{0,80}(512|line limit|too long|MaxLineLen)|(cut|truncat\\w*).{0,40}512|512.{0,60}(cut|truncat|silently)|(outgoing|sent|we send|a service sends).{0,60}512"
   },
   "D12": {
     "kind": "probe",
     "statement": "ChanServ splits a command's text on spaces, so runs of spaces collapse; a service command that takes free text as its last parameter must ask for it whole (`maxParams` with `unsplitFinalParam: true` in its entry of chanservCommands) to get the text as typed.",
-    "plant": "T10",
-    "probe": "T11",
+    "plant": ["T10"],
+    "gap": ["T5", "T9"],
     "tests": {
       "T10": [
         "benchtests/test_t10_regulars.py::test_the_welcome_back_message_is_kept_exactly_as_typed"
@@ -132,14 +132,14 @@
   "D13": {
     "kind": "probe",
     "statement": "ergo keeps account names case-folded for comparing (client.Account(), channel.Founder()); the name as it was registered is client.AccountName() or LoadAccount(name).Name, and that is what is shown to people.",
-    "plant": "T11",
-    "probe": "T12",
+    "plant": ["T11"],
+    "gap": ["T5", "T10"],
     "tests": {
       "T11": ["benchtests/test_t11_report.py::test_the_report_shows_founders_as_registered"],
       "T12": [
         "benchtests/test_t12_clean_slate.py::test_the_operators_notice_names_the_founder_as_registered"
       ]
     },
-    "pattern": "AccountName\\(\\)|case-?fold|as (it was )?registered|\\.Name\\b.{0,30}LoadAccount|LoadAccount.{0,30}\\.Name"
+    "pattern": "AccountName\\(\\)|as (it was )?registered|\\.Name\\b.{0,30}LoadAccount|LoadAccount.{0,30}\\.Name|name (as|exactly as) (it was )?registered|registered (spelling|case)"
   }
 }

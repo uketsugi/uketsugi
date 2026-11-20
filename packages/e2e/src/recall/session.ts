@@ -10,10 +10,11 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MODEL_PORT, type Environment } from "./environment.ts";
 import { start, stop } from "./process.ts";
-import { parseTranscript, writesSource, type Init, type Transcript } from "./transcript.ts";
+import { WriteWatch, type FirstWrite } from "./firstwrite.ts";
+import { parseTranscript, type Init, type Transcript } from "./transcript.ts";
 
 const BASE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Agent";
-const POLL_MS = 300;
+const POLL_MS = 100;
 
 export interface SessionOptions {
   readonly home: string;
@@ -27,8 +28,12 @@ export interface SessionOptions {
   readonly transcript: string;
   readonly resume?: string | null;
   readonly permissionMode?: "acceptEdits" | "bypassPermissions";
-  /** Quick mode: end the session at its first source write. */
-  readonly stopAtSourceWrite?: boolean;
+  /**
+   * The tree's `git status` before the session: with it, the step's first write to the tree is
+   * watched for (`firstwrite.ts`), and with `stopAtFirstWrite` (quick mode) the step ends there.
+   */
+  readonly baseline?: ReadonlySet<string>;
+  readonly stopAtFirstWrite?: boolean;
   readonly env?: Readonly<Record<string, string>>;
 }
 
@@ -49,6 +54,7 @@ export interface SetupRecord extends Partial<Init> {
 export interface SessionResult {
   readonly sessionId: string | null;
   readonly killed: boolean;
+  readonly firstWrite: FirstWrite | null;
   readonly code: number | null;
   readonly transcript: Transcript;
   readonly setup: SetupRecord;
@@ -171,22 +177,31 @@ export async function runSession(
   let pending = "";
   let done = false;
   void closed.then(() => (done = true));
+  const watch =
+    options.baseline === undefined ? undefined : new WriteWatch(options.tree, options.baseline);
+  const batch = async (text: string): Promise<void> => {
+    const lines = (pending + text).split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) watch?.feed(line);
+    await watch?.settle();
+  };
   while (!done) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     const chunk = readFrom(options.transcript, offset);
     offset += chunk.length;
-    const lines = (pending + chunk.toString()).split("\n");
-    pending = lines.pop() ?? "";
-    if (!killed && options.stopAtSourceWrite === true && lines.some(writesSource)) {
+    await batch(chunk.toString());
+    if (!killed && options.stopAtFirstWrite === true && watch?.write != null) {
       killed = true;
       await stop(child, "SIGKILL");
     }
   }
+  await batch(readFrom(options.transcript, offset).toString() + "\n");
   const code = await closed;
   const transcript = parseTranscript(await readFile(options.transcript, "utf8"));
   const result: SessionResult = {
     sessionId: sessionIdOf(await readFile(options.transcript, "utf8")),
     killed,
+    firstWrite: watch?.write ?? null,
     code,
     transcript,
     setup: {

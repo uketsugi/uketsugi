@@ -36,13 +36,14 @@ export interface Serving {
   readonly modelStep?: Forwarder;
 }
 
-export interface StoredFact {
+/** A fact of a product's store as it is kept in the evidence (what Uketsugi's `/api/facts` returns of it). */
+export interface StoreFact {
   readonly id: string;
-  /** Claim, detail and question as one text. */
-  readonly text: string;
-  readonly by: "agent" | "model step";
-  /** One of the seed's own facts. */
-  readonly seed: boolean;
+  readonly claim: string;
+  readonly detail?: string | null;
+  readonly question?: string | null;
+  /** Set when the product's own capture wrote it, not an agent. */
+  readonly from_session?: string | null;
 }
 
 /** What a harness session is given beside the task, by configuration. */
@@ -59,12 +60,59 @@ export interface InstallRecord {
   readonly output: string;
 }
 
+/** Which tool calls are the product's: names, a tool search naming it, and strings that touch its files or skills. */
+export interface MemorySpec {
+  readonly call: readonly string[];
+  readonly toolSearch?: string;
+  readonly touch: readonly string[];
+}
+
+const TOUCH_KEYS = new Set([
+  "command",
+  "Command",
+  "CommandLine",
+  "cmd",
+  "file_path",
+  "path",
+  "Path",
+  "AbsolutePath",
+  "SearchPath",
+  "Directory",
+  "directory",
+  "TargetFile",
+  "notebook_path",
+  "skill",
+]);
+
+/** Whether a tool call is the product's memory call (a result of one is a delivery). */
+export function isMemoryCall(
+  spec: MemorySpec,
+  name: string,
+  input: Readonly<Record<string, unknown>>,
+): boolean {
+  if (spec.call.some((p) => new RegExp(p).test(name))) return true;
+  if (
+    spec.toolSearch !== undefined &&
+    name === "ToolSearch" &&
+    new RegExp(spec.toolSearch).test(JSON.stringify(input))
+  )
+    return true;
+  return Object.entries(input).some(
+    ([k, v]) =>
+      TOUCH_KEYS.has(k) && typeof v === "string" && spec.touch.some((p) => new RegExp(p).test(v)),
+  );
+}
+
 export interface Adapter {
   readonly name: string;
+  /** What counts as the product's own memory calls. */
+  readonly memory: MemorySpec;
+  /** Lines the product's brief always carries, which no earlier session put there. */
+  readonly boilerplate: readonly string[];
   /** The first is the default. */
   readonly configurations: readonly [string, ...string[]];
   session(config: string): SessionRow;
-  serve(context: AdapterContext, config: string, dir: string): Promise<Serving>;
+  serve(context: AdapterContext, config: string, dir: string, port: number): Promise<Serving>;
   /** Stores the seed facts by the product's own write path; returns how many. */
   seed(
     serving: Serving,
@@ -79,11 +127,15 @@ export interface Adapter {
     home: string,
   ): Promise<InstallRecord[]>;
   afterSession(serving: Serving): Promise<void>;
-  readStore(
-    serving: Serving,
-    project: string,
-    seedClaims: ReadonlySet<string>,
-  ): Promise<StoredFact[]>;
+  /** Every fact the product holds for the project, as `/api/facts` returns it. The store lives in `<dir>/data`, which the runner copies between sessions. */
+  readStore(serving: Serving, project: string): Promise<StoreFact[]>;
   /** The hook outputs and tool results that count as the product delivering. */
-  deliveries(transcript: Transcript, config: string): Delivery[];
+  deliveries(transcript: Transcript): Delivery[];
+}
+
+/** The deliveries of a transcript by a product's memory calls: every hook's output, and the result of each call that is memory's. */
+export function deliveriesBy(spec: MemorySpec, transcript: Transcript): Delivery[] {
+  return transcript.deliveries.filter(
+    (d) => d.via === "hook" || isMemoryCall(spec, d.name, d.input),
+  );
 }
