@@ -1,0 +1,198 @@
+From 8fe6f9e1a6d92199502d7d616cd35b9ea1b470de Mon Sep 17 00:00:00 2001
+From: ergo-dev <dev@example.invalid>
+Date: Tue, 17 Nov 2026 18:13:14 -0800
+Subject: [PATCH 04/12] Add ChanServ FREEZE
+
+---
+ irc/channel.go    |  4 +++
+ irc/channelreg.go |  9 +++++++
+ irc/chanserv.go   | 64 +++++++++++++++++++++++++++++++++++++++++++++++
+ irc/getters.go    | 16 ++++++++++++
+ 4 files changed, 93 insertions(+)
+
+diff --git a/irc/channel.go b/irc/channel.go
+index 51098968..297f8cd0 100644
+--- a/irc/channel.go
++++ b/irc/channel.go
+@@ -63,6 +63,7 @@ type Channel struct {
+ 	greeting          string
+ 	notes             []ChannelNote
+ 	greetingLog       []GreetingChange
++	freeze            *ChannelFreeze
+ 	// these caches are paired to allow iteration over channel members without holding the lock
+ 	membersCache    []*Client
+ 	memberDataCache []*memberData
+@@ -138,6 +139,7 @@ func (channel *Channel) applyRegInfo(chanReg RegisteredChannel) {
+ 	channel.greeting = chanReg.Greeting
+ 	channel.notes = slices.Clone(chanReg.Notes)
+ 	channel.greetingLog = slices.Clone(chanReg.GreetingLog)
++	channel.freeze = chanReg.Freeze
+ 
+ 	for _, mode := range chanReg.Modes {
+ 		channel.flags.SetMode(mode, true)
+@@ -179,6 +181,7 @@ func (channel *Channel) ExportRegistration() (info RegisteredChannel) {
+ 	info.Greeting = channel.greeting
+ 	info.Notes = slices.Clone(channel.notes)
+ 	info.GreetingLog = slices.Clone(channel.greetingLog)
++	info.Freeze = channel.freeze
+ 
+ 	return
+ }
+@@ -348,6 +351,7 @@ func (channel *Channel) SetUnregistered(expectedFounder string) {
+ 	channel.greeting = ""
+ 	channel.notes = nil
+ 	channel.greetingLog = nil
++	channel.freeze = nil
+ 	// reset the UUID so that any re-registration will persist under
+ 	// a separate key:
+ 	channel.uuid = uuid
+diff --git a/irc/channelreg.go b/irc/channelreg.go
+index 5bd9be1b..d36781a9 100644
+--- a/irc/channelreg.go
++++ b/irc/channelreg.go
+@@ -71,6 +71,15 @@ type RegisteredChannel struct {
+ 	Notes []ChannelNote
+ 	// GreetingLog holds the latest greeting changes, oldest first
+ 	GreetingLog []GreetingChange
++	// Freeze is set while network staff have frozen the channel
++	Freeze *ChannelFreeze
++}
++
++// ChannelFreeze records who froze a channel, when and why.
++type ChannelFreeze struct {
++	Since   time.Time
++	Account string
++	Reason  string
+ }
+ 
+ // GreetingChange is one change of a channel's greeting; Text is empty when it was removed.
+diff --git a/irc/chanserv.go b/irc/chanserv.go
+index 51764b60..f6eaf15b 100644
+--- a/irc/chanserv.go
++++ b/irc/chanserv.go
+@@ -220,6 +220,27 @@ operators can use it.`,
+ 			enabled:      chanregEnabled,
+ 			minParams:    2,
+ 		},
++		"freeze": {
++			handler: csFreezeHandler,
++			help: `Syntax: $bFREEZE #channel <reason>$b
++
++FREEZE stops the founder of a channel from changing its greeting and notes
++until network staff UNFREEZE it.`,
++			helpShort: `$bFREEZE$b stops a founder from changing a channel's settings.`,
++			capabs:    []string{"chanreg"},
++			enabled:   chanregEnabled,
++			minParams: 2,
++		},
++		"unfreeze": {
++			handler: csFreezeHandler,
++			help: `Syntax: $bUNFREEZE #channel$b
++
++UNFREEZE lifts a FREEZE.`,
++			helpShort: `$bUNFREEZE$b lifts a FREEZE.`,
++			capabs:    []string{"chanreg"},
++			enabled:   chanregEnabled,
++			minParams: 1,
++		},
+ 		"howtoban": {
+ 			handler:   csHowToBanHandler,
+ 			helpShort: `$bHOWTOBAN$b suggests the best available way of banning a user`,
+@@ -833,6 +854,18 @@ func csInfoHandler(service *ircService, server *Server, client *Client, command
+ 	service.Notice(rb, fmt.Sprintf(client.t("Channel %s is registered"), chinfo.Name))
+ 	service.Notice(rb, fmt.Sprintf(client.t("Founder: %s"), chinfo.Founder))
+ 	service.Notice(rb, fmt.Sprintf(client.t("Registered at: %s"), chinfo.RegisteredAt.Format(time.RFC1123)))
++	if freeze := channel.Freeze(); freeze != nil {
++		line := fmt.Sprintf(client.t("Frozen since %s: "), freeze.Since.UTC().Format(time.RFC3339))
++		room := 510 - len(":"+service.prefix+" NOTICE "+client.Nick()+" :")
++		for _, word := range strings.Fields(freeze.Reason) {
++			if len(line)+len(word) > room {
++				service.Notice(rb, strings.TrimSpace(line))
++				line = ""
++			}
++			line += word + " "
++		}
++		service.Notice(rb, strings.TrimSpace(line))
++	}
+ }
+ 
+ func displayChannelSetting(service *ircService, settingName string, settings ChannelSettings, client *Client, rb *ResponseBuffer) {
+@@ -1019,6 +1052,9 @@ func csEntrymsgHandler(service *ircService, server *Server, client *Client, comm
+ 		csGreetingHistory(service, channel, client, rb)
+ 		return
+ 	}
++	if refuseWhileFrozen(service, channel, client, rb) {
++		return
++	}
+ 	greeting := strings.Join(params[1:], " ")
+ 	if utf8.RuneCountInString(greeting) > maxGreetingLength {
+ 		service.Notice(rb, fmt.Sprintf(client.t("Greetings can be at most %d characters long"), maxGreetingLength))
+@@ -1040,6 +1076,9 @@ func csNoteHandler(service *ircService, server *Server, client *Client, command
+ 		service.Notice(rb, client.t("Insufficient privileges"))
+ 		return
+ 	}
++	if sub := strings.ToLower(params[1]); (sub == "add" || sub == "del") && refuseWhileFrozen(service, channel, client, rb) {
++		return
++	}
+ 	switch strings.ToLower(params[1]) {
+ 	case "add":
+ 		text := strings.Join(params[2:], " ")
+@@ -1096,3 +1135,28 @@ func csGreetingHistory(service *ircService, channel *Channel, client *Client, rb
+ 		}
+ 	}
+ }
++
++// refuseWhileFrozen tells a founder that a frozen channel cannot be changed; staff are not refused.
++func refuseWhileFrozen(service *ircService, channel *Channel, client *Client, rb *ResponseBuffer) bool {
++	if channel.Freeze() == nil || client.HasRoleCapabs("chanreg") {
++		return false
++	}
++	service.Notice(rb, fmt.Sprintf(client.t("%s is frozen by network staff"), channel.Name()))
++	return true
++}
++
++func csFreezeHandler(service *ircService, server *Server, client *Client, command string, params []string, rb *ResponseBuffer) {
++	channel := server.channels.Get(params[0])
++	if channel == nil || !channel.IsRegistered() {
++		service.Notice(rb, client.t("Channel is not registered"))
++		return
++	}
++	if command == "freeze" {
++		channel.SetFreeze(&ChannelFreeze{Since: time.Now().UTC(), Account: client.AccountName(), Reason: strings.Join(params[1:], " ")})
++		service.Notice(rb, fmt.Sprintf(client.t("Froze %s"), channel.Name()))
++	} else {
++		channel.SetFreeze(nil)
++		service.Notice(rb, fmt.Sprintf(client.t("Unfroze %s"), channel.Name()))
++	}
++	server.snomasks.Send(sno.LocalChannels, fmt.Sprintf("STAFF %s %s %s", client.AccountName(), strings.ToUpper(command), channel.Name()))
++}
+diff --git a/irc/getters.go b/irc/getters.go
+index 5cb8259f..c7704219 100644
+--- a/irc/getters.go
++++ b/irc/getters.go
+@@ -819,6 +819,22 @@ func (channel *Channel) SetGreeting(greeting, account string, staff bool) {
+ 	}
+ }
+ 
++// Freeze returns the channel's freeze, or nil when it is not frozen.
++func (channel *Channel) Freeze() *ChannelFreeze {
++	channel.stateMutex.RLock()
++	defer channel.stateMutex.RUnlock()
++	return channel.freeze
++}
++
++// SetFreeze freezes (or, with nil, unfreezes) the channel.
++func (channel *Channel) SetFreeze(freeze *ChannelFreeze) {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	channel.freeze = freeze
++}
++
+ func (channel *Channel) GreetingLog() []GreetingChange {
+ 	channel.stateMutex.RLock()
+ 	defer channel.stateMutex.RUnlock()
+-- 
+2.34.1
+

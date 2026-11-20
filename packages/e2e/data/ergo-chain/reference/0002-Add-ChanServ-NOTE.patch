@@ -1,0 +1,201 @@
+From e0edf2905cf71dec2add77d60a26bea8decce146 Mon Sep 17 00:00:00 2001
+From: ergo-dev <dev@example.invalid>
+Date: Tue, 17 Nov 2026 17:31:16 -0800
+Subject: [PATCH 02/12] Add ChanServ NOTE
+
+---
+ irc/channel.go    |  5 +++++
+ irc/channelreg.go | 10 +++++++++
+ irc/chanserv.go   | 55 +++++++++++++++++++++++++++++++++++++++++++++++
+ irc/getters.go    | 33 ++++++++++++++++++++++++++++
+ 4 files changed, 103 insertions(+)
+
+diff --git a/irc/channel.go b/irc/channel.go
+index 56a69b54..14adda61 100644
+--- a/irc/channel.go
++++ b/irc/channel.go
+@@ -9,6 +9,7 @@ import (
+ 	"fmt"
+ 	"iter"
+ 	"maps"
++	"slices"
+ 	"strconv"
+ 	"strings"
+ 	"time"
+@@ -60,6 +61,7 @@ type Channel struct {
+ 	uuid              utils.UUID
+ 	metadata          map[string]string
+ 	greeting          string
++	notes             []ChannelNote
+ 	// these caches are paired to allow iteration over channel members without holding the lock
+ 	membersCache    []*Client
+ 	memberDataCache []*memberData
+@@ -133,6 +135,7 @@ func (channel *Channel) applyRegInfo(chanReg RegisteredChannel) {
+ 	channel.forward = chanReg.Forward
+ 	channel.metadata = chanReg.Metadata
+ 	channel.greeting = chanReg.Greeting
++	channel.notes = slices.Clone(chanReg.Notes)
+ 
+ 	for _, mode := range chanReg.Modes {
+ 		channel.flags.SetMode(mode, true)
+@@ -172,6 +175,7 @@ func (channel *Channel) ExportRegistration() (info RegisteredChannel) {
+ 	info.Settings = channel.settings
+ 	info.Metadata = channel.metadata
+ 	info.Greeting = channel.greeting
++	info.Notes = slices.Clone(channel.notes)
+ 
+ 	return
+ }
+@@ -339,6 +343,7 @@ func (channel *Channel) SetUnregistered(expectedFounder string) {
+ 	channel.registeredTime = zeroTime
+ 	channel.accountToUMode = make(map[string]modes.Mode)
+ 	channel.greeting = ""
++	channel.notes = nil
+ 	// reset the UUID so that any re-registration will persist under
+ 	// a separate key:
+ 	channel.uuid = uuid
+diff --git a/irc/channelreg.go b/irc/channelreg.go
+index 5f2f2d29..7e02f21f 100644
+--- a/irc/channelreg.go
++++ b/irc/channelreg.go
+@@ -67,6 +67,16 @@ type RegisteredChannel struct {
+ 	Metadata map[string]string
+ 	// Greeting is sent by ChanServ to users who join the channel
+ 	Greeting string
++	// Notes are staff notes about the channel, oldest first
++	Notes []ChannelNote
++}
++
++// ChannelNote is one staff note on a registered channel.
++type ChannelNote struct {
++	ID      int
++	Account string
++	Time    time.Time
++	Text    string
+ }
+ 
+ func (r *RegisteredChannel) Serialize() ([]byte, error) {
+diff --git a/irc/chanserv.go b/irc/chanserv.go
+index d53481c3..1d0739e0 100644
+--- a/irc/chanserv.go
++++ b/irc/chanserv.go
+@@ -8,6 +8,7 @@ import (
+ 	"regexp"
+ 	"slices"
+ 	"sort"
++	"strconv"
+ 	"strings"
+ 	"time"
+ 	"unicode/utf8"
+@@ -206,6 +207,19 @@ change it.`,
+ 			enabled:      chanregEnabled,
+ 			minParams:    1,
+ 		},
++		"note": {
++			handler: csNoteHandler,
++			help: `Syntax: $bNOTE #channel ADD <text>$b
++        $bNOTE #channel LIST$b
++        $bNOTE #channel DEL <number>$b
++
++NOTE keeps staff notes about a channel. Only the channel founder and server
++operators can use it.`,
++			helpShort:    `$bNOTE$b keeps staff notes about a channel.`,
++			authRequired: true,
++			enabled:      chanregEnabled,
++			minParams:    2,
++		},
+ 		"howtoban": {
+ 			handler:   csHowToBanHandler,
+ 			helpShort: `$bHOWTOBAN$b suggests the best available way of banning a user`,
+@@ -1013,3 +1027,44 @@ func csEntrymsgHandler(service *ircService, server *Server, client *Client, comm
+ 		service.Notice(rb, fmt.Sprintf(client.t("Set the greeting for %s"), channel.Name()))
+ 	}
+ }
++
++const maxChannelNotes = 10
++
++func csNoteHandler(service *ircService, server *Server, client *Client, command string, params []string, rb *ResponseBuffer) {
++	channel := server.channels.Get(params[0])
++	if channel == nil || !channel.IsRegistered() || !(channel.Founder() == client.Account() || client.HasRoleCapabs("chanreg")) {
++		service.Notice(rb, client.t("Insufficient privileges"))
++		return
++	}
++	switch strings.ToLower(params[1]) {
++	case "add":
++		text := strings.Join(params[2:], " ")
++		if text == "" {
++			service.Notice(rb, client.t("Invalid parameters"))
++			return
++		}
++		if id := channel.AddNote(client.Account(), text, maxChannelNotes); id == 0 {
++			service.Notice(rb, fmt.Sprintf(client.t("%s already has the maximum of %d notes"), channel.Name(), maxChannelNotes))
++		} else {
++			service.Notice(rb, fmt.Sprintf(client.t("Added note #%d to %s"), id, channel.Name()))
++		}
++	case "list":
++		notes := channel.Notes()
++		if len(notes) == 0 {
++			service.Notice(rb, fmt.Sprintf(client.t("%s has no notes"), channel.Name()))
++		}
++		for i := len(notes) - 1; i >= 0; i-- {
++			n := notes[i]
++			service.Notice(rb, fmt.Sprintf("#%d %s UTC %s: %s", n.ID, n.Time.UTC().Format("2006-01-02 15:04"), n.Account, n.Text))
++		}
++	case "del":
++		id, err := strconv.Atoi(strings.TrimPrefix(strings.Join(params[2:], ""), "#"))
++		if err != nil || !channel.DeleteNote(id) {
++			service.Notice(rb, client.t("No such note"))
++			return
++		}
++		service.Notice(rb, fmt.Sprintf(client.t("Deleted note #%d from %s"), id, channel.Name()))
++	default:
++		service.Notice(rb, client.t("Invalid parameters"))
++	}
++}
+diff --git a/irc/getters.go b/irc/getters.go
+index d7391cfa..18017764 100644
+--- a/irc/getters.go
++++ b/irc/getters.go
+@@ -812,6 +812,39 @@ func (channel *Channel) SetGreeting(greeting string) {
+ 	channel.greeting = greeting
+ }
+ 
++func (channel *Channel) Notes() []ChannelNote {
++	channel.stateMutex.RLock()
++	defer channel.stateMutex.RUnlock()
++	return slices.Clone(channel.notes)
++}
++
++// AddNote appends a note unless the channel already holds `limit`; it returns the new note's number, or 0.
++func (channel *Channel) AddNote(account, text string, limit int) int {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	if len(channel.notes) >= limit {
++		return 0
++	}
++	id := 1
++	for _, n := range channel.notes {
++		id = max(id, n.ID+1)
++	}
++	channel.notes = append(channel.notes, ChannelNote{ID: id, Account: account, Time: time.Now().UTC(), Text: text})
++	return id
++}
++
++func (channel *Channel) DeleteNote(id int) bool {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	before := len(channel.notes)
++	channel.notes = slices.DeleteFunc(channel.notes, func(n ChannelNote) bool { return n.ID == id })
++	return len(channel.notes) != before
++}
++
+ func (channel *Channel) SetSettings(settings ChannelSettings) {
+ 	defer channel.MarkDirty(IncludeSettings)
+ 
+-- 
+2.34.1
+

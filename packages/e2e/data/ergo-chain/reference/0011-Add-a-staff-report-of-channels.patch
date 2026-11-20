@@ -1,0 +1,188 @@
+From 9dd917bcb2a7c55e96d4873a0fc9cdeb77fe9ef2 Mon Sep 17 00:00:00 2001
+From: bench <bench@example.invalid>
+Date: Tue, 17 Nov 2026 19:47:08 -0800
+Subject: [PATCH 11/12] Add a staff report of channels
+
+---
+ irc/chanserv.go | 146 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 146 insertions(+)
+
+diff --git a/irc/chanserv.go b/irc/chanserv.go
+index acff8e00..5e794637 100644
+--- a/irc/chanserv.go
++++ b/irc/chanserv.go
+@@ -4,7 +4,10 @@
+ package irc
+ 
+ import (
++	"bytes"
++	"errors"
+ 	"fmt"
++	"net/textproto"
+ 	"regexp"
+ 	"slices"
+ 	"sort"
+@@ -13,6 +16,7 @@ import (
+ 	"time"
+ 	"unicode/utf8"
+ 
++	"github.com/ergochat/ergo/irc/email"
+ 	"github.com/ergochat/ergo/irc/modes"
+ 	"github.com/ergochat/ergo/irc/sno"
+ 	"github.com/ergochat/ergo/irc/utils"
+@@ -233,6 +237,21 @@ can use it.`,
+ 			enabled:      chanregEnabled,
+ 			minParams:    1,
+ 		},
++		"report": {
++			handler: csReportHandler,
++			help: `Syntax: $bREPORT [EXPIRING | MAIL]$b
++        $bREPORT NOTE #channel <text>$b
++
++REPORT lists the registered channels that are about to expire and those that
++have notes. EXPIRING lists only the first, MAIL sends the report to the
++operators by email, and NOTE adds a note to a channel.`,
++			helpShort:         `$bREPORT$b gives staff an overview of the registered channels.`,
++			capabs:            []string{"chanreg"},
++			enabled:           chanregEnabled,
++			minParams:         0,
++			maxParams:         3,
++			unsplitFinalParam: true,
++		},
+ 		"note": {
+ 			handler: csNoteHandler,
+ 			help: `Syntax: $bNOTE #channel ADD <text>$b
+@@ -1269,3 +1288,130 @@ func csSuccessorHandler(service *ircService, server *Server, client *Client, com
+ 	channel.SetSuccessor(account.NameCasefolded)
+ 	service.Notice(rb, fmt.Sprintf(client.t("%[2]s will get %[1]s if your account is unregistered"), channel.Name(), account.Name))
+ }
++
++func csReportHandler(service *ircService, server *Server, client *Client, command string, params []string, rb *ResponseBuffer) {
++	config := server.Config()
++	sub := ""
++	if len(params) > 0 {
++		sub = strings.ToLower(params[0])
++	}
++	if sub == "note" {
++		if len(params) < 3 {
++			service.Notice(rb, client.t("Invalid parameters"))
++			return
++		}
++		channel := server.channels.Get(params[1])
++		if channel == nil || !channel.IsRegistered() {
++			service.Notice(rb, client.t("Channel is not registered"))
++			return
++		}
++		text := strings.Join(params[2:], " ")
++		if limit := config.Channels.Registration.NoteMaxLength; utf8.RuneCountInString(text) > limit {
++			service.Notice(rb, fmt.Sprintf(client.t("Notes can be at most %d characters long"), limit))
++		} else if id := channel.AddNote(client.Account(), text, config.Channels.Registration.NotesMax); id == 0 {
++			service.Notice(rb, fmt.Sprintf(client.t("%s already has the maximum of %d notes"), channel.Name(), config.Channels.Registration.NotesMax))
++		} else {
++			service.Notice(rb, fmt.Sprintf(client.t("Added note #%d to %s"), id, channel.Name()))
++		}
++		server.snomasks.Send(sno.LocalChannels, fmt.Sprintf("STAFF %s REPORT %s", client.AccountName(), channel.Name()))
++		return
++	}
++	if sub != "" && sub != "expiring" && sub != "mail" {
++		service.Notice(rb, client.t("Invalid parameters"))
++		return
++	}
++
++	after, warning := time.Duration(*config.Channels.Registration.ExpireAfter), time.Duration(*config.Channels.Registration.ExpireWarning)
++	type entry struct {
++		channel *Channel
++		founder string
++		when    time.Time
++		note    string
++	}
++	var expiring, noted []entry
++	now := time.Now().UTC()
++	for _, channel := range server.channels.Channels() {
++		if !channel.IsRegistered() {
++			continue
++		}
++		founder := channel.Founder()
++		if account, err := server.accounts.LoadAccount(founder); err == nil {
++			founder = account.Name
++		}
++		if expires := channel.LastUsed().Add(after); after > 0 && !now.Before(expires.Add(-warning)) {
++			expiring = append(expiring, entry{channel: channel, founder: founder, when: expires})
++		}
++		if notes := channel.Notes(); len(notes) > 0 {
++			newest := notes[len(notes)-1]
++			noted = append(noted, entry{channel: channel, founder: founder, when: newest.Time, note: newest.Text})
++		}
++	}
++	byDate := func(a, b entry) int { return a.when.Compare(b.when) }
++	slices.SortFunc(expiring, byDate)
++	slices.SortFunc(noted, byDate)
++
++	var lines []string
++	lines = append(lines, fmt.Sprintf("Unused channels expire after %d days; the founder is warned %d days before", int(after.Hours()/24), int(warning.Hours()/24)))
++	lines = append(lines, "Expiring:")
++	for _, e := range expiring {
++		lines = append(lines, fmt.Sprintf("%s %s %s", e.channel.Name(), e.founder, e.when.Format(time.RFC3339)))
++	}
++	if sub == "" || sub == "mail" {
++		lines = append(lines, "With notes:")
++		for _, e := range noted {
++			line := fmt.Sprintf("%s %s %s", e.channel.Name(), e.founder, e.when.Format(time.RFC3339))
++			if sub == "" {
++				line += ": " + e.note
++			}
++			lines = append(lines, line)
++		}
++	}
++
++	if sub != "mail" {
++		room := 510 - len(":"+service.prefix+" NOTICE "+client.Nick()+" :")
++		for _, line := range lines {
++			for text := line; text != ""; {
++				cut := min(len(text), room)
++				for cut < len(text) && !utf8.RuneStart(text[cut]) {
++					cut--
++				}
++				service.Notice(rb, text[:cut])
++				text = text[cut:]
++			}
++		}
++		return
++	}
++
++	network := config.Network.Name
++	mailConfig := config.Accounts.Registration.EmailVerification
++	var recipients []string
++	for _, c := range server.clients.AllClients() {
++		if c.Oper() != nil && c.Account() != "" {
++			if account, err := server.accounts.LoadAccount(c.Account()); err == nil && account.Settings.Email != "" {
++				recipients = append(recipients, account.Settings.Email)
++			}
++		}
++	}
++	service.Notice(rb, fmt.Sprintf(client.t("Mailing the report to %d operators"), len(recipients)))
++	go func() {
++		for _, to := range recipients {
++			message := email.ComposeMail(mailConfig, to, fmt.Sprintf("[%s] Channel report", network))
++			message = *bytes.NewBuffer(bytes.Replace(message.Bytes(), []byte("\r\n\r\n"), []byte("\r\nAuto-Submitted: auto-generated\r\n\r\n"), 1))
++			message.WriteString(strings.Join(lines, "\r\n") + "\r\n\r\n-- " + network + " staff\r\n")
++			var err error
++			for attempt := 0; attempt < 3; attempt++ {
++				if err = email.SendMail(mailConfig, to, message.Bytes()); err == nil {
++					break
++				}
++				var smtpErr *textproto.Error
++				if !errors.As(err, &smtpErr) || smtpErr.Code/100 != 4 {
++					break
++				}
++				time.Sleep(3 * time.Second)
++			}
++			if err != nil {
++				server.logger.Error("internal", "Failed to mail the channel report", to, err.Error())
++			}
++		}
++	}()
++}
+-- 
+2.34.1
+

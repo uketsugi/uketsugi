@@ -1,0 +1,326 @@
+From 96567c14d6455988a804769c92d196cd6d537340 Mon Sep 17 00:00:00 2001
+From: bench <bench@example.invalid>
+Date: Tue, 17 Nov 2026 19:38:31 -0800
+Subject: [PATCH 06/12] Expire registered channels nobody uses
+
+---
+ default.yaml      |  7 ++++
+ irc/chanexpire.go | 85 +++++++++++++++++++++++++++++++++++++++++++++++
+ irc/channel.go    | 13 ++++++++
+ irc/channelreg.go |  4 +++
+ irc/config.go     | 20 ++++++++---
+ irc/getters.go    | 40 ++++++++++++++++++++++
+ irc/server.go     |  1 +
+ traditional.yaml  |  7 ++++
+ 8 files changed, 172 insertions(+), 5 deletions(-)
+ create mode 100644 irc/chanexpire.go
+
+diff --git a/default.yaml b/default.yaml
+index b7a70a32..ca58eedc 100644
+--- a/default.yaml
++++ b/default.yaml
+@@ -701,6 +701,13 @@ channels:
+         notes-max: 25
+         note-max-length: 300
+ 
++        # a registered channel that nobody with an account has joined for this long
++        # loses its registration (0 turns expiry off); its founder is mailed
++        expire-after: 60d
++
++        # the founder is warned by mail this long before that
++        expire-warning: 7d
++
+     # as a crude countermeasure against spambots, anonymous connections younger
+     # than this value will get an empty response to /LIST (a time period of 0 disables)
+     list-delay: 0s
+diff --git a/irc/chanexpire.go b/irc/chanexpire.go
+new file mode 100644
+index 00000000..9f129272
+--- /dev/null
++++ b/irc/chanexpire.go
+@@ -0,0 +1,85 @@
++// released under the MIT license
++
++package irc
++
++import (
++	"bytes"
++	"errors"
++	"fmt"
++	"net/textproto"
++	"time"
++
++	"github.com/ergochat/ergo/irc/email"
++)
++
++// expireChannels runs once at start-up and then on a timer: registered channels that nobody with an account has
++// joined for `expire-after` lose their registration, and their founders are mailed a warning before and a note after.
++func (server *Server) expireChannels() {
++	config := server.Config()
++	after, warning := time.Duration(*config.Channels.Registration.ExpireAfter), time.Duration(*config.Channels.Registration.ExpireWarning)
++	next := time.Hour
++	if after > 0 && after/4 < next {
++		next = after / 4
++	}
++	defer func() { time.AfterFunc(next, server.expireChannels) }()
++	if after == 0 {
++		return
++	}
++
++	type outgoing struct{ to, subject, body string }
++	var outbox []outgoing
++	network := config.Network.Name
++	now := time.Now().UTC()
++	for _, channel := range server.channels.Channels() {
++		if !channel.IsRegistered() {
++			continue
++		}
++		founder, name := channel.Founder(), channel.Name()
++		if channel.HasAccountMembers() {
++			channel.SetLastUsed(now)
++			continue
++		}
++		expires := channel.LastUsed().Add(after)
++		var to string
++		if account, err := server.accounts.LoadAccount(founder); err == nil {
++			to = account.Settings.Email
++		}
++		if !now.Before(expires) {
++			if server.channels.SetUnregistered(channel.NameCasefolded(), founder) == nil && to != "" {
++				outbox = append(outbox, outgoing{to, fmt.Sprintf("[%s] %s has expired", network, name),
++					fmt.Sprintf("Nobody with an account has joined %s for %s, so its registration has expired.\r\n", name, after)})
++			}
++		} else if warning > 0 && !now.Before(expires.Add(-warning)) && !channel.ExpiryWarned() {
++			channel.SetExpiryWarned()
++			for _, c := range server.accounts.AccountToClients(founder) {
++				c.Send(nil, chanservService.prefix, "NOTICE", c.Nick(), fmt.Sprintf("[%s] %s", name,
++					fmt.Sprintf(c.t("Nobody with an account has joined this channel for a while; its registration will expire on %s unless someone does"), expires.Format(time.RFC3339))))
++			}
++			if to != "" {
++				outbox = append(outbox, outgoing{to, fmt.Sprintf("[%s] %s will expire on %s", network, name, expires.Format(time.RFC3339)),
++					fmt.Sprintf("Nobody with an account has joined %s for a while. Its registration will expire on %s unless someone joins.\r\n", name, expires.Format(time.RFC3339))})
++			}
++		}
++	}
++
++	mailConfig := config.Accounts.Registration.EmailVerification
++	for _, m := range outbox {
++		message := email.ComposeMail(mailConfig, m.to, m.subject)
++		message = *bytes.NewBuffer(bytes.Replace(message.Bytes(), []byte("\r\n\r\n"), []byte("\r\nAuto-Submitted: auto-generated\r\n\r\n"), 1))
++		message.WriteString(m.body + "\r\n-- " + network + " staff\r\n")
++		var err error
++		for attempt := 0; attempt < 3; attempt++ {
++			if err = email.SendMail(mailConfig, m.to, message.Bytes()); err == nil {
++				break
++			}
++			var smtpErr *textproto.Error
++			if !errors.As(err, &smtpErr) || smtpErr.Code/100 != 4 {
++				break
++			}
++			time.Sleep(3 * time.Second)
++		}
++		if err != nil {
++			server.logger.Error("internal", "Failed to mail channel founder", m.to, err.Error())
++		}
++	}
++}
+diff --git a/irc/channel.go b/irc/channel.go
+index 297f8cd0..0931e58b 100644
+--- a/irc/channel.go
++++ b/irc/channel.go
+@@ -64,6 +64,8 @@ type Channel struct {
+ 	notes             []ChannelNote
+ 	greetingLog       []GreetingChange
+ 	freeze            *ChannelFreeze
++	lastUsed          time.Time
++	expiryWarned      bool
+ 	// these caches are paired to allow iteration over channel members without holding the lock
+ 	membersCache    []*Client
+ 	memberDataCache []*memberData
+@@ -140,6 +142,8 @@ func (channel *Channel) applyRegInfo(chanReg RegisteredChannel) {
+ 	channel.notes = slices.Clone(chanReg.Notes)
+ 	channel.greetingLog = slices.Clone(chanReg.GreetingLog)
+ 	channel.freeze = chanReg.Freeze
++	channel.lastUsed = chanReg.LastUsed
++	channel.expiryWarned = chanReg.ExpiryWarned
+ 
+ 	for _, mode := range chanReg.Modes {
+ 		channel.flags.SetMode(mode, true)
+@@ -182,6 +186,8 @@ func (channel *Channel) ExportRegistration() (info RegisteredChannel) {
+ 	info.Notes = slices.Clone(channel.notes)
+ 	info.GreetingLog = slices.Clone(channel.greetingLog)
+ 	info.Freeze = channel.freeze
++	info.LastUsed = channel.lastUsed
++	info.ExpiryWarned = channel.expiryWarned
+ 
+ 	return
+ }
+@@ -331,6 +337,7 @@ func (channel *Channel) SetRegistered(founder string) error {
+ 	}
+ 	channel.registeredFounder = founder
+ 	channel.registeredTime = time.Now().UTC()
++	channel.lastUsed = channel.registeredTime
+ 	channel.accountToUMode[founder] = modes.ChannelFounder
+ 	return nil
+ }
+@@ -352,6 +359,8 @@ func (channel *Channel) SetUnregistered(expectedFounder string) {
+ 	channel.notes = nil
+ 	channel.greetingLog = nil
+ 	channel.freeze = nil
++	channel.lastUsed = zeroTime
++	channel.expiryWarned = false
+ 	// reset the UUID so that any re-registration will persist under
+ 	// a separate key:
+ 	channel.uuid = uuid
+@@ -963,6 +972,10 @@ func (channel *Channel) Join(client *Client, key string, isSajoin bool, rb *Resp
+ 		}
+ 	}
+ 
++	if rb.target == client && client.LoggedIntoAccount() {
++		channel.SetLastUsed(time.Now().UTC())
++	}
++
+ 	if greeting := channel.Greeting(); greeting != "" && rb.target == client {
+ 		lead := fmt.Sprintf("[%s] ", chname)
+ 		room := 510 - len(":"+chanservService.prefix+" NOTICE "+details.nick+" :"+lead)
+diff --git a/irc/channelreg.go b/irc/channelreg.go
+index d36781a9..b4d96881 100644
+--- a/irc/channelreg.go
++++ b/irc/channelreg.go
+@@ -73,6 +73,10 @@ type RegisteredChannel struct {
+ 	GreetingLog []GreetingChange
+ 	// Freeze is set while network staff have frozen the channel
+ 	Freeze *ChannelFreeze
++	// LastUsed is when someone with an account last joined the channel
++	LastUsed time.Time
++	// ExpiryWarned is set once the founder has been warned that the registration is about to expire
++	ExpiryWarned bool
+ }
+ 
+ // ChannelFreeze records who froze a channel, when and why.
+diff --git a/irc/config.go b/irc/config.go
+index 4048197c..ef3bd467 100644
+--- a/irc/config.go
++++ b/irc/config.go
+@@ -689,11 +689,13 @@ type Config struct {
+ 		OpOnlyCreation       bool `yaml:"operator-only-creation"`
+ 		Registration         struct {
+ 			Enabled               bool
+-			OperatorOnly          bool `yaml:"operator-only"`
+-			MaxChannelsPerAccount int  `yaml:"max-channels-per-account"`
+-			GreetingMaxLength     int  `yaml:"greeting-max-length"`
+-			NotesMax              int  `yaml:"notes-max"`
+-			NoteMaxLength         int  `yaml:"note-max-length"`
++			OperatorOnly          bool              `yaml:"operator-only"`
++			MaxChannelsPerAccount int               `yaml:"max-channels-per-account"`
++			GreetingMaxLength     int               `yaml:"greeting-max-length"`
++			NotesMax              int               `yaml:"notes-max"`
++			NoteMaxLength         int               `yaml:"note-max-length"`
++			ExpireAfter           *custime.Duration `yaml:"expire-after"`
++			ExpireWarning         *custime.Duration `yaml:"expire-warning"`
+ 		}
+ 		ListDelay        time.Duration    `yaml:"list-delay"`
+ 		InviteExpiration custime.Duration `yaml:"invite-expiration"`
+@@ -1724,6 +1726,14 @@ func LoadConfig(filename string) (config *Config, err error) {
+ 	if config.Channels.Registration.NoteMaxLength == 0 {
+ 		config.Channels.Registration.NoteMaxLength = 300
+ 	}
++	if config.Channels.Registration.ExpireAfter == nil {
++		sixtyDays := custime.Duration(60 * 24 * time.Hour)
++		config.Channels.Registration.ExpireAfter = &sixtyDays
++	}
++	if config.Channels.Registration.ExpireWarning == nil {
++		sevenDays := custime.Duration(7 * 24 * time.Hour)
++		config.Channels.Registration.ExpireWarning = &sevenDays
++	}
+ 
+ 	config.Server.Compatibility.forceTrailing = utils.BoolDefaultTrue(config.Server.Compatibility.ForceTrailing)
+ 	config.Server.Compatibility.allowTruncation = utils.BoolDefaultTrue(config.Server.Compatibility.AllowTruncation)
+diff --git a/irc/getters.go b/irc/getters.go
+index c7704219..dd6d088c 100644
+--- a/irc/getters.go
++++ b/irc/getters.go
+@@ -798,6 +798,36 @@ func (channel *Channel) Settings() (result ChannelSettings) {
+ 	return result
+ }
+ 
++// LastUsed is when someone with an account last joined the channel (when it was registered, if nobody has since).
++func (channel *Channel) LastUsed() time.Time {
++	channel.stateMutex.RLock()
++	defer channel.stateMutex.RUnlock()
++	return channel.lastUsed
++}
++
++func (channel *Channel) SetLastUsed(t time.Time) {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	channel.lastUsed = t
++	channel.expiryWarned = false
++}
++
++func (channel *Channel) ExpiryWarned() bool {
++	channel.stateMutex.RLock()
++	defer channel.stateMutex.RUnlock()
++	return channel.expiryWarned
++}
++
++func (channel *Channel) SetExpiryWarned() {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	channel.expiryWarned = true
++}
++
+ func (channel *Channel) Greeting() string {
+ 	channel.stateMutex.RLock()
+ 	defer channel.stateMutex.RUnlock()
+@@ -1198,3 +1228,13 @@ func (client *Client) checkMetadataThrottle() (throttled bool, remainingTime tim
+ 	client.metadataThrottle = throttle.ThrottleDetails
+ 	return
+ }
++
++// HasAccountMembers says whether anyone with an account is in the channel at the moment.
++func (channel *Channel) HasAccountMembers() bool {
++	for _, member := range channel.Members() {
++		if member.LoggedIntoAccount() {
++			return true
++		}
++	}
++	return false
++}
+diff --git a/irc/server.go b/irc/server.go
+index 823a98a8..2948ea85 100644
+--- a/irc/server.go
++++ b/irc/server.go
+@@ -151,6 +151,7 @@ func NewServer(config *Config, logger *logger.Manager) (*Server, error) {
+ 
+ 	time.AfterFunc(alwaysOnMaintenanceInterval, server.periodicAlwaysOnMaintenance)
+ 	time.AfterFunc(pushMaintenanceInterval, server.periodicPushMaintenance)
++	go server.expireChannels()
+ 
+ 	return server, nil
+ }
+diff --git a/traditional.yaml b/traditional.yaml
+index 29103aa3..9618a274 100644
+--- a/traditional.yaml
++++ b/traditional.yaml
+@@ -672,6 +672,13 @@ channels:
+         notes-max: 25
+         note-max-length: 300
+ 
++        # a registered channel that nobody with an account has joined for this long
++        # loses its registration (0 turns expiry off); its founder is mailed
++        expire-after: 60d
++
++        # the founder is warned by mail this long before that
++        expire-warning: 7d
++
+     # as a crude countermeasure against spambots, anonymous connections younger
+     # than this value will get an empty response to /LIST (a time period of 0 disables)
+     list-delay: 0s
+-- 
+2.34.1
+

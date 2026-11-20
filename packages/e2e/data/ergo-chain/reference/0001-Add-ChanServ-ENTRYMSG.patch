@@ -1,0 +1,177 @@
+From 74ed17b2bbd1506f93e857ecdce362a622966875 Mon Sep 17 00:00:00 2001
+From: ergo-dev <dev@example.invalid>
+Date: Tue, 17 Nov 2026 17:28:42 -0800
+Subject: [PATCH 01/12] Add ChanServ ENTRYMSG
+
+---
+ irc/channel.go    | 18 ++++++++++++++++++
+ irc/channelreg.go |  2 ++
+ irc/chanserv.go   | 38 ++++++++++++++++++++++++++++++++++++++
+ irc/getters.go    | 14 ++++++++++++++
+ 4 files changed, 72 insertions(+)
+
+diff --git a/irc/channel.go b/irc/channel.go
+index e5e0215c..56a69b54 100644
+--- a/irc/channel.go
++++ b/irc/channel.go
+@@ -12,6 +12,7 @@ import (
+ 	"strconv"
+ 	"strings"
+ 	"time"
++	"unicode/utf8"
+ 
+ 	"sync"
+ 
+@@ -58,6 +59,7 @@ type Channel struct {
+ 	settings          ChannelSettings
+ 	uuid              utils.UUID
+ 	metadata          map[string]string
++	greeting          string
+ 	// these caches are paired to allow iteration over channel members without holding the lock
+ 	membersCache    []*Client
+ 	memberDataCache []*memberData
+@@ -130,6 +132,7 @@ func (channel *Channel) applyRegInfo(chanReg RegisteredChannel) {
+ 	channel.settings = chanReg.Settings
+ 	channel.forward = chanReg.Forward
+ 	channel.metadata = chanReg.Metadata
++	channel.greeting = chanReg.Greeting
+ 
+ 	for _, mode := range chanReg.Modes {
+ 		channel.flags.SetMode(mode, true)
+@@ -168,6 +171,7 @@ func (channel *Channel) ExportRegistration() (info RegisteredChannel) {
+ 
+ 	info.Settings = channel.settings
+ 	info.Metadata = channel.metadata
++	info.Greeting = channel.greeting
+ 
+ 	return
+ }
+@@ -334,6 +338,7 @@ func (channel *Channel) SetUnregistered(expectedFounder string) {
+ 	var zeroTime time.Time
+ 	channel.registeredTime = zeroTime
+ 	channel.accountToUMode = make(map[string]modes.Mode)
++	channel.greeting = ""
+ 	// reset the UUID so that any re-registration will persist under
+ 	// a separate key:
+ 	channel.uuid = uuid
+@@ -945,6 +950,19 @@ func (channel *Channel) Join(client *Client, key string, isSajoin bool, rb *Resp
+ 		}
+ 	}
+ 
++	if greeting := channel.Greeting(); greeting != "" && rb.target == client {
++		lead := fmt.Sprintf("[%s] ", chname)
++		room := 510 - len(":"+chanservService.prefix+" NOTICE "+details.nick+" :"+lead)
++		for text := greeting; text != ""; {
++			cut := min(len(text), room)
++			for cut < len(text) && !utf8.RuneStart(text[cut]) {
++				cut--
++			}
++			rb.Add(nil, chanservService.prefix, "NOTICE", details.nick, lead+text[:cut])
++			text = text[cut:]
++		}
++	}
++
+ 	// TODO #259 can be implemented as Flush(false) (i.e., nonblocking) while holding joinPartMutex
+ 	rb.Flush(true)
+ 
+diff --git a/irc/channelreg.go b/irc/channelreg.go
+index 3e61e460..5f2f2d29 100644
+--- a/irc/channelreg.go
++++ b/irc/channelreg.go
+@@ -65,6 +65,8 @@ type RegisteredChannel struct {
+ 	Settings ChannelSettings
+ 	// Metadata set using the METADATA command
+ 	Metadata map[string]string
++	// Greeting is sent by ChanServ to users who join the channel
++	Greeting string
+ }
+ 
+ func (r *RegisteredChannel) Serialize() ([]byte, error) {
+diff --git a/irc/chanserv.go b/irc/chanserv.go
+index 492e3080..d53481c3 100644
+--- a/irc/chanserv.go
++++ b/irc/chanserv.go
+@@ -10,6 +10,7 @@ import (
+ 	"sort"
+ 	"strings"
+ 	"time"
++	"unicode/utf8"
+ 
+ 	"github.com/ergochat/ergo/irc/modes"
+ 	"github.com/ergochat/ergo/irc/sno"
+@@ -193,6 +194,18 @@ QUIT) are stored in your channel's history. Your options are:
+ 			enabled:   chanregEnabled,
+ 			minParams: 3,
+ 		},
++		"entrymsg": {
++			handler: csEntrymsgHandler,
++			help: `Syntax: $bENTRYMSG #channel [text]$b
++
++ENTRYMSG sets the greeting that ChanServ sends to everyone who joins the
++channel. Without text, it removes the greeting. Only the channel founder can
++change it.`,
++			helpShort:    `$bENTRYMSG$b sets the greeting for people joining a channel.`,
++			authRequired: true,
++			enabled:      chanregEnabled,
++			minParams:    1,
++		},
+ 		"howtoban": {
+ 			handler:   csHowToBanHandler,
+ 			helpShort: `$bHOWTOBAN$b suggests the best available way of banning a user`,
+@@ -975,3 +988,28 @@ func csHowToBanHandler(service *ircService, server *Server, client *Client, comm
+ 		}
+ 	}
+ }
++
++const maxGreetingLength = 200
++
++func csEntrymsgHandler(service *ircService, server *Server, client *Client, command string, params []string, rb *ResponseBuffer) {
++	channel := server.channels.Get(params[0])
++	if channel == nil || !channel.IsRegistered() {
++		service.Notice(rb, client.t("Channel is not registered"))
++		return
++	}
++	if !(channel.Founder() == client.Account() || client.HasRoleCapabs("chanreg")) {
++		service.Notice(rb, client.t("Insufficient privileges"))
++		return
++	}
++	greeting := strings.Join(params[1:], " ")
++	if utf8.RuneCountInString(greeting) > maxGreetingLength {
++		service.Notice(rb, fmt.Sprintf(client.t("Greetings can be at most %d characters long"), maxGreetingLength))
++		return
++	}
++	channel.SetGreeting(greeting)
++	if greeting == "" {
++		service.Notice(rb, fmt.Sprintf(client.t("Removed the greeting for %s"), channel.Name()))
++	} else {
++		service.Notice(rb, fmt.Sprintf(client.t("Set the greeting for %s"), channel.Name()))
++	}
++}
+diff --git a/irc/getters.go b/irc/getters.go
+index ee01df56..d7391cfa 100644
+--- a/irc/getters.go
++++ b/irc/getters.go
+@@ -798,6 +798,20 @@ func (channel *Channel) Settings() (result ChannelSettings) {
+ 	return result
+ }
+ 
++func (channel *Channel) Greeting() string {
++	channel.stateMutex.RLock()
++	defer channel.stateMutex.RUnlock()
++	return channel.greeting
++}
++
++func (channel *Channel) SetGreeting(greeting string) {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	channel.greeting = greeting
++}
++
+ func (channel *Channel) SetSettings(settings ChannelSettings) {
+ 	defer channel.MarkDirty(IncludeSettings)
+ 
+-- 
+2.34.1
+

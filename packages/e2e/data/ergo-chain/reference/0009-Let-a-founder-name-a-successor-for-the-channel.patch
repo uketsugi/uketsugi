@@ -1,0 +1,281 @@
+From 86b3958f70fa8dc0be9661b4378a781e2040ad47 Mon Sep 17 00:00:00 2001
+From: bench <bench@example.invalid>
+Date: Tue, 17 Nov 2026 19:43:45 -0800
+Subject: [PATCH 09/12] Let a founder name a successor for the channel
+
+---
+ default.yaml      |  4 ++--
+ irc/accounts.go   | 49 +++++++++++++++++++++++++++++++++++++++++++++++
+ irc/channel.go    |  4 ++++
+ irc/channelreg.go |  2 ++
+ irc/chanserv.go   | 32 +++++++++++++++++++++++++++++++
+ irc/config.go     |  8 ++++----
+ irc/getters.go    | 14 ++++++++++++++
+ traditional.yaml  |  4 ++--
+ 8 files changed, 109 insertions(+), 8 deletions(-)
+
+diff --git a/default.yaml b/default.yaml
+index ca58eedc..f4d869e8 100644
+--- a/default.yaml
++++ b/default.yaml
+@@ -703,10 +703,10 @@ channels:
+ 
+         # a registered channel that nobody with an account has joined for this long
+         # loses its registration (0 turns expiry off); its founder is mailed
+-        expire-after: 60d
++        expire-after: 90d
+ 
+         # the founder is warned by mail this long before that
+-        expire-warning: 7d
++        expire-warning: 14d
+ 
+     # as a crude countermeasure against spambots, anonymous connections younger
+     # than this value will get an empty response to /LIST (a time period of 0 disables)
+diff --git a/irc/accounts.go b/irc/accounts.go
+index d7428cab..2dc05861 100644
+--- a/irc/accounts.go
++++ b/irc/accounts.go
+@@ -4,12 +4,15 @@
+ package irc
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"crypto/rand"
+ 	"crypto/x509"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"net"
++	"net/textproto"
+ 	"sort"
+ 	"strconv"
+ 	"strings"
+@@ -27,6 +30,7 @@ import (
+ 	"github.com/ergochat/ergo/irc/modes"
+ 	"github.com/ergochat/ergo/irc/oauth2"
+ 	"github.com/ergochat/ergo/irc/passwd"
++	"github.com/ergochat/ergo/irc/sno"
+ 	"github.com/ergochat/ergo/irc/utils"
+ )
+ 
+@@ -1939,12 +1943,57 @@ func (am *AccountManager) Unregister(account string, erase bool) error {
+ 
+ 	// on our way out, unregister all the account's channels and delete them from the db
+ 	defer func() {
++		config := am.server.Config()
++		network := config.Network.Name
++		type outgoing struct{ to, subject, body string }
++		var outbox []outgoing
+ 		for _, channelName := range am.server.channels.ChannelsForAccount(casefoldedAccount, true) {
++			if channel := am.server.channels.Get(channelName); channel != nil && channel.Successor() != "" {
++				successor, loadErr := am.LoadAccount(channel.Successor())
++				if _, transferErr := channel.Transfer(nil, channel.Successor(), true); loadErr == nil && transferErr == nil {
++					channel.SetSuccessor("")
++					name := channel.Name()
++					am.server.snomasks.Send(sno.LocalChannels, fmt.Sprintf("%s passed to its successor, account %s", name, successor.Name))
++					for _, c := range am.AccountToClients(successor.NameCasefolded) {
++						c.Send(nil, chanservService.prefix, "NOTICE", c.Nick(), fmt.Sprintf("[%s] %s", name, c.t("You are now the founder of this channel")))
++					}
++					if successor.Settings.Email != "" {
++						body := fmt.Sprintf("The founder's account is gone, so you are now the founder of %s.\r\n", name)
++						if after := time.Duration(*config.Channels.Registration.ExpireAfter); after > 0 {
++							body += fmt.Sprintf("Its registration expires if nobody with an account joins it for %d days.\r\n", int(after.Hours()/24))
++						}
++						outbox = append(outbox, outgoing{successor.Settings.Email, fmt.Sprintf("[%s] You are now the founder of %s", network, name), body})
++					}
++					continue
++				}
++			}
+ 			err := am.server.channels.SetUnregistered(channelName, casefoldedAccount)
+ 			if err != nil {
+ 				am.server.logger.Error("internal", "couldn't unregister channel", channelName, err.Error())
+ 			}
+ 		}
++		go func() {
++			mailConfig := config.Accounts.Registration.EmailVerification
++			for _, m := range outbox {
++				message := email.ComposeMail(mailConfig, m.to, m.subject)
++				message = *bytes.NewBuffer(bytes.Replace(message.Bytes(), []byte("\r\n\r\n"), []byte("\r\nAuto-Submitted: auto-generated\r\n\r\n"), 1))
++				message.WriteString(m.body + "\r\n-- " + network + " staff\r\n")
++				var err error
++				for attempt := 0; attempt < 3; attempt++ {
++					if err = email.SendMail(mailConfig, m.to, message.Bytes()); err == nil {
++						break
++					}
++					var smtpErr *textproto.Error
++					if !errors.As(err, &smtpErr) || smtpErr.Code/100 != 4 {
++						break
++					}
++					time.Sleep(3 * time.Second)
++				}
++				if err != nil {
++					am.server.logger.Error("internal", "Failed to mail the successor of a channel", m.to, err.Error())
++				}
++			}
++		}()
+ 	}()
+ 
+ 	var credText string
+diff --git a/irc/channel.go b/irc/channel.go
+index f8d340bf..24bf9d64 100644
+--- a/irc/channel.go
++++ b/irc/channel.go
+@@ -70,6 +70,7 @@ type Channel struct {
+ 	joinLimit         *ChannelJoinLimit
+ 	recentJoins       []time.Time
+ 	joinLimitTripped  bool
++	successor         string
+ 	// these caches are paired to allow iteration over channel members without holding the lock
+ 	membersCache    []*Client
+ 	memberDataCache []*memberData
+@@ -149,6 +150,7 @@ func (channel *Channel) applyRegInfo(chanReg RegisteredChannel) {
+ 	channel.lastUsed = chanReg.LastUsed
+ 	channel.expiryWarned = chanReg.ExpiryWarned
+ 	channel.joinLimit = chanReg.JoinLimit
++	channel.successor = chanReg.Successor
+ 
+ 	for _, mode := range chanReg.Modes {
+ 		channel.flags.SetMode(mode, true)
+@@ -194,6 +196,7 @@ func (channel *Channel) ExportRegistration() (info RegisteredChannel) {
+ 	info.LastUsed = channel.lastUsed
+ 	info.ExpiryWarned = channel.expiryWarned
+ 	info.JoinLimit = channel.joinLimit
++	info.Successor = channel.successor
+ 
+ 	return
+ }
+@@ -368,6 +371,7 @@ func (channel *Channel) SetUnregistered(expectedFounder string) {
+ 	channel.lastUsed = zeroTime
+ 	channel.expiryWarned = false
+ 	channel.joinLimit = nil
++	channel.successor = ""
+ 	// reset the UUID so that any re-registration will persist under
+ 	// a separate key:
+ 	channel.uuid = uuid
+diff --git a/irc/channelreg.go b/irc/channelreg.go
+index 99ae27a2..de0392ce 100644
+--- a/irc/channelreg.go
++++ b/irc/channelreg.go
+@@ -77,6 +77,8 @@ type RegisteredChannel struct {
+ 	LastUsed time.Time
+ 	// JoinLimit is how many joins the channel takes in a window of time, if it is limited
+ 	JoinLimit *ChannelJoinLimit
++	// Successor is the account the channel passes to when the founder's account is unregistered
++	Successor string
+ 	// ExpiryWarned is set once the founder has been warned that the registration is about to expire
+ 	ExpiryWarned bool
+ }
+diff --git a/irc/chanserv.go b/irc/chanserv.go
+index f33fdb2f..ebe88aac 100644
+--- a/irc/chanserv.go
++++ b/irc/chanserv.go
+@@ -219,6 +219,18 @@ within that many seconds. The founder and channel admins can set it.`,
+ 			enabled:      chanregEnabled,
+ 			minParams:    2,
+ 		},
++		"successor": {
++			handler: csSuccessorHandler,
++			help: `Syntax: $bSUCCESSOR #channel [account]$b
++
++SUCCESSOR names the account that the channel passes to if the founder's account
++is unregistered. Without an account, it clears the successor. Only the founder
++can use it.`,
++			helpShort:    `$bSUCCESSOR$b names who gets the channel if the founder's account goes.`,
++			authRequired: true,
++			enabled:      chanregEnabled,
++			minParams:    1,
++		},
+ 		"note": {
+ 			handler: csNoteHandler,
+ 			help: `Syntax: $bNOTE #channel ADD <text>$b
+@@ -1222,3 +1234,23 @@ func csJoinLimitHandler(service *ircService, server *Server, client *Client, com
+ 	channel.SetJoinLimit(&ChannelJoinLimit{Joins: joins, Seconds: seconds})
+ 	service.Notice(rb, fmt.Sprintf(client.t("%s now takes at most %d joins every %d seconds"), channel.Name(), joins, seconds))
+ }
++
++func csSuccessorHandler(service *ircService, server *Server, client *Client, command string, params []string, rb *ResponseBuffer) {
++	channel := server.channels.Get(params[0])
++	if channel == nil || !channel.IsRegistered() || channel.Founder() != client.Account() {
++		service.Notice(rb, client.t("Insufficient privileges"))
++		return
++	}
++	if len(params) == 1 {
++		channel.SetSuccessor("")
++		service.Notice(rb, fmt.Sprintf(client.t("Cleared the successor of %s"), channel.Name()))
++		return
++	}
++	account, err := server.accounts.LoadAccount(params[1])
++	if err != nil {
++		service.Notice(rb, client.t("Account does not exist"))
++		return
++	}
++	channel.SetSuccessor(account.NameCasefolded)
++	service.Notice(rb, fmt.Sprintf(client.t("%[2]s will get %[1]s if your account is unregistered"), channel.Name(), account.Name))
++}
+diff --git a/irc/config.go b/irc/config.go
+index ef3bd467..2dbba399 100644
+--- a/irc/config.go
++++ b/irc/config.go
+@@ -1727,12 +1727,12 @@ func LoadConfig(filename string) (config *Config, err error) {
+ 		config.Channels.Registration.NoteMaxLength = 300
+ 	}
+ 	if config.Channels.Registration.ExpireAfter == nil {
+-		sixtyDays := custime.Duration(60 * 24 * time.Hour)
+-		config.Channels.Registration.ExpireAfter = &sixtyDays
++		ninetyDays := custime.Duration(90 * 24 * time.Hour)
++		config.Channels.Registration.ExpireAfter = &ninetyDays
+ 	}
+ 	if config.Channels.Registration.ExpireWarning == nil {
+-		sevenDays := custime.Duration(7 * 24 * time.Hour)
+-		config.Channels.Registration.ExpireWarning = &sevenDays
++		fourteenDays := custime.Duration(14 * 24 * time.Hour)
++		config.Channels.Registration.ExpireWarning = &fourteenDays
+ 	}
+ 
+ 	config.Server.Compatibility.forceTrailing = utils.BoolDefaultTrue(config.Server.Compatibility.ForceTrailing)
+diff --git a/irc/getters.go b/irc/getters.go
+index aee01b4a..9b722f87 100644
+--- a/irc/getters.go
++++ b/irc/getters.go
+@@ -828,6 +828,20 @@ func (channel *Channel) SetExpiryWarned() {
+ 	channel.expiryWarned = true
+ }
+ 
++func (channel *Channel) Successor() string {
++	channel.stateMutex.RLock()
++	defer channel.stateMutex.RUnlock()
++	return channel.successor
++}
++
++func (channel *Channel) SetSuccessor(account string) {
++	defer channel.MarkDirty(IncludeSettings)
++
++	channel.stateMutex.Lock()
++	defer channel.stateMutex.Unlock()
++	channel.successor = account
++}
++
+ // JoinLimit returns the channel's join limit, or nil when it has none.
+ func (channel *Channel) JoinLimit() *ChannelJoinLimit {
+ 	channel.stateMutex.RLock()
+diff --git a/traditional.yaml b/traditional.yaml
+index 9618a274..3e677adb 100644
+--- a/traditional.yaml
++++ b/traditional.yaml
+@@ -674,10 +674,10 @@ channels:
+ 
+         # a registered channel that nobody with an account has joined for this long
+         # loses its registration (0 turns expiry off); its founder is mailed
+-        expire-after: 60d
++        expire-after: 90d
+ 
+         # the founder is warned by mail this long before that
+-        expire-warning: 7d
++        expire-warning: 14d
+ 
+     # as a crude countermeasure against spambots, anonymous connections younger
+     # than this value will get an empty response to /LIST (a time period of 0 disables)
+-- 
+2.34.1
+
