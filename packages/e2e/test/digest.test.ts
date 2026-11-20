@@ -64,7 +64,10 @@ describeUseCases("what the model step writes", (w) => {
     expect(found.text).toContain(
       "Facts a model wrote from what it left, which nobody has checked:",
     );
-    expect(found.text).toContain("(written by a model, unchecked)");
+    // They are listed once: under the session, not again under Facts.
+    expect(found.text).toContain(
+      "Facts (2 of 2 shown, 2 of them in the previous session above; search_facts finds the rest):",
+    );
     const [fact] = found.facts;
     expect(fact).toMatchObject({
       author: "you",

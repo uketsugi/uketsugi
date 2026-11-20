@@ -36,7 +36,10 @@ export async function choosePicks(
   const next = newSession(key, ports.ids.uuid(), null, ports.clock.now());
   const sources = await briefSources(ports, { caller, project, session: next }, null);
   const { brief } = composeBrief(sources);
-  if (brief.facts.length >= sources.factCount) return null;
+  // A fact the previous session's section lists is shown there and not under Facts.
+  const { published = [], digested = [] } = brief.last_session ?? {};
+  const shown = new Set([...brief.facts, ...published, ...digested].map((fact) => fact.id));
+  if (shown.size >= sources.factCount) return null;
   const pool = sources.facts.map((fact) => fact.id);
   const own = await ownFacts(ports, caller, pool);
   const candidates = sources.facts.filter((fact) => own.has(fact.id));

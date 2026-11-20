@@ -305,8 +305,16 @@ describeUseCases("when and what the model step reads", (w) => {
       expect.stringContaining("number 7 "),
       expect.stringContaining("number 31 "),
     ]);
-    // The rule orders the rest as before: the newest first.
-    expect(brief?.facts[2]?.claim).toContain("number 40 ");
+    // The rule orders the rest as before, the newest first, leaving out the facts the previous
+    // session's section lists (the newest ones, which that session published).
+    const listed = brief?.last_session?.published ?? [];
+    expect(listed.map((fact) => fact.claim)).toEqual([
+      expect.stringContaining("number 40 "),
+      expect.stringContaining("number 39 "),
+      expect.stringContaining("number 38 "),
+      expect.stringContaining("number 37 "),
+    ]);
+    expect(brief?.facts[2]?.claim).toContain("number 36 ");
 
     // A session that said nothing and published nothing costs no call, whatever the project holds.
     await server.call("search_facts", { query: "settings file" });

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { BriefFact } from "@uketsugi/contracts";
 import { describe, expect, test } from "vitest";
 import { BRIEF_MAX_CHARS, composeBrief, type BriefSources } from "../src/brief.ts";
@@ -134,9 +135,8 @@ describe("the session brief", () => {
       '  "Stopped after the queue tests passed."',
       "Facts published while it ran:",
       `- ${id(20)} · The retry queue caps at five attempts`,
-      "Facts (2 of 14 shown; search_facts finds the rest):",
+      "Facts (2 of 14 shown, 1 of them in the previous session above; search_facts finds the rest):",
       `- ${id(21)} · Uploads are chunked at 8 MB (reviewed)`,
-      `- ${id(20)} · The retry queue caps at five attempts`,
     ]);
     expect(brief).toMatchObject({
       held: [{ id: id(1), state: "claimed", holder: "you" }],
@@ -150,7 +150,7 @@ describe("the session brief", () => {
         note: "Stopped after the queue tests passed.",
         published: [{ id: id(20) }],
       },
-      facts: [{ id: id(21), trust: "reviewed" }, { id: id(20) }],
+      facts: [{ id: id(21), trust: "reviewed" }],
       fact_count: 14,
     });
   });
@@ -173,8 +173,9 @@ describe("the session brief", () => {
           written(30, "Deliveries are deduplicated on the event id"),
           { ...written(31, "The cap is 30 seconds"), trust: "reviewed" },
           fact(20, "The retry queue caps at five attempts"),
+          written(32, "Webhooks retry for a day"),
         ],
-        factCount: 3,
+        factCount: 4,
       }),
     );
     expect(text.split("\n").slice(1)).toEqual([
@@ -182,16 +183,16 @@ describe("the session brief", () => {
       '  "Stopped after the queue tests passed."',
       "Facts a model wrote from what it left, which nobody has checked:",
       `- ${id(30)} · Deliveries are deduplicated on the event id`,
-      "Facts (3 of 3 shown; search_facts finds the rest):",
-      `- ${id(30)} · Deliveries are deduplicated on the event id (written by a model, unchecked)`,
+      "Facts (4 of 4 shown, 1 of them in the previous session above; search_facts finds the rest):",
       `- ${id(31)} · The cap is 30 seconds (reviewed)`,
       `- ${id(20)} · The retry queue caps at five attempts`,
+      `- ${id(32)} · Webhooks retry for a day (written by a model, unchecked)`,
     ]);
     expect(brief.last_session).toMatchObject({
       published: [],
       digested: [{ id: id(30), from_session: "s-0800" }],
     });
-    expect(brief.facts[2]).not.toHaveProperty("from_session");
+    expect(brief.facts[1]).not.toHaveProperty("from_session");
   });
 
   test("says a session never closed when it left no note, and what it did instead", () => {
@@ -307,7 +308,42 @@ describe("the session brief", () => {
     expect(brief.last_session?.note?.endsWith("…")).toBe(true);
     const shown = brief.facts.length;
     expect(shown).toBeGreaterThan(2);
-    expect(text).toContain(`Facts (${shown} of 4321 shown; search_facts finds the rest):`);
+    const above = brief.last_session?.published.length ?? 0;
+    expect(above).toBeGreaterThan(0);
+    expect(text).toContain(
+      `Facts (${shown + above} of 4321 shown, ${above} of them in the previous session above; search_facts finds the rest):`,
+    );
     for (const line of text.split("\n")) expect(line.length).toBeLessThan(900);
+  });
+});
+
+describe("the brief lists each fact once", () => {
+  /** The newest sixteen facts of the store D8's treatment session read, newest first (`d8-facts.json`). */
+  const store: BriefFact[] = (
+    JSON.parse(readFileSync(new URL("./fixtures/d8-facts.json", import.meta.url), "utf8")) as [
+      string,
+      string,
+    ][]
+  ).map(([factId, claim]) => ({ id: factId, claim, trust: "unreviewed" }));
+  const D8_FACT = "01a1f1ce-6caf-70e8-a377-0a41e375cc50";
+
+  test("a fact the previous session's section lists is not listed under Facts, and D8's fact fits", () => {
+    const { brief, text } = composeBrief(
+      sources({
+        previous: { session: previous(), published: store.slice(0, 4), digested: [] },
+        facts: store,
+        factCount: store.length,
+      }),
+    );
+    const lines = text.split("\n");
+    const listed = lines.filter((line) => line.startsWith("- "));
+    expect(new Set(listed).size).toBe(listed.length);
+    expect(text).toContain(D8_FACT);
+    expect(brief.facts.map((entry) => entry.id)).toContain(D8_FACT);
+    expect(brief.facts.map((entry) => entry.id)).not.toContain(store[0]?.id);
+    expect(lines).toContain(
+      `Facts (${brief.facts.length + 4} of ${store.length} shown, 4 of them in the previous session above; search_facts finds the rest):`,
+    );
+    expect(text.length).toBeLessThanOrEqual(BRIEF_MAX_CHARS);
   });
 });

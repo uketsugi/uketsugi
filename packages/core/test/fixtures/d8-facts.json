@@ -1,0 +1,66 @@
+[
+  [
+    "01a1f1d6-c719-72e4-a2ef-d87594f4136d",
+    "The welcome-back window is `channels.registration.welcome-back-window`, default 24h (a nil value is set to 24h by LoadConfig); 0 turns the welcome-back message off so every account gets the greeting."
+  ],
+  [
+    "01a1f1d6-a927-70f6-a61f-f7ae0ea0fb8c",
+    "The greeting-length key is `channels.registration.greeting-max-length` (default 200 via LoadConfig), not `max-greeting-length`; `default.yaml` and `traditional.yaml` list `greeting-max-length: 200` under `channels.registration`."
+  ],
+  [
+    "01a1f1d6-a82c-7383-bb7d-493c2676e81a",
+    "For PRIVMSG-to-service commands marked unsplitFinalParam, servicePrivmsgHandler splits the message with splitRawFinalParam, which keeps the final parameter's internal and leading spaces, dropping only one separating space; the CHANSERV command form (serviceCmdHandler) still joins parsed params with single spaces."
+  ],
+  [
+    "01a1f1d6-a79d-75d0-bd0f-7d8178756a0b",
+    "`CS ENTRYMSG #channel REGULARS <text>` sets the welcome-back message, using the same founder/chanreg/admin permission check, freeze refusal, and GreetingMaxLength limit as the greeting; with no text (or only whitespace) it removes the welcome-back message. The welcome-back text is stored unmodified and is not recorded in the greeting history."
+  ],
+  [
+    "01a1f1d6-a4ca-735c-8f66-d3940038b74e",
+    "An account that joined a registered channel within `channels.registration.welcome-back-window` (default 24h) receives the channel's welcome-back message instead of the greeting; accounts without a login always get the greeting, and if no welcome-back message is set such a joiner gets no greeting."
+  ],
+  [
+    "01a1f1d1-d02b-7416-8a94-0bb6d15ee002",
+    "`make test` runs go test and go vet with tags \"i18n mysql postgresql sqlite\" and with no tags, then `./.check-gofmt.sh`; `make smoke` runs `install` and then `ergo run --conf ./default.yaml --smoke`, which needs the installed `ergo` on PATH, so a freshly built binary outside GOBIN fails with \"ergo: not found\"."
+  ],
+  [
+    "01a1f1d1-cdc7-7132-9baf-a9a4ee2df41d",
+    "`default.yaml` and `traditional.yaml` both list `max-greeting-length: 200`, `max-notes: 25` and `max-note-length: 300` under `channels.registration`, so they load unchanged and show the defaults."
+  ],
+  [
+    "01a1f1d1-bfa9-7080-b586-70ec91f2497a",
+    "Before the channel-limits change, NOTE ADD in ChanServ had no maximum note length; the only limit was the number of notes per channel, a fixed constant maxChannelNotes = 10."
+  ],
+  [
+    "01a1f1d1-a6a3-771f-9a2b-9533f7c79df8",
+    "The channel limits are read from `channels.registration.max-greeting-length` (default 200), `max-notes` (default 25) and `max-note-length` (default 300) into `Config.Channels.Registration.MaxGreetingLength`, `MaxNotes` and `MaxNoteLength`; LoadConfig substitutes these defaults when a key is missing or 0."
+  ],
+  [
+    "01a1f1ce-6eff-7226-b118-ed70ce4bd1b4",
+    "Channel.Join flushes the joiner's ResponseBuffer after the JOIN, topic and names; a greeting sent with client.Send after that flush reaches every session of the joining client, including for SAJOIN."
+  ],
+  [
+    "01a1f1ce-6e71-75de-812a-5f2d81455877",
+    "ChanServ commands marked authRequired are refused for clients not logged into an account before the handler runs, so a chanreg oper with no account cannot use them; ENTRYMSG omits authRequired and checks the login itself, which lets chanreg opers use it without an account (verified live)."
+  ],
+  [
+    "01a1f1ce-6dd4-73dc-bdc7-2a8431b40580",
+    "Services' NUH prefix (e.g. ChanServ!ChanServ@localhost) is a runtime value set at init and overridden by overrideServicePrefixes from the services hostname config; referencing the chanservService variable from code reachable from chanservCommands causes a Go initialization cycle, so the prefix is passed explicitly."
+  ],
+  [
+    "01a1f1ce-6d35-7623-a2ce-356c9c07f581",
+    "Inbound client lines longer than 512 bytes get ERR_INPUTTOOLONG (417) unless server.compatibility allowTruncation is set, so a user cannot submit 200 three-byte characters in one line (verified against a live test server)."
+  ],
+  [
+    "01a1f1ce-6caf-70e8-a377-0a41e375cc50",
+    "Outgoing IRC lines longer than 512 bytes are truncated by ircmsg when serialized, so a server-built message must be split by the sender to avoid losing its end."
+  ],
+  [
+    "01a1f1ce-5302-7347-84fd-008555220bb8",
+    "A registered channel's persisted registration includes its ChannelSettings, so a field added to ChannelSettings is saved and reloaded with the registration across restarts."
+  ],
+  [
+    "01a1f1c7-4206-7167-b909-f07ccd778dc9",
+    "`ChanServ`'s services prefix is `ChanServ!ChanServ@localhost` unless a services hostname is configured; unsolicited service messages take this as their prefix."
+  ]
+]

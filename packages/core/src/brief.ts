@@ -264,13 +264,25 @@ function previousSection(
   };
 }
 
-/** The facts that fit, under a heading that says how many of the project's facts they are. */
-function factSection(sources: BriefSources, budget: number): Section<BriefFact> {
+/**
+ * The facts that fit, under a heading that says how many of the project's facts are shown. A fact
+ * the previous session's section already lists (`listed`) is not listed again, and the room goes
+ * to the facts after it; the heading counts it as shown and says it is above.
+ */
+function factSection(
+  sources: BriefSources,
+  listed: readonly BriefFact[],
+  budget: number,
+): Section<BriefFact> {
   if (sources.factCount === 0) return { lines: ["This project holds no facts yet."], shown: [] };
-  const heading = (shown: number) =>
-    `Facts (${shown} of ${sources.factCount} shown; search_facts finds the rest):`;
-  const kept = fitting(sources.facts.map(factLine), budget - heading(sources.factCount).length - 1);
-  return { lines: [heading(kept.length), ...kept], shown: sources.facts.slice(0, kept.length) };
+  const heading = (shown: number) => {
+    const above =
+      listed.length === 0 ? "" : `, ${listed.length} of them in the previous session above`;
+    return `Facts (${shown + listed.length} of ${sources.factCount} shown${above}; search_facts finds the rest):`;
+  };
+  const rest = sources.facts.filter((fact) => !listed.some((entry) => entry.id === fact.id));
+  const kept = fitting(rest.map(factLine), budget - heading(sources.factCount).length - 1);
+  return { lines: [heading(kept.length), ...kept], shown: rest.slice(0, kept.length) };
 }
 
 /** The sources with every fact's claim cut to one line of the brief's size. */
@@ -314,7 +326,8 @@ export function composeBrief(given: BriefSources): ComposedBrief {
   const lapsed = take("Tasks whose lease lapsed", groups.lapsed);
   const previous = previousSection(sources, SHARES.previous);
   lines.push(...previous.lines);
-  const facts = factSection(sources, BRIEF_MAX_CHARS - sizeOf(lines));
+  const listed = [...(previous.view?.published ?? []), ...(previous.view?.digested ?? [])];
+  const facts = factSection(sources, listed, BRIEF_MAX_CHARS - sizeOf(lines));
   lines.push(...facts.lines);
   return {
     brief: {
