@@ -3,9 +3,11 @@
  * the only one that knows it. It runs on the calling thread: a statement holds the thread for as
  * long as it runs, and between statements the event loop gets a turn.
  *
- * Three things the engine does not do by itself are done here:
+ * Four things the engine does not do by itself are done here:
  * - A commit reaches the disk. The engine ships with `fsync` off, and its file layer has no
  *   `fsync` at all, so `SyncedNodeFs` adds one and the start parameters turn it on.
+ * - The log is checkpointed. Single-user mode never does it, so `pg_wal` would keep everything
+ *   written since the last clean close.
  * - The data directory has one owner (`data-dir.ts`).
  * - An existing store about to take new migrations is snapshotted first.
  */
@@ -18,7 +20,7 @@ import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { NodeFS } from "@electric-sql/pglite/nodefs";
 import { vector } from "@electric-sql/pglite-pgvector";
 import type { Store } from "@uketsugi/core";
-import { PGliteDialect, type KyselyPlugin } from "kysely";
+import { PGliteDialect, PGliteDriver, type Dialect, type KyselyPlugin } from "kysely";
 import type { Migration } from "kysely/migration";
 import { connect, type Db } from "./codec.ts";
 import {
@@ -128,6 +130,45 @@ const yieldBetweenStatements: KyselyPlugin = {
 };
 
 /**
+ * How much log may pile up since the last checkpoint before one is made: a segment. The log on
+ * disk then stays within a few segments, and a restart after a crash replays at most this much.
+ */
+const LOG_LIMIT_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The driver, with a checkpoint once a unit has taken the log past its limit. Kysely gives the
+ * connection back when no statement and no transaction is open, which is the only moment the
+ * command may run. It holds the thread for the syncs it makes, once in a segment of writes.
+ */
+class CheckpointingDriver extends PGliteDriver {
+  readonly #pglite: PGlite;
+
+  constructor(pglite: PGlite) {
+    super({ pglite });
+    this.#pglite = pglite;
+  }
+
+  override async releaseConnection(): Promise<void> {
+    if (this.#pglite.closed) return;
+    const { rows } = await this.#pglite.query<{ bytes: number }>(
+      "select pg_wal_lsn_diff(pg_current_wal_lsn(), redo_lsn)::float8 as bytes from pg_control_checkpoint()",
+    );
+    if ((rows[0]?.bytes ?? 0) > LOG_LIMIT_BYTES) await this.#pglite.exec("checkpoint");
+  }
+}
+
+/** The embedded dialect with the checkpointing driver in place of its own. */
+function checkpointing(pglite: PGlite): Dialect {
+  const base = new PGliteDialect({ pglite });
+  return {
+    createAdapter: () => base.createAdapter(),
+    createDriver: () => new CheckpointingDriver(pglite),
+    createIntrospector: (db) => base.createIntrospector(db),
+    createQueryCompiler: () => base.createQueryCompiler(),
+  };
+}
+
+/**
  * Starts the engine on a directory, or in memory without one, and loads a snapshot into it when
  * one is given. The caller migrates. A directory's commits are synced to disk; memory's are not,
  * and `onSync` is told of each sync.
@@ -149,7 +190,8 @@ export async function startEngine(
     extensions: { vector, pg_trgm },
     parsers: { [types.INT8]: (value: string) => Number(value) },
   });
-  const db = connect(new PGliteDialect({ pglite }), [yieldBetweenStatements]);
+  const dialect = directory === undefined ? new PGliteDialect({ pglite }) : checkpointing(pglite);
+  const db = connect(dialect, [yieldBetweenStatements]);
   return {
     db,
     snapshot: () => pglite.dumpDataDir("gzip"),
