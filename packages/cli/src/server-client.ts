@@ -17,7 +17,7 @@ import {
   type SignInCode,
   type TokenRevoked,
 } from "@uketsugi/contracts";
-import { hostProof } from "@uketsugi/server";
+import { hostProof, type Starting } from "@uketsugi/server";
 import { readHostKey, readRecord, readToken, type Home, type ServerRecord } from "./home.ts";
 import { CliFailure, describe } from "./report.ts";
 
@@ -124,6 +124,21 @@ export async function whoAnswers(home: Home, url: string): Promise<"own" | "othe
   if (key === null || typeof given !== "string") return "other";
   const [proof, expected] = [Buffer.from(given), Buffer.from(hostProof(key, challenge))];
   return proof.length === expected.length && timingSafeEqual(proof, expected) ? "own" : "other";
+}
+
+/**
+ * What this data directory's own server says while it has not opened its store, at the address it
+ * listens on; null where none does, or it has opened it. The body of `/healthz` is read here and
+ * nowhere else.
+ */
+export async function startingAt(home: Home, url: string): Promise<Starting | null> {
+  if ((await whoAnswers(home, url)) !== "own") return null;
+  const response = await fetch(new URL("/healthz", url), {
+    signal: AbortSignal.timeout(PROBE_WITHIN_MS),
+  }).catch(() => null);
+  if (response?.status !== 503) return null;
+  const body = (await response.json().catch(() => null)) as Starting | null;
+  return body?.status === "starting" || body?.status === "recovering" ? body : null;
 }
 
 /** Makes whatever answers at a recorded address prove it is this host's own server, before anything secret is sent there. */

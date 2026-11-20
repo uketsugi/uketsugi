@@ -20,11 +20,11 @@ import {
   type Embedder,
   type IdGen,
 } from "@uketsugi/core";
-import { openEmbeddedStore, openServerStore } from "@uketsugi/store";
+import { openEmbeddedStore, openServerStore, type RecoveryProgress } from "@uketsugi/store";
 import { v7 as uuidv7 } from "uuid";
-import { composeServer } from "./compose.ts";
-import { DEFAULT_HOST } from "./guard.ts";
+import { composeServer, listenStarting, type StartingListener } from "./compose.ts";
 import { createModelRunner, type ModelConfig } from "./model-runner.ts";
+import type { Starting } from "./starting.ts";
 
 /** The system's clock, in whole milliseconds. */
 const systemClock: Clock = {
@@ -51,6 +51,13 @@ export interface PortsOptions {
   readonly embedder?: Embedder | null;
   /** How long a task's lease lasts, in milliseconds. Left out, core's fifteen minutes. */
   readonly taskLeaseMs?: number;
+  /** Told how far the recovery of an embedded store that was not shut down cleanly has got. */
+  readonly onRecovery?: (progress: RecoveryProgress) => void;
+  /**
+   * Given the way to close the store as soon as it is open, so that a stop that comes while the
+   * rest of the start goes on can close it and leave it clean.
+   */
+  readonly onStoreOpen?: (close: () => Promise<void>) => void;
 }
 
 /** The store and the ports around it, with nobody in them yet. */
@@ -67,8 +74,12 @@ export interface OpenedPorts {
  */
 export async function openPorts(options: PortsOptions): Promise<OpenedPorts> {
   const { dataDir, databaseUrl, taskLeaseMs } = options;
-  const embedded = databaseUrl === undefined ? await openEmbeddedStore({ dataDir }) : null;
+  const embedded =
+    databaseUrl === undefined
+      ? await openEmbeddedStore({ dataDir, onRecovery: options.onRecovery })
+      : null;
   const store = embedded ?? (await openServerStore({ connectionString: databaseUrl ?? "" }));
+  options.onStoreOpen?.(() => store.close());
   const embedder = options.embedder ?? null;
   return {
     ports: { store, clock: systemClock, ids: systemIds, embedder, taskLeaseMs },
@@ -149,9 +160,44 @@ const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web/dist", import.meta.url)
 /** Where the plugins are: this package's own folder of them, beside its code. */
 const PLUGINS_DIR = fileURLToPath(new URL("../plugins", import.meta.url));
 
-/** Starts the whole server on a store, for its owner and whoever they add: what `ukt serve` runs. */
+/**
+ * Starts the whole server on a store, for its owner and whoever they add: what `ukt serve` runs.
+ * It listens first and answers what it is doing (`starting.ts`) while the store opens, which for a
+ * store that was not shut down cleanly is a recovery that takes as long as the disk takes.
+ */
 export async function startLocalServer(options: LocalServerOptions): Promise<LocalServer> {
-  const local = await openLocalPorts(options);
+  let state: Starting = { status: "starting" };
+  const starting = await listenStarting({
+    host: options.host,
+    port: options.port,
+    allowedHosts: options.allowedHosts,
+    hostKey: options.hostKey,
+    state: () => state,
+  });
+  try {
+    const local = await openLocalPorts({
+      ...options,
+      onRecovery: (progress) => {
+        state =
+          progress.phase === "done"
+            ? { status: "starting" }
+            : { status: "recovering", ...progress };
+        options.onRecovery?.(progress);
+      },
+    });
+    return await serveOn(starting, local, options);
+  } catch (error) {
+    await starting.close();
+    throw error;
+  }
+}
+
+/** Composes the server on the opened ports and takes over the listener that has answered until now. */
+async function serveOn(
+  starting: StartingListener,
+  local: LocalPorts,
+  options: LocalServerOptions,
+): Promise<LocalServer> {
   try {
     const { ports, owner } = local;
     let issuedToken: string | null = null;
@@ -179,10 +225,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
       snapshot: local.snapshot ?? undefined,
       onDigest: options.onDigest,
     });
-    const listening = await server.listen({
-      host: options.host ?? DEFAULT_HOST,
-      port: options.port,
-    });
+    const listening = server.takeOver(starting);
     return {
       url: listening.url,
       port: listening.port,

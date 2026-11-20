@@ -1,6 +1,14 @@
 /** The server package: the one composition function, and the wiring of the server `ukt` runs. */
-export { composeServer, localUrl } from "./compose.ts";
-export type { ComposeOptions, Edition, Listening, UketsugiServer } from "./compose.ts";
+export { composeServer, listenStarting, localUrl } from "./compose.ts";
+export type {
+  ComposeOptions,
+  Edition,
+  Listening,
+  StartingListener,
+  StartingOptions,
+  UketsugiServer,
+} from "./compose.ts";
+export { startingFailure, type Starting } from "./starting.ts";
 export type { HarnessRefusals, TokenNeed } from "./errors.ts";
 export { hostProof } from "./auth.ts";
 export { DEFAULT_HOST, loopbackOfEvery } from "./guard.ts";

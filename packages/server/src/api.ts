@@ -139,6 +139,17 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
 }
 
 /**
+ * `/host-proof`, asked before the secret is sent, so by nobody yet: the answer shows the secret
+ * to no one. The server answers it from the moment it listens, before its store is open.
+ */
+export function hostProofRoute(api: Hono<AuthEnv>, key: string): void {
+  api.get("/host-proof", onThisMachine, query("HostProofParams"), (c) => {
+    const proof: HostProof = { proof: hostProof(key, c.req.valid("query").challenge) };
+    return c.json(proof);
+  });
+}
+
+/**
  * The routes of whoever runs the server: what reaches every person's data, who may sign in,
  * whether the language model they configured answers, and a sign-in code for the operator
  * themselves. Each needs the host's own secret, from this
@@ -148,11 +159,7 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
 function operatorRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   const { ports, operator, signIn, snapshot } = deps;
   if (operator === undefined || operator.key === "") return;
-  // Asked before the secret is sent, so by nobody yet: the answer shows the secret to no one.
-  api.get("/host-proof", onThisMachine, query("HostProofParams"), (c) => {
-    const proof: HostProof = { proof: hostProof(operator.key, c.req.valid("query").challenge) };
-    return c.json(proof);
-  });
+  hostProofRoute(api, operator.key);
   const fromOperator = every(onThisMachine, hostAuth(operator));
   api.post("/sign-in-codes", fromOperator, (c) => {
     const { code, expiresAt } = signIn.mint(c.get("caller"));

@@ -8,8 +8,9 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { CATALOG, openLocalEmbedder } from "@uketsugi/embed";
-import { localUrl } from "@uketsugi/server";
-import { ENGINE_DIR, usable } from "@uketsugi/store";
+import type { Starting } from "@uketsugi/server";
+import { describeRecovery, ENGINE_DIR, usable } from "@uketsugi/store";
+import { checkService, foreignAnswer, listensAt } from "./doctor-service.ts";
 import { connectLines } from "./harness-lines.ts";
 import {
   looseModes,
@@ -20,7 +21,7 @@ import {
   type Home,
 } from "./home.ts";
 import { hostStore, storePlace, type HostStore } from "./host-store.ts";
-import { dirFlag, onStore, servingOf, type OnStore, type Program } from "./program.ts";
+import { dirFlag, onStore, type OnStore, type Program } from "./program.ts";
 import { CliFailure, describe, type Io, type Report } from "./report.ts";
 import {
   capabilities,
@@ -30,19 +31,9 @@ import {
   modelCheck,
   projects,
   servingNow,
-  whoAnswers,
+  startingAt,
 } from "./server-client.ts";
-import {
-  lastWords,
-  lingers,
-  SERVICE_COMMANDS,
-  serves,
-  serviceState,
-  startCommand,
-  startFix,
-  UNIT,
-  type ServiceState,
-} from "./service.ts";
+import { lingers, serves, serviceState, startCommand, startFix } from "./service.ts";
 
 /** One thing looked at. `warn` works but is less than it could be; `fail` needs its fix. */
 export interface Finding {
@@ -155,67 +146,22 @@ async function checkLanguageModel(home: Home, configured: boolean, ask: boolean)
   }
 }
 
-/** Where something that is not this data directory's server answers, at the address this one would listen on; null where nothing does. */
-async function foreignAnswer(home: Home): Promise<string | null> {
-  const runs = await servingOf(home, {});
-  const origin = localUrl(runs.host, Number(runs.port));
-  return (await whoAnswers(home, origin)) === "other" ? origin : null;
-}
-
-/**
- * Whether the server runs as its person's service: installed, enabled and running, with the
- * commands that stop it, start it and show what it printed. For one that is not running, the
- * cause: another program on its port, else the last lines it printed, and a fix that addresses it.
- */
-async function checkService(
-  io: Io,
-  env: NodeJS.ProcessEnv,
-  service: ServiceState,
-  home: Home,
-  lingering: boolean | null,
-): Promise<Finding> {
-  const check = "service";
-  const byHand = "the server runs while `ukt serve` does";
-  if (!service.manager) return { check, state: "ok", detail: `none: ${service.why}, so ${byHand}` };
-  if (service.text === null)
-    return { check, state: "warn", detail: `not installed, so ${byHand}`, fix: "ukt setup" };
-  if (!serves(service, home))
+/** A server that listens and has not opened its store: it answers what it is doing, and nothing else is asked of it. */
+function startingFinding(state: Starting): Finding {
+  const check = "server";
+  if (state.status === "starting")
     return {
       check,
       state: "warn",
-      detail: `${UNIT} serves another data directory, so here ${byHand}`,
-      fix: "ukt setup",
+      detail: "starting: it listens and has not opened its store yet",
+      fix: "wait a few seconds, then run `ukt doctor` again",
     };
-  const notes = [
-    ...Object.entries(SERVICE_COMMANDS).map(([what, typed]) => `${what}: ${typed}`),
-    ...(lingering === false
-      ? ["it stops when you log out of this machine; to keep it running: loginctl enable-linger"]
-      : []),
-  ];
-  if (!service.running) {
-    const detail = `${UNIT} is installed and not running: ${service.standing}`;
-    const origin = await foreignAnswer(home);
-    if (origin !== null)
-      return {
-        check,
-        state: "fail",
-        detail: `${detail}. Something that is not this data directory's server answers at ${origin}, which is the service's port`,
-        fix: "ukt setup --port <a free port>",
-        notes,
-      };
-    const why = (await lastWords(io, env, home)).trim().split("\n");
-    const fix = startFix(service, home);
-    return { check, state: "fail", detail, fix, notes: [...notes, ...why] };
-  }
-  return service.enabled
-    ? { check, state: "ok", detail: `${UNIT} is enabled and running`, notes }
-    : {
-        check,
-        state: "warn",
-        detail: `${UNIT} is running, but not enabled: it will not start at your next login`,
-        fix: "ukt setup",
-        notes,
-      };
+  return {
+    check,
+    state: "warn",
+    detail: `recovering its store after an unclean stop: ${describeRecovery(state)}`,
+    fix: "wait for it: `ukt serve` prints how far it has got, and stopping it is safe, the next start recovers again",
+  };
 }
 
 /** What the running server says of itself, or null with the finding that says why it cannot be asked. */
@@ -227,6 +173,12 @@ async function checkServer(
   const check = "server";
   const record = await servingNow(home);
   if (record === null) {
+    const starting = await startingAt(home, await listensAt(home));
+    if (starting !== null)
+      return {
+        findings: [startingFinding(starting), notChecked("store"), notChecked("language model")],
+        vector: null,
+      };
     const left = await readRecord(home);
     const detail =
       left === null

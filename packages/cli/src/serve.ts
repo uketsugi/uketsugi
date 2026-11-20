@@ -2,6 +2,7 @@
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { RevokedTokenError, type DigestReport } from "@uketsugi/core";
 import { CATALOG, openLocalEmbedder, type LocalEmbedder } from "@uketsugi/embed";
+import { describeRecovery, type RecoveryProgress } from "@uketsugi/store";
 import {
   DEFAULT_DAILY_TOKENS,
   loopbackOfEvery,
@@ -45,6 +46,8 @@ import { SERVICE_COMMANDS, serves, serviceState, UNIT } from "./service.ts";
 export interface ServeOptions extends Told, OnStore, LlmOptions {
   readonly dataDir?: string;
   readonly json?: boolean;
+  /** Given the way to close the store once it is open: what a stop that comes during the start closes. */
+  readonly onStoreOpen?: (close: () => Promise<void>) => void;
 }
 
 const count = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -86,6 +89,37 @@ function tellDigests(io: Io): (report: DigestReport) => void {
     waiting = report.waited;
     io.out(digestLine(report));
   };
+}
+
+/** How often a recovery that is going on says where it has got to. */
+const RECOVERY_TELLS_EVERY_MS = 10_000;
+
+/**
+ * What the terminal says while a store is recovered after an unclean stop: that it is, at once
+ * and before the first sync, then where it has got to every ten seconds, then that it is done.
+ * `stop` ends the telling, whatever came of the recovery.
+ */
+function tellRecovery(io: Io): { tell: (progress: RecoveryProgress) => void; stop: () => void } {
+  let latest: RecoveryProgress | null = null;
+  let timer: NodeJS.Timeout | undefined;
+  const stop = (): void => clearInterval(timer);
+  const tell = (progress: RecoveryProgress): void => {
+    const first = latest === null;
+    latest = progress;
+    if (first) {
+      io.out(
+        "uketsugi is recovering its store after an unclean stop (a power cut, or a stop that was cut short). It answers meanwhile: `ukt doctor` shows how far it has got, and stopping it is safe.",
+      );
+      timer = setInterval(
+        () => io.out(`recovering: ${describeRecovery(latest ?? progress)}`),
+        RECOVERY_TELLS_EVERY_MS,
+      );
+    }
+    if (progress.phase !== "done") return;
+    stop();
+    io.out(`recovered: ${describeRecovery(progress)}`);
+  };
+  return { tell, stop };
 }
 
 /** A started server: what to print, and how to stop it. */
@@ -281,8 +315,11 @@ async function startServing(
   const held = home.givenToken ?? onFile;
   const model = await openModel(io, home);
   const { embedder } = model;
+  const recovery = tellRecovery(io);
   const server = await startLocalServer({
     ...storeOptions(home, store),
+    onRecovery: recovery.tell,
+    onStoreOpen: options.onStoreOpen,
     host: told.host,
     port,
     embedder,
@@ -294,6 +331,7 @@ async function startServing(
     requireToken: told.requireToken,
     ...(llm === null ? {} : { model: llm, onDigest: tellDigests(io) }),
   }).catch(async (error: unknown) => {
+    recovery.stop();
     await embedder?.close();
     throw startFailure(error, home, `Port ${port} on ${told.host}`);
   });
@@ -334,11 +372,38 @@ async function startServing(
   };
 }
 
-/** Stops a started server on Ctrl-C or a termination signal, then ends the process. */
-function closeOnSignal(serving: Serving): void {
-  const stop = (): void => void serving.close().finally(() => process.exit(0));
+/** What ends the process on a stop, told how far the start has got. */
+export interface Stopping {
+  /** The store is open: a stop closes it from here on. */
+  readonly storeOpen: (close: () => Promise<void>) => void;
+  /** The server has started: a stop closes it. */
+  readonly started: (serving: Serving) => void;
+}
+
+/**
+ * Ends the process on Ctrl-C or a termination signal, whenever it comes. What is open is closed
+ * first: the server once it has started, the store once it is open, so that the store is left
+ * clean. A stop while a recovery is still going on, before the store is open, ends the process at
+ * once: the recovery is redone at the next start. The data directory's lock library has a
+ * listener of its own on these signals and re-raises one only when it is the only listener, so
+ * this one ends the process itself.
+ */
+export function endOnSignal(): Stopping {
+  let closer: (() => Promise<void>) | undefined;
+  const stop = (): void => {
+    if (closer === undefined) process.exit(0);
+    void closer().finally(() => process.exit(0));
+  };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  return {
+    storeOpen: (close) => {
+      closer ??= close;
+    },
+    started: (serving) => {
+      closer = () => serving.close();
+    },
+  };
 }
 
 /** Adds `serve` to the program. */
@@ -350,11 +415,11 @@ export function serveVerb({ io, env, verb, run }: Program): void {
     about,
     "environment",
   ).action(async (options: ServeOptions) => {
-    let started: Serving | undefined;
+    const stopping = endOnSignal();
     await run("serve", options, async () => {
-      started = await serve(io, options, env);
+      const started = await serve(io, { ...options, onStoreOpen: stopping.storeOpen }, env);
+      stopping.started(started);
       return started.report;
     });
-    if (started !== undefined) closeOnSignal(started);
   });
 }

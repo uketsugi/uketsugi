@@ -1,13 +1,11 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import type * as NodeFs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { scopeOf } from "@uketsugi/core";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { openEmbeddedStore, type EmbeddedStore } from "../src/index.ts";
+import { writeUntilKilled } from "./support/processes.ts";
 import { publishSample, sampleOwner } from "./support/sample.ts";
 
 /**
@@ -57,17 +55,16 @@ describe("a store whose owner is killed while it writes", () => {
 
   beforeAll(async () => {
     await store.close();
-    const writer = join(import.meta.dirname, "support", "writer.ts");
-    const args = ["--conditions=@uketsugi/source", writer, dataDir, "1000"];
-    const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "inherit"] });
-    for await (const line of createInterface(child.stdout)) {
-      acknowledged.push(line);
-      if (acknowledged.length === 1) {
-        refusal = await openEmbeddedStore({ dataDir }).catch((error: unknown) => error);
-      }
-      if (acknowledged.length === 12) child.kill("SIGKILL");
-    }
-    if (child.exitCode === null && child.signalCode === null) await once(child, "exit");
+    acknowledged.push(
+      ...(await writeUntilKilled(
+        dataDir,
+        (ids) => ids.length === 12,
+        async (ids) => {
+          if (ids.length === 1)
+            refusal = await openEmbeddedStore({ dataDir }).catch((error: unknown) => error);
+        },
+      )),
+    );
     store = await openEmbeddedStore({ dataDir, lockStaleMs: 2000 });
   });
 

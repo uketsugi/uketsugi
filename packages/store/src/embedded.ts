@@ -30,6 +30,7 @@ import {
   usable,
 } from "./data-dir.ts";
 import { migrate, migrationState, MIGRATIONS } from "./migrations.ts";
+import { recoverEngine, type RecoveryProgress } from "./recovery.ts";
 import { createStore } from "./store.ts";
 
 export interface EmbeddedStoreOptions {
@@ -40,6 +41,11 @@ export interface EmbeddedStoreOptions {
   readonly dataDir?: string;
   /** How old an unrefreshed lock must be before it is taken over. Ten seconds unless given. */
   readonly lockStaleMs?: number;
+  /**
+   * Told how far the recovery of a store that was not shut down cleanly has got. It runs off the
+   * main thread, so the process keeps answering while it does; a clean store makes no report.
+   */
+  readonly onRecovery?: (progress: RecoveryProgress) => void;
 }
 
 /** The embedded store: the Store port, and a snapshot of itself while it runs. */
@@ -75,12 +81,22 @@ interface EngineModule {
  * `fsync`, so the engine's `fsync` returned without syncing; here it syncs the host descriptor.
  */
 class SyncedNodeFs extends NodeFS {
+  readonly #onSync: () => void;
+
+  /** `onSync` is told after each sync. */
+  constructor(dataDir: string, onSync: () => void) {
+    super(dataDir);
+    this.#onSync = onSync;
+  }
+
   override async init(...args: Parameters<NodeFS["init"]>): ReturnType<NodeFS["init"]> {
     const { emscriptenOpts } = await super.init(...args);
+    const onSync = this.#onSync;
     const addFsync: NonNullable<typeof emscriptenOpts.preRun>[number] = (mod) => {
       const nodefs = (mod as unknown as EngineModule).FS.filesystems.NODEFS;
       nodefs.stream_ops.fsync = (stream) => {
         nodefs.tryFSOperation(() => fsyncSync(stream.nfd));
+        onSync();
         return 0;
       };
     };
@@ -113,14 +129,19 @@ const yieldBetweenStatements: KyselyPlugin = {
 
 /**
  * Starts the engine on a directory, or in memory without one, and loads a snapshot into it when
- * one is given. The caller migrates. A directory's commits are synced to disk; memory's are not.
+ * one is given. The caller migrates. A directory's commits are synced to disk; memory's are not,
+ * and `onSync` is told of each sync.
  */
-export async function startEngine(directory?: string, snapshot?: Blob): Promise<Engine> {
+export async function startEngine(
+  directory?: string,
+  snapshot?: Blob,
+  onSync: () => void = () => undefined,
+): Promise<Engine> {
   if (directory !== undefined) await mkdir(directory, { recursive: true });
   const onDisk =
     directory === undefined
       ? {}
-      : { dataDir: directory, fs: new SyncedNodeFs(directory), startParams: DURABLE_START };
+      : { dataDir: directory, fs: new SyncedNodeFs(directory, onSync), startParams: DURABLE_START };
   const pglite = await PGlite.create({
     ...onDisk,
     loadDataDir: snapshot,
@@ -165,9 +186,11 @@ export async function openEmbeddedStore(
       : await lockDataDir(dataDir, options.lockStaleMs);
   try {
     if (dataDir !== undefined) await settleRestore(dataDir);
-    const engine = await startEngine(
-      dataDir === undefined ? undefined : join(dataDir, ENGINE_DIR),
-    ).catch(async (error: unknown) => {
+    const engineDir = dataDir === undefined ? undefined : join(dataDir, ENGINE_DIR);
+    const engine = await (async () => {
+      if (engineDir !== undefined) await recoverEngine(engineDir, options.onRecovery);
+      return startEngine(engineDir);
+    })().catch(async (error: unknown) => {
       if (dataDir === undefined) throw error;
       throw new StoreUnreadableError(dataDir, error, !(await usable(join(dataDir, ENGINE_DIR))));
     });

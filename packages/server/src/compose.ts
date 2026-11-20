@@ -40,6 +40,7 @@ import {
 } from "./guard.ts";
 import { createMcpEndpoint } from "./mcp.ts";
 import { pluginRoutes, PLUGINS_PATH, pluginsFolder } from "./plugins.ts";
+import { startingApp, type Starting } from "./starting.ts";
 import { createToolUses } from "./tool-uses.ts";
 
 /** What differs between editions of the server: what it is called, and what it tells a harness it refuses. */
@@ -100,6 +101,8 @@ export interface UketsugiServer {
   fetch(request: Request): Response | Promise<Response>;
   /** Listens on a host and port; port 0 takes a free one. */
   listen(options: { host?: string; port: number }): Promise<Listening>;
+  /** Serves from a listener that has answered until now (`listenStarting`) and is the server's from here on. */
+  takeOver(listener: StartingListener): Listening;
   /** Stops every listener, the worker and the MCP handler. It does not close the ports. */
   close(): Promise<void>;
 }
@@ -117,28 +120,85 @@ export function localUrl(host: string, port: number): string {
   return `http://${hostnameOf(loopbackOfEvery(host) ?? host)}:${port}`;
 }
 
-/** Listens on `host`, and says with the listener which address it took. */
-function listen(
-  fetch: UketsugiServer["fetch"],
-  host: string,
-  port: number,
-): Promise<{ listening: Omit<Listening, "beyond">; address: string }> {
+/** Answers a request; `env` is what the node server hands on of the connection it came on. */
+type Handler = (request: Request, env: unknown) => Response | Promise<Response>;
+
+/** A listener of the server's address that serves what it is given, and can be given another handler. */
+interface Bound {
+  readonly port: number;
+  readonly url: string;
+  /** The host it was asked to listen on, without brackets. */
+  readonly host: string;
+  /** The address it took. */
+  readonly address: string;
+  readonly close: () => Promise<void>;
+  /** From now on this serves requests. */
+  readonly serveWith: (handler: Handler) => void;
+}
+
+/** Adds the address a server listens on to the names it answers to, unless it is a loopback one. */
+function nameAddress(names: Set<string>, address: string): void {
+  if (loopbackOfEvery(address) === null) names.add(hostnameOf(address));
+}
+
+/** Listens on `host` and serves `first`. */
+function listen(first: Handler, host: string, port: number): Promise<Bound> {
+  let handler = first;
   return new Promise((resolve, reject) => {
+    const fetch: Handler = (request, env) => handler(request, env);
     const server = serve({ fetch, port, hostname: host }, (info: AddressInfo) => {
-      const listening = {
+      resolve({
         port: info.port,
         url: localUrl(host, info.port),
+        host,
+        address: info.address,
         close: () =>
           new Promise<void>((done, fail) => {
             const node = server as NodeServer;
             node.closeAllConnections();
             node.close((error) => (error === undefined ? done() : fail(error)));
           }),
-      };
-      resolve({ listening, address: info.address });
+        serveWith: (next) => {
+          handler = next;
+        },
+      });
     });
     server.once("error", reject);
   });
+}
+
+/** The address a server listens on, without the brackets of an IPv6 one. */
+const bareAddress = (host: string): string => host.replace(/^\[|\]$/g, "");
+
+/** A listener that answers while the server's store is not open, and the way to hand it to the server that opens it. */
+export type StartingListener = Bound;
+
+export interface StartingOptions {
+  /** The address to listen on. Left out, this machine alone. */
+  readonly host?: string;
+  /** 0 takes a free port. */
+  readonly port: number;
+  /** Other hostnames the server is reached by, as for `composeServer`. */
+  readonly allowedHosts?: readonly string[];
+  /** The host's own secret, for the proof that this is its server. */
+  readonly hostKey?: string;
+  /** What the server is doing, read on every request. */
+  readonly state: () => Starting;
+  readonly onError?: (error: unknown) => void;
+}
+
+/**
+ * Listens and answers every request with what the server is doing until `takeOver` hands the
+ * listener to the server that has opened its store. The one listener stays: nobody is refused
+ * a connection at any point of the start.
+ */
+export async function listenStarting(options: StartingOptions): Promise<StartingListener> {
+  const names = new Set([...localhostAllowedHostnames(), ...(options.allowedHosts ?? [])]);
+  const onError = options.onError ?? ((error: unknown) => console.error(error));
+  const app = startingApp({ names, hostKey: options.hostKey, state: options.state, onError });
+  const bound = await listen(app.fetch, bareAddress(options.host ?? DEFAULT_HOST), options.port);
+  nameAddress(names, bound.host);
+  return bound;
 }
 
 /**
@@ -243,17 +303,22 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   if (plugins !== null) http.route(PLUGINS_PATH, pluginRoutes(plugins));
   if (webDir !== undefined && existsSync(webDir)) serveDashboard(http, webDir);
 
+  const takeOver = (bound: StartingListener): Listening => {
+    worker.start();
+    nameAddress(hostnames, bound.host);
+    if (!LOOPBACK_ADDRESSES.includes(bound.address)) reachable = true;
+    bound.serveWith(http.fetch);
+    const { port, url, close } = bound;
+    const listening = { port, url, close, beyond: reachable };
+    listeners.push(listening);
+    return listening;
+  };
+
   return {
     fetch: (request) => http.fetch(request),
+    takeOver,
     async listen({ host = DEFAULT_HOST, port }) {
-      worker.start();
-      const address = host.replace(/^\[|\]$/g, "");
-      const { listening: taken, address: bound } = await listen(http.fetch, address, port);
-      if (loopbackOfEvery(address) === null) hostnames.add(hostnameOf(address));
-      if (!LOOPBACK_ADDRESSES.includes(bound)) reachable = true;
-      const listening = { ...taken, beyond: reachable };
-      listeners.push(listening);
-      return listening;
+      return takeOver(await listen(http.fetch, bareAddress(host), port));
     },
     async close() {
       await Promise.all(listeners.splice(0).map((listening) => listening.close()));
