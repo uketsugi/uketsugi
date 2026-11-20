@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dup": "jscpd",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm dup",
+    "advisories": "node scripts/advisories.ts",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm advisories && pnpm test && pnpm dup",
     "generate": "pnpm -r generate && prettier --write packages/core/src/scan/token-rules.json",
     "ukt": "node --conditions=@uketsugi/source packages/cli/src/index.ts"
   },

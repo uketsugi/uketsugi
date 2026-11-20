@@ -30,7 +30,7 @@ export default defineConfig({
   resolve: { conditions: ["@uketsugi/source"] },
   ssr: { resolve: { conditions: ["@uketsugi/source"] } },
   test: {
-    include: ["packages/*/test/**/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "scripts/*.test.ts"],
     environment: "node",
     globalSetup: ["packages/testkit/src/own-home.ts"],
     setupFiles: ["packages/store/test/support/no-disk-sync.ts"],

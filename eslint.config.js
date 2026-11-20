@@ -36,7 +36,7 @@ export default tseslint.config(
   },
   {
     // A test's `describe` block and a conformance suite are lists of cases, not one function's logic.
-    files: ["packages/*/test/**", "packages/testkit/src/conformance/**"],
+    files: ["packages/*/test/**", "scripts/*.test.ts", "packages/testkit/src/conformance/**"],
     rules: { "max-lines-per-function": "off" },
   },
   {
