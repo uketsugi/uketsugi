@@ -4,6 +4,7 @@
  */
 import { LIMITS } from "@uketsugi/contracts";
 import { activityReport, ModelError, SESSION_IDLE_MS, type ModelRunner } from "@uketsugi/core";
+import { eventually } from "@uketsugi/testkit";
 import { expect, test, vi } from "vitest";
 import { candidate, FOUND, scripted, serverWith } from "./digest-world.ts";
 import { describeUseCases } from "./use-case-world.ts";
@@ -260,7 +261,7 @@ describeUseCases("when and what the model step reads", (w) => {
     const server = serverWith(w, slow);
     await server.end(FOUND);
     const reading = server.drain();
-    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    await eventually(() => expect(asked).toHaveLength(1));
     await server.stop();
     await reading;
     expect(asked[0]?.aborted).toBe(true);

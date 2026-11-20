@@ -267,7 +267,6 @@ describeUseCases("chains of facts between a person and everyone", (w) => {
       const listed = (await listProjects(s.ports, s.bob)).projects.find((p) => p.key === his);
       expect(listed?.treatment).toBe("private");
     },
-    30_000,
   );
 
   test("nor does the rule's merge, whose survivor takes a citation of a shared fact", async () => {
@@ -302,7 +301,7 @@ describeUseCases("chains of facts between a person and everyone", (w) => {
       withdrawal: "ok",
     });
     expect((await s.seenBy(s.ann, first.id))?.supersededBy).toBe(second.id);
-  }, 30_000);
+  });
 
   test("a fact that cites a private fact of its author's says so, and follows that fact when it is shared or taken back, in whichever project it is and by that project's own choice", async () => {
     const [here, there] = [P("follows"), P("follows-elsewhere")];

@@ -4,7 +4,7 @@ import {
   type FactPage,
   type RulingList,
 } from "@uketsugi/contracts";
-import type { McpTestClient } from "@uketsugi/testkit";
+import { eventually, type McpTestClient } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { PROJECT, startServer, type RunningServer } from "./running-server.ts";
 
@@ -51,13 +51,12 @@ describe("the write path over /mcp: the scan, duplicates, corrections and redact
       await (await server.api("/api/export")).text(),
     ].join("\n");
   /** Waits for the server's own worker to get to a job a call left behind. */
-  async function eventually<T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+  function atLast<T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
+    return eventually(async () => {
       const value = await read();
-      if (done(value)) return value;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return read();
+      expect(done(value)).toBe(true);
+      return value;
+    }, 10);
   }
 
   test("a secret in a claim is replaced before anything is stored, and the result says so", async () => {
@@ -96,7 +95,7 @@ describe("the write path over /mcp: the scan, duplicates, corrections and redact
     );
     expect(second.similar).toMatchObject([{ id: first.id }]);
 
-    const merged = await eventually(
+    const merged = await atLast(
       () => byId(first.id),
       (facts) => facts.length === 2,
     );
@@ -133,7 +132,7 @@ describe("the write path over /mcp: the scan, duplicates, corrections and redact
       const previous = chain.at(-1);
       chain.push((await publish(`Uploads are scanned before storage${mark}`)).id);
       if (previous !== undefined)
-        await eventually(
+        await atLast(
           () => byId(previous),
           (found) => found.length === 2,
         );
@@ -173,7 +172,7 @@ describe("the write path over /mcp: the scan, duplicates, corrections and redact
       const previous = ids.at(-1);
       ids.push((await publish(claim, citation)).id);
       if (previous !== undefined)
-        await eventually(
+        await atLast(
           () => byId(previous),
           (found) => found.length === 2,
         );

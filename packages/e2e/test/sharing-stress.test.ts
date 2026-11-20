@@ -11,6 +11,7 @@
  * stress, which found a redaction that missed a merge five times in 1,679.
  */
 import { appendFileSync } from "node:fs";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import {
   createApp,
   createTokenIdentity,
@@ -198,7 +199,7 @@ async function hands(w: World, s: Shared, run: Run, me: Person, seed: number): P
       run.counts.reverts += 1;
       await byHand(run, "revert", revertRuling(run.ports, me.who, ruling.id));
     }
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await nextTurn();
   }
 }
 
@@ -211,7 +212,7 @@ async function jobs(w: World, run: Run, done: () => boolean): Promise<void> {
   });
   while (!done()) {
     await worker.drain();
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await nextTurn();
   }
   for (let pass = 0; pass < 40; pass += 1) {
     w.clock.advance(3_600_000);

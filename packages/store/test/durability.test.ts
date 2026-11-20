@@ -17,14 +17,6 @@ import { publishSample, sampleOwner } from "./support/sample.ts";
  */
 const synced = vi.hoisted(() => ({ calls: 0, toDisk: false }));
 
-/**
- * The limit of the two steps here that wait on the disk: this process's ten synced commits, and
- * the writer's, which is a process of its own and syncs every one. A sync takes as long as the
- * disk takes: 1 ms on a quiet one, and while other work wrote to it single syncs of 3.9 to 5.9
- * seconds were measured, and 10 seconds for the syncs of one close.
- */
-const DISK_WAIT_MS = 30_000;
-
 vi.mock("node:fs", async (original) => {
   const actual = await original<typeof NodeFs>();
   const fsyncSync = (fd: number): void => {
@@ -45,23 +37,19 @@ afterAll(async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test(
-  "every committed unit is synced to disk before it is acknowledged",
-  async () => {
-    const owner = await sampleOwner(store);
-    synced.toDisk = true;
-    try {
-      for (let n = 1; n <= 10; n += 1) {
-        const before = synced.calls;
-        await publishSample(store, owner, n);
-        expect(synced.calls).toBeGreaterThan(before);
-      }
-    } finally {
-      synced.toDisk = false;
+test("every committed unit is synced to disk before it is acknowledged", async () => {
+  const owner = await sampleOwner(store);
+  synced.toDisk = true;
+  try {
+    for (let n = 1; n <= 10; n += 1) {
+      const before = synced.calls;
+      await publishSample(store, owner, n);
+      expect(synced.calls).toBeGreaterThan(before);
     }
-  },
-  DISK_WAIT_MS,
-);
+  } finally {
+    synced.toDisk = false;
+  }
+});
 
 describe("a store whose owner is killed while it writes", () => {
   const acknowledged: string[] = [];
@@ -81,7 +69,7 @@ describe("a store whose owner is killed while it writes", () => {
     }
     if (child.exitCode === null && child.signalCode === null) await once(child, "exit");
     store = await openEmbeddedStore({ dataDir, lockStaleMs: 2000 });
-  }, DISK_WAIT_MS);
+  });
 
   test("a second process is refused while the owner runs, and told what to do", () => {
     expect(String(refusal)).toMatch(

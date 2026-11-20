@@ -7,8 +7,14 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ActivityReport, CapabilityDescriptor, FactPage } from "@uketsugi/contracts";
-import { chatAsked, chatCompletion, startFakeProvider, type FakeProvider } from "@uketsugi/testkit";
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import {
+  chatAsked,
+  chatCompletion,
+  eventually,
+  startFakeProvider,
+  type FakeProvider,
+} from "@uketsugi/testkit";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { doctor, type Finding } from "../src/doctor.ts";
 import { resolveHome } from "../src/home.ts";
 import { main } from "../src/index.ts";
@@ -128,7 +134,7 @@ describe("ukt serve with the language model ukt setup remembered", () => {
     expect(await hook({ hook_event_name: "Stop", last_assistant_message: SAID })).toBe(200);
     expect(await hook({ hook_event_name: "SessionEnd" })).toBe(200);
 
-    const facts = await vi.waitFor(async () => {
+    const facts = await eventually(async () => {
       const page = await read<FactPage>(`/api/facts?project=${encodeURIComponent(PROJECT)}`);
       expect(page.facts).toHaveLength(1);
       return page.facts;
@@ -139,7 +145,7 @@ describe("ukt serve with the language model ukt setup remembered", () => {
     // The session's text reached the provider as the user's message, never as the system's.
     const asked = provider.received.map(chatAsked).find(({ user }) => user.includes("retry path"));
     expect(asked?.system).not.toContain("retry path");
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(io.outLines).toEqual([
         `language model: read session ${session} · wrote 1 fact · 120 tokens in, 9 out · 129 of 1000000 tokens used in the last day`,
       ]),
@@ -178,7 +184,7 @@ describe("ukt serve with the language model ukt setup remembered", () => {
       provider.received
         .map((request) => JSON.parse(chatAsked(request).user) as { said?: object[] })
         .filter((record) => JSON.stringify(record).includes(asked));
-    await vi.waitFor(() => expect(records()).toHaveLength(1));
+    await eventually(() => expect(records()).toHaveLength(1));
     expect(records()[0]?.said).toEqual([
       { request: asked, answer: SAID },
       { request: "And the cap?", answer: "The cap is 30 seconds." },

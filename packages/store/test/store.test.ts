@@ -7,8 +7,9 @@ import {
   describeTaskStoreConformance,
   onTestServer,
   TEST_POSTGRES_URL,
+  eventually,
 } from "@uketsugi/testkit";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { openEmbeddedStore, openServerStore } from "../src/index.ts";
 import { sampleOwner } from "./support/sample.ts";
 
@@ -60,7 +61,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("on a server", () => {
     await onTestServer(
       `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${store.database}'`,
     );
-    await vi.waitFor(async () => expect(await sampleOwner(store)).toEqual(owner));
+    await eventually(async () => expect(await sampleOwner(store)).toEqual(owner));
     await store.close();
   });
 });

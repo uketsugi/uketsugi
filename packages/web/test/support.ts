@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, configure, render } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import axe from "axe-core";
 import { http, HttpResponse, type JsonBodyType } from "msw";
@@ -35,9 +35,17 @@ export const api = setupServer(
   answer("/api/rulings", fixtures.rulings),
 );
 
+/**
+ * How long a query that waits for the page (`findBy`, `waitFor`) may wait: the hang guard of every
+ * test, which `vitest.config.ts` passes in the environment. The page is there when the query finds
+ * it; a busy machine only makes that later.
+ */
+const HANG_GUARD_MS = Number(process.env["UKT_HANG_GUARD_MS"]);
+
 /** Runs the mocked server for a test file. A request no handler answers fails the test. */
 export function mockApi(): void {
   beforeAll(() => {
+    configure({ asyncUtilTimeout: HANG_GUARD_MS });
     api.listen({ onUnhandledFrame: "error" });
     document.documentElement.lang = LANGUAGE;
     // jsdom lays nothing out and draws nothing: it cannot scroll, which the router asks of it on

@@ -1,5 +1,5 @@
 import { acceptToken, ModelError } from "@uketsugi/core";
-import { connectMcp } from "@uketsugi/testkit";
+import { connectMcp, eventually } from "@uketsugi/testkit";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { composeServer, openLocalPorts, type UketsugiServer } from "../src/index.ts";
 
@@ -31,7 +31,7 @@ test("a job that fails and will be tried again leaves its reason in the server's
   });
   await client.close();
   // The write could not embed the fact and left that to a job; the job fails on the same model.
-  await vi.waitFor(() => expect(logged).toHaveLength(1));
+  await eventually(() => expect(logged).toHaveLength(1));
   const failure = logged[0] as Error;
   const id = String(published.structuredContent?.id);
   expect(failure.message).toBe(
@@ -54,7 +54,7 @@ test("a model that answers badly is one line in the terminal, not a stack", asyn
     citations: "src/gateway.ts:9",
   });
   await client.close();
-  await vi.waitFor(() => expect(printed).toHaveBeenCalledTimes(1));
+  await eventually(() => expect(printed).toHaveBeenCalledTimes(1));
   const line: unknown = printed.mock.calls[0]?.[0];
   printed.mockRestore();
   await quiet.close();

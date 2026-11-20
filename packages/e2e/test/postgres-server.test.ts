@@ -18,8 +18,9 @@ import {
   TEST_POSTGRES_URL,
   type McpTestClient,
   type TestDatabase,
+  eventually,
 } from "@uketsugi/testkit";
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { asHost, HOST_KEY, signInOnHost } from "./local-hosts.ts";
 
 const TOKEN = "ukt_test_token_for_the_postgres_server";
@@ -88,7 +89,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("the server on a PostgreSQL server", ()
     });
     expect(again.content.similar).toMatchObject([{ id: first.content.id }]);
     // The server's own worker claims the job the publish left and merges the two.
-    const rulings = await vi.waitFor(async () => {
+    const rulings = await eventually(async () => {
       const list = (await (await api("/api/rulings")).json()) as RulingList;
       expect(list.rulings).toHaveLength(1);
       return list.rulings;
@@ -164,7 +165,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("the server on a PostgreSQL server", ()
     type Explained = SearchFactsResult & { explain: { candidates: { cosine: number | null }[] } };
     const query = "How often is an invoice webhook retried?";
     // The worker's first pass leaves a job for each fact without a vector, then runs them.
-    const found = await vi.waitFor(async () => {
+    const found = await eventually(async () => {
       const asked = await call<Explained>("search_facts", { query, explain: true });
       const cosines = asked.content.explain.candidates.map((candidate) => candidate.cosine);
       expect(cosines).toHaveLength(2);

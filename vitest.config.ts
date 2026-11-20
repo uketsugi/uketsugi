@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { HANG_GUARD_MS } from "./packages/testkit/src/guard.ts";
 
 /**
  * One test run for the whole workspace. Packages resolve each other through the `@uketsugi/source`
@@ -13,11 +14,14 @@ import { defineConfig } from "vitest/config";
  * 5.1 to 6.4 s with 11 (9.1 s at most), which is past a test's five seconds and near a hook's ten,
  * while the whole run took 40 s with 6 and 40 to 55 s with 11.
  *
- * A test has 15 seconds and a hook 30, three times Vitest's defaults: the limits are of the clock,
- * and the machine that runs the gate is shared. With a second full run beside this one and other
- * work besides (a load average of 21 to 25), tests that start an engine of their own and take 1.0 to
- * 1.6 s alone took 4.0 to 5.1 s, in the store, the command line and the end-to-end cases alike. A
- * test that needs longer still says why where it asks for it.
+ * A test's and a hook's time limit is a guard against a hang and decides nothing: a test passes when
+ * the state it waits for is there, however long a busy machine takes to bring it, and a test or hook
+ * that never gets there is stopped after five minutes. The machine that runs the gate is shared:
+ * with other work beside it (a load average of 10 to 23) tests that start an engine of their own
+ * and take 1 to 1.6 s alone took 4 to 5 s, and at times past 15, which a limit that decided turned
+ * into twenty failed files in code no one had touched. A wait inside a test polls for its state
+ * and gives up after the same guard (`HANG_GUARD_MS`, which the web tests read from the
+ * environment this sets).
  *
  * The engine's disk syncs are dropped in every test file but the one about them (`no-disk-sync.ts`).
  */
@@ -30,7 +34,8 @@ export default defineConfig({
     globalSetup: ["packages/testkit/src/own-home.ts"],
     setupFiles: ["packages/store/test/support/no-disk-sync.ts"],
     maxWorkers: "50%",
-    testTimeout: 15_000,
-    hookTimeout: 30_000,
+    testTimeout: HANG_GUARD_MS,
+    hookTimeout: HANG_GUARD_MS,
+    env: { UKT_HANG_GUARD_MS: String(HANG_GUARD_MS) },
   },
 });

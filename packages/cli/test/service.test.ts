@@ -24,7 +24,7 @@ async function served() {
 
 // The manager of these tests runs the real server, which a test stops and starts again more than
 // once: each start is a new engine, a second alone and several beside other test files.
-describe("a server that runs as the service", { timeout: 60_000 }, () => {
+describe("a server that runs as the service", () => {
   test("is what doctor reports, with the commands that stop it, start it and show its log, and what each harness must send", async () => {
     const { dataDir, machine, origin, env, io, report } = await served();
 

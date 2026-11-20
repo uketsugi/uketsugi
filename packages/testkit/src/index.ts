@@ -1,5 +1,7 @@
 /** Test support: fakes for the ports that read the world, an MCP client, a tool caller, a test database, and the conformance suites a port's adapter must pass. */
 export { FakeClock, FakeEmbedder, FakeIdGen, FakeRunner, fakeUuid } from "./fakes.ts";
+export { eventually } from "./eventually.ts";
+export { HANG_GUARD_MS } from "./guard.ts";
 export { connectMcp } from "./mcp-client.ts";
 export type { McpCallResult, McpTestClient } from "./mcp-client.ts";
 export { toolCaller, type Called, type ToolCaller } from "./tool-caller.ts";
