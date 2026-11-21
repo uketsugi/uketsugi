@@ -11,9 +11,9 @@ import type { Actor } from "../domain.ts";
 import { isLive, type LiveFact } from "../facts/duplicates.ts";
 import { mergeDuplicates, MergeStale, notSetApart } from "../jobs/consolidate.ts";
 import type { CorePorts } from "../ports.ts";
-import { SEARCH_PROFILE } from "../search/fusion.ts";
+import { strongMatch } from "../search/standing.ts";
 import { onHeldFacts } from "../sharing.ts";
-import { rankFacts } from "../usecases/facts/search.ts";
+import { rankFacts, searchProfileOf } from "../usecases/facts/search.ts";
 import type { Reading } from "./candidates.ts";
 import { type Pair, type Verdict } from "./chores.ts";
 
@@ -42,14 +42,10 @@ export interface Comparison extends Pair {
  * meaning. Facts that merely share an identifier are not near.
  */
 async function nearOwn(ports: CorePorts, reading: Reading, subject: Subject): Promise<LiveFact[]> {
-  const ranking = await rankFacts(ports, reading, subject.claim, SEARCH_PROFILE.passLimit);
+  const ranking = await rankFacts(ports, reading, subject.claim, searchProfileOf(ports).passLimit);
   const strong = new Set(
     ranking.ranked
-      .filter(
-        ({ lexemeCoverage, cosine }) =>
-          lexemeCoverage >= SEARCH_PROFILE.strongCoverage ||
-          (cosine !== null && cosine >= SEARCH_PROFILE.strongCosine),
-      )
+      .filter((candidate) => strongMatch(candidate, ranking.profile) !== "none")
       .map((candidate) => candidate.factId),
   );
   const own = ranking.facts.filter(

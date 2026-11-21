@@ -3,6 +3,7 @@
  * Every method that may reach a network or a disk is asynchronous.
  */
 import type { Caller, RunnerKind } from "./domain.ts";
+import type { SearchProfile } from "./search/fusion.ts";
 import type { Store } from "./store-port.ts";
 
 /** The only source of time. Core never reads the system clock. */
@@ -176,4 +177,6 @@ export interface CorePorts {
   readonly runner?: ModelRunner;
   /** How long a task's lease lasts, in milliseconds. Absent means fifteen minutes. */
   readonly taskLeaseMs?: number;
+  /** The values every search runs with. Absent means the fitted ones; a benchmark passes others to measure them. */
+  readonly searchProfile?: SearchProfile;
 }

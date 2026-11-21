@@ -70,3 +70,21 @@ export function relaxedLines(rows: readonly CellRow[]): string[] {
     `  misses moved into the top 10 (of ${misses.length}) by: ${movedBy.join(", ")}; by any one of them ${byAny}; by all together ${misses.length - left.length}; left outside with all relaxed ${left.length}, of which the query names no specific word ${leftNotNamed}`,
   ];
 }
+
+/** The figures beside the order of length alone, and on the cells whose query names a needed fact and on the rest. */
+export function baselineLines(rows: readonly CellRow[]): string[] {
+  const byLength = (set: readonly CellRow[]): number =>
+    count(set, (row) => row.baseline.lengthPlace >= 1 && row.baseline.lengthPlace <= TOP);
+  const part = (name: string, set: readonly CellRow[]): string =>
+    `${name} ${set.length} cells: top 10 in ${count(set, inTop)}, length alone ${byLength(set)}`;
+  return [
+    `length alone (the case's facts longest first, the query unread): needed fact in the top 10 in ${byLength(rows)} of ${rows.length}`,
+    `by whether the query names a needed fact (shares a specific word): ${part(
+      "named",
+      rows.filter((row) => row.baseline.named),
+    )}; ${part(
+      "not named",
+      rows.filter((row) => !row.baseline.named),
+    )}`,
+  ];
+}

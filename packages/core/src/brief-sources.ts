@@ -16,6 +16,7 @@ import type { Fact, ReadScope } from "./domain.ts";
 import { isLive, type LiveFact } from "./facts/duplicates.ts";
 import { factViews } from "./facts/views.ts";
 import type { CorePorts } from "./ports.ts";
+import { SEARCH_PROFILE } from "./search/fusion.ts";
 import { factStanding, standingWeight } from "./search/standing.ts";
 import { viewerOf } from "./usecases/tasks/shared.ts";
 
@@ -53,7 +54,7 @@ function byStanding(
       updatedAt: fact.updatedAt,
       confirmedAt: view.confirmed_at === undefined ? null : new Date(view.confirmed_at),
     };
-    weights.set(view.id, standingWeight(factStanding(row, reader, now)));
+    weights.set(view.id, standingWeight(factStanding(row, reader, now, SEARCH_PROFILE)));
   }
   const weight = (view: FactView): number => weights.get(view.id) ?? 0;
   return [...views].sort(

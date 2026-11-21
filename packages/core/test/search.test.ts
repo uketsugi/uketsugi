@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { CandidateRow } from "../src/search-port.ts";
-import { clearsKeywordFloor, ranksByFact, relevanceOf } from "../src/search/fusion.ts";
+import {
+  clearsKeywordFloor,
+  ranksByFact,
+  relevanceOf,
+  SEARCH_PROFILE,
+} from "../src/search/fusion.ts";
 import { confidenceOf, rankCandidates, factStanding } from "../src/search/standing.ts";
 import { extractIdentifiers, normalizeText } from "../src/text/analyze.ts";
 
@@ -53,16 +58,19 @@ describe("text analysis", () => {
 
 describe("fusion", () => {
   test("relevance sums weight over rank constant plus rank, per pass", () => {
-    expect(relevanceOf({ keyword: 1 })).toBeCloseTo(1 / 61, 12);
-    expect(relevanceOf({ keyword: 2, identifier: 1, trigram: 3, vector: 4 })).toBeCloseTo(
-      1 / 62 + 1.5 / 61 + 0.5 / 63 + 1 / 64,
-      12,
-    );
+    expect(relevanceOf({ keyword: 1 }, SEARCH_PROFILE)).toBeCloseTo(1 / 61, 12);
+    expect(
+      relevanceOf({ keyword: 2, identifier: 1, trigram: 3, vector: 4 }, SEARCH_PROFILE),
+    ).toBeCloseTo(1 / 62 + 1.5 / 61 + 0.5 / 63 + 1 / 64, 12);
   });
 
   test("two passes at a low rank beat one pass at the top, and an identifier beats a keyword", () => {
-    expect(relevanceOf({ keyword: 20, vector: 20 })).toBeGreaterThan(relevanceOf({ keyword: 1 }));
-    expect(relevanceOf({ identifier: 1 })).toBeGreaterThan(relevanceOf({ keyword: 1 }));
+    expect(relevanceOf({ keyword: 20, vector: 20 }, SEARCH_PROFILE)).toBeGreaterThan(
+      relevanceOf({ keyword: 1 }, SEARCH_PROFILE),
+    );
+    expect(relevanceOf({ identifier: 1 }, SEARCH_PROFILE)).toBeGreaterThan(
+      relevanceOf({ keyword: 1 }, SEARCH_PROFILE),
+    );
   });
 
   test("the passes' rows are gathered into each fact's ranks", () => {
@@ -83,33 +91,44 @@ describe("fusion", () => {
     ["an identifier", { keyword: 1, identifier: 1 }, 0.1, 0, true],
     ["the vector pass", { vector: 1 }, 0.9, 0, true],
   ])("the keyword floor: %s", (_name, ranks, cosine, lexemeCoverage, clears) => {
-    expect(clearsKeywordFloor({ ranks, cosine, lexemeCoverage })).toBe(clears);
+    expect(clearsKeywordFloor({ ranks, cosine, lexemeCoverage }, SEARCH_PROFILE)).toBe(clears);
   });
 });
 
 describe("standing", () => {
   test("a fresh fact of the reader's own, unflagged, loses nothing", () => {
-    expect(factStanding(row("a"), ME, NOW)).toEqual({ status: 1, flagged: 1, recency: 1 });
+    expect(factStanding(row("a"), ME, NOW, SEARCH_PROFILE)).toEqual({
+      status: 1,
+      flagged: 1,
+      recency: 1,
+    });
   });
 
   test("another author's unconfirmed fact stands lower until it is confirmed", () => {
-    expect(factStanding(row("a", { author: "them" }), ME, NOW).status).toBe(0.85);
-    expect(factStanding(row("a", { author: "them", status: "confirmed" }), ME, NOW).status).toBe(1);
+    expect(factStanding(row("a", { author: "them" }), ME, NOW, SEARCH_PROFILE).status).toBe(0.85);
+    expect(
+      factStanding(row("a", { author: "them", status: "confirmed" }), ME, NOW, SEARCH_PROFILE)
+        .status,
+    ).toBe(1);
   });
 
   test("a flag lowers a fact once", () => {
-    expect(factStanding(row("a", { flagged: true }), ME, NOW).flagged).toBe(0.8);
+    expect(factStanding(row("a", { flagged: true }), ME, NOW, SEARCH_PROFILE).flagged).toBe(0.8);
   });
 
   test("recency decays towards its floor, and a confirmation restarts it", () => {
     const old = new Date(NOW.getTime() - 90 * DAY);
-    expect(factStanding(row("a", { updatedAt: old }), ME, NOW).recency).toBeCloseTo(
+    expect(factStanding(row("a", { updatedAt: old }), ME, NOW, SEARCH_PROFILE).recency).toBeCloseTo(
       0.85 + 0.15 / Math.E,
       12,
     );
     const ancient = new Date(NOW.getTime() - 5000 * DAY);
-    expect(factStanding(row("a", { updatedAt: ancient }), ME, NOW).recency).toBeCloseTo(0.85, 6);
-    expect(factStanding(row("a", { updatedAt: old, confirmedAt: NOW }), ME, NOW).recency).toBe(1);
+    expect(
+      factStanding(row("a", { updatedAt: ancient }), ME, NOW, SEARCH_PROFILE).recency,
+    ).toBeCloseTo(0.85, 6);
+    expect(
+      factStanding(row("a", { updatedAt: old, confirmedAt: NOW }), ME, NOW, SEARCH_PROFILE).recency,
+    ).toBe(1);
   });
 });
 
@@ -128,20 +147,20 @@ describe("the final order", () => {
     ]);
     const newer = new Date(NOW.getTime() + 1);
     const rows = [row("a"), row("b"), row("c", { updatedAt: newer })];
-    const ordered = rankCandidates(rows, tied, ME, newer);
+    const ordered = rankCandidates(rows, tied, ME, newer, SEARCH_PROFILE);
     expect(ordered.map((candidate) => candidate.factId)).toEqual(["c", "b", "a"]);
   });
 
   test("a flagged fact at the top of its pass falls below the clean ones", () => {
     const rows = [row("a", { flagged: true }), row("b"), row("c")];
-    const ordered = rankCandidates(rows, ranks, ME, NOW);
+    const ordered = rankCandidates(rows, ranks, ME, NOW, SEARCH_PROFILE);
     expect(ordered.map((candidate) => candidate.factId)).toEqual(["b", "c", "a"]);
     expect(ordered[2]).toMatchObject({ relevance: 1 / 61, score: 0.013115 });
   });
 
   test("a fact under the keyword floor is dropped, and one no pass ranked is ignored", () => {
     const rows = [row("a", { cosine: 0.4, lexemeCoverage: 0.1 }), row("b"), row("z")];
-    const ordered = rankCandidates(rows, ranks, ME, NOW);
+    const ordered = rankCandidates(rows, ranks, ME, NOW, SEARCH_PROFILE);
     expect(ordered.map((candidate) => candidate.factId)).toEqual(["b"]);
   });
 });
@@ -154,12 +173,12 @@ describe("confidence", () => {
     ["coverage", { ...weak, lexemeCoverage: 0.6 }],
     ["cosine", { ...weak, cosine: 0.83 }],
   ] as const)("is strong on %s evidence", (test, candidate) => {
-    expect(confidenceOf([weak, candidate])).toEqual({ confidence: "strong", test });
+    expect(confidenceOf([weak, candidate], SEARCH_PROFILE)).toEqual({ confidence: "strong", test });
   });
 
   test("is low with no evidence at the head, wherever else it lies", () => {
-    expect(confidenceOf([])).toEqual({ confidence: "low", test: "none" });
+    expect(confidenceOf([], SEARCH_PROFILE)).toEqual({ confidence: "low", test: "none" });
     const strong = { ...weak, lexemeCoverage: 1 };
-    expect(confidenceOf([weak, weak, weak, strong]).confidence).toBe("low");
+    expect(confidenceOf([weak, weak, weak, strong], SEARCH_PROFILE).confidence).toBe("low");
   });
 });

@@ -7,10 +7,13 @@ import type { SearchFactsResult } from "@uketsugi/contracts";
 import {
   createApp,
   createWorker,
+  SEARCH_PROFILE,
   scopeOf,
+  type App,
   type CorePorts,
   type Embedder,
   type ReadScope,
+  type SearchProfile,
 } from "@uketsugi/core";
 import { openLocalEmbedder, type LocalEmbedder } from "@uketsugi/embed";
 import { openLocalPorts } from "@uketsugi/server";
@@ -23,8 +26,11 @@ export const SEARCH_LIMIT = 50;
 export interface ReplayEnv {
   readonly ports: CorePorts;
   readonly scope: ReadScope;
-  /** The calls of one client in one project. A client name is a session. */
-  caller(project: string, client: string): ToolCaller;
+  /**
+   * The calls of one client in one project. A client name is a session. Its searches run with
+   * `profile`, the fitted values when none is given, on the same store.
+   */
+  caller(project: string, client: string, profile?: SearchProfile): ToolCaller;
   /** Runs the follow-up jobs as a server does; throws when one failed. */
   drain(): Promise<void>;
   close(): Promise<void>;
@@ -57,13 +63,23 @@ export async function openEnv(
     ids: new FakeIdGen(),
     embedder,
   };
-  const app = createApp(ports);
+  const apps = new Map<SearchProfile, App>();
+  const appFor = (profile: SearchProfile): App => {
+    const app = apps.get(profile) ?? createApp({ ...ports, searchProfile: profile });
+    apps.set(profile, app);
+    return app;
+  };
   return {
     ports,
     scope: scopeOf(local.owner),
     model: embedder !== null,
-    caller: (project, client) =>
-      toolCaller(app, local.owner, { name: client, version: null, conversationId: null }, project),
+    caller: (project, client, profile = SEARCH_PROFILE) =>
+      toolCaller(
+        appFor(profile),
+        local.owner,
+        { name: client, version: null, conversationId: null },
+        project,
+      ),
     async drain() {
       const failed: string[] = [];
       const onFailure = (job: { kind: string }, error: unknown) =>

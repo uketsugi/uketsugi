@@ -10,15 +10,22 @@
  * export it; `floorFails` is checked against the results in `replay.test.ts`.
  */
 import type { SearchFactsResult } from "@uketsugi/contracts";
-import type { CandidateRow, PassRow, SearchQuery } from "@uketsugi/core";
+import {
+  passValuesOf,
+  type CandidateRow,
+  type PassRow,
+  type SearchProfile,
+  type SearchQuery,
+} from "@uketsugi/core";
 import type { ReplayEnv } from "./env.ts";
 import { SEARCH_LIMIT } from "./env.ts";
 import type { ReplayFact } from "./data.ts";
 import { namingOf, type Naming } from "./naming.ts";
+import { RELAXATIONS, relaxedProfile } from "./profile.ts";
 
 type Explain = {
   query: { identifiers: string[] };
-  profile: Record<string, number>;
+  profile: SearchProfile;
   candidates: { id: string; ranks: Record<string, number> }[];
 };
 
@@ -59,14 +66,6 @@ export interface MissContext {
   readonly corpus: readonly ReplayFact[];
 }
 
-/** The relaxations tried one at a time, each named for the fitted value it sets aside. */
-const RELAXED: Record<string, Partial<SearchQuery>> = {
-  coverageAdmission: { admissionCoverage: 0 },
-  vectorCutoff: { vectorCutoff: -1 },
-  trigramThreshold: { trigramThreshold: 0 },
-  passLimit: { passLimit: 100_000 },
-};
-
 interface Kept {
   readonly ranks: Map<string, Record<string, number>>;
   readonly rows: Map<string, CandidateRow>;
@@ -93,11 +92,11 @@ export function floorFails(
   ranks: Readonly<Record<string, number>>,
   cosine: number | null,
   coverage: number,
-  profile: Readonly<Record<string, number>>,
+  profile: Pick<SearchProfile, "vectorCutoff" | "keywordFloor">,
 ): boolean {
   if (ranks["identifier"] !== undefined || ranks["vector"] !== undefined) return false;
-  if (cosine === null || cosine >= (profile["vectorCutoff"] ?? 0)) return false;
-  return coverage < (profile["keywordFloor"] ?? 0);
+  if (cosine === null || cosine >= profile.vectorCutoff) return false;
+  return coverage < profile.keywordFloor;
 }
 
 /** The best place any needed fact takes when its own claim is asked. */
@@ -143,10 +142,7 @@ async function queryOf(context: MissContext): Promise<SearchQuery> {
       embedder === null || embedded?.[0] === undefined
         ? null
         : { model: embedder.model, vector: embedded[0] },
-    vectorCutoff: profile["vectorCutoff"] ?? 0,
-    admissionCoverage: profile["coverageAdmission"] ?? 0,
-    trigramThreshold: profile["trigramThreshold"] ?? 0,
-    passLimit: profile["passLimit"] ?? 0,
+    ...passValuesOf(profile),
   };
 }
 
@@ -171,9 +167,9 @@ function keptMiss(context: MissContext, kept: Kept, own: string, rest: Evidence)
 /** The fitted values whose relaxing makes the passes keep a needed fact. */
 async function shutOutBy(context: MissContext, base: SearchQuery): Promise<string[]> {
   const values: string[] = [];
-  for (const [name, change] of Object.entries(RELAXED)) {
+  for (const name of Object.keys(RELAXATIONS)) {
     if (base.embedding === null && name === "vectorCutoff") continue;
-    const relaxed = await keptBy(context.env, { ...base, ...change });
+    const relaxed = await keptBy(context.env, { ...base, ...passValuesOf(relaxedProfile(name)) });
     if ([...context.targets.keys()].some((id) => relaxed.ranks.has(id))) values.push(name);
   }
   return values;

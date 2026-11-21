@@ -54,3 +54,4 @@ export type { Conversation, TurnSide } from "./usecases/session-note.ts";
 export { chooseTreatment } from "./usecases/sharing.ts";
 export { toHex } from "./hash.ts";
 export { normalizeText } from "./text/analyze.ts";
+export { passValuesOf, SEARCH_PROFILE, type SearchProfile } from "./search/fusion.ts";

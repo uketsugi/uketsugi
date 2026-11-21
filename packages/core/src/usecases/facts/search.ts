@@ -10,7 +10,12 @@ import { factViews } from "../../facts/views.ts";
 import { invalidInput } from "../../failure.ts";
 import type { CorePorts, ModelVector } from "../../ports.ts";
 import type { SearchQuery } from "../../search-port.ts";
-import { ranksByFact, SEARCH_PROFILE } from "../../search/fusion.ts";
+import {
+  passValuesOf,
+  ranksByFact,
+  SEARCH_PROFILE,
+  type SearchProfile,
+} from "../../search/fusion.ts";
 import { confidenceOf, rankCandidates, type RankedCandidate } from "../../search/standing.ts";
 import { extractIdentifiers, normalizeText } from "../../text/analyze.ts";
 import { factInProject } from "./write.ts";
@@ -63,6 +68,11 @@ async function embedQuery(
   }
 }
 
+/** The values a search on these ports runs with: theirs when they carry some, else the fitted ones. */
+export function searchProfileOf(ports: Pick<CorePorts, "searchProfile">): SearchProfile {
+  return ports.searchProfile ?? SEARCH_PROFILE;
+}
+
 /** A query's facts in their final order, and everything the order came from. */
 export interface Ranking {
   /** The facts shown, best first. */
@@ -73,6 +83,7 @@ export interface Ranking {
   /** What was skipped, for example `no_model`. */
   readonly degraded: string[];
   readonly query: SearchQuery;
+  readonly profile: SearchProfile;
   readonly ranked: readonly RankedCandidate[];
 }
 
@@ -88,6 +99,7 @@ export async function rankFacts(
   limit: number,
 ): Promise<Ranking> {
   const scope = scopeOf(ctx.caller);
+  const profile = searchProfileOf(ports);
   const { vector, degraded } = await embedQuery(ports, text);
   const query: SearchQuery = {
     scope,
@@ -95,10 +107,7 @@ export async function rankFacts(
     query: text,
     idents: extractIdentifiers(text),
     embedding: vector,
-    vectorCutoff: SEARCH_PROFILE.vectorCutoff,
-    admissionCoverage: SEARCH_PROFILE.coverageAdmission,
-    trigramThreshold: SEARCH_PROFILE.trigramThreshold,
-    passLimit: SEARCH_PROFILE.passLimit,
+    ...passValuesOf(profile),
   };
   const { search, facts } = ports.store;
   const kept = await search.passes(query);
@@ -108,7 +117,7 @@ export async function rankFacts(
     search.candidates(query, ids),
   ]);
   const ranks = ranksByFact([...kept, ...near]);
-  const ranked = rankCandidates(rows, ranks, ctx.caller.principalId, ports.clock.now());
+  const ranked = rankCandidates(rows, ranks, ctx.caller.principalId, ports.clock.now(), profile);
   const head = ranked.slice(0, limit);
   const stored = await facts.getMany(
     scope,
@@ -118,16 +127,17 @@ export async function rankFacts(
   return {
     facts: inOrder,
     matched: ranked.length,
-    verdict: confidenceOf(head),
+    verdict: confidenceOf(head, profile),
     degraded,
     query,
+    profile,
     ranked,
   };
 }
 
 /** The ranking's reasoning: how the query was read, what was skipped, and every candidate's place and why. */
 function explanation(ranking: Ranking, shown: number): Record<string, unknown> {
-  const { query, ranked, verdict, degraded } = ranking;
+  const { query, ranked, verdict, degraded, profile } = ranking;
   return {
     query: {
       normalized: normalizeText(query.query),
@@ -136,7 +146,7 @@ function explanation(ranking: Ranking, shown: number): Record<string, unknown> {
     },
     skipped: degraded.map((reason) => ({ pass: "vector", reason })),
     confidence: verdict,
-    profile: SEARCH_PROFILE,
+    profile,
     candidates: ranked.slice(0, EXPLAIN_LIMIT).map((candidate, index) => ({
       id: candidate.factId,
       position: index + 1,

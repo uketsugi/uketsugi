@@ -37,6 +37,12 @@ export interface SearchQuery {
   readonly trigramThreshold: number;
   /** How many facts each pass keeps. */
   readonly passLimit: number;
+  /**
+   * Orders the keyword pass by the share of the query's lexemes a fact's own text holds (then by
+   * `ts_rank_cd`) instead of by `ts_rank_cd` alone, so the facts that hold most of the query's
+   * words are the ones the pass keeps. Absent means by `ts_rank_cd`.
+   */
+  readonly keywordByCoverage?: boolean;
 }
 
 /** A fact a pass kept, with its 1-based rank in that pass. */

@@ -1,14 +1,16 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeEmbedder } from "@uketsugi/testkit";
+import { SEARCH_PROFILE } from "@uketsugi/core";
+import { FakeEmbedder, type ToolCaller } from "@uketsugi/testkit";
 import { afterEach, describe, expect, test } from "vitest";
 import { citationOf } from "../src/benchmark/replay/data.ts";
+import { baselineOf } from "../src/benchmark/replay/baseline.ts";
 import { briefHolds, saysWithin } from "../src/benchmark/replay/brief.ts";
 import { floorFails } from "../src/benchmark/replay/causes.ts";
 import { loadReplayData, missingFiles } from "../src/benchmark/replay/data.ts";
 import { namingOf } from "../src/benchmark/replay/naming.ts";
-import { VARIANTS, withRelaxed } from "../src/benchmark/replay/profile.ts";
+import { relaxedProfile, VARIANTS } from "../src/benchmark/replay/profile.ts";
 import { loadModel, openEnv } from "../src/benchmark/replay/env.ts";
 import { replayShape } from "../src/benchmark/replay/replay.ts";
 import { sectionOf } from "../src/benchmark/replay/report.ts";
@@ -199,7 +201,7 @@ describe("naming and relaxing", () => {
     expect(specific.judgement).toBe(true);
   });
 
-  test("a relaxed value holds only while the search runs", async () => {
+  test("a relaxed profile is the one its searches run with, and the server's own stays fitted", async () => {
     const data = loadReplayData(synthetic());
     const env = await openEnv(null);
     try {
@@ -207,19 +209,87 @@ describe("naming and relaxing", () => {
       expect(Object.keys(rows[0]?.relaxed ?? {})).toEqual(
         VARIANTS.filter((v) => v !== "vectorCutoff"),
       );
-      const inside = await withRelaxed("passLimit", async () => {
-        const found = await env.caller("github.com/replay/x-0", "probe")("search_facts", {
-          query: "staging deploy",
+      const passLimitOf = async (caller: ToolCaller) => {
+        const found = await caller("search_facts", { query: "staging deploy", explain: true });
+        return (found.explain?.["profile"] as { passLimit: number }).passLimit;
+      };
+      const project = "github.com/replay/x-0";
+      const relaxed = env.caller(project, "probe", relaxedProfile("passLimit"));
+      expect(await passLimitOf(relaxed)).toBe(100_000);
+      expect(await passLimitOf(env.caller(project, "probe"))).toBe(50);
+    } finally {
+      await env.close();
+    }
+  });
+});
+
+describe("what the figures are read against", () => {
+  const store = [
+    ...Array.from({ length: 30 }, (_, i) =>
+      fact(`g${i}`, `the channel setting number${i} is stored`),
+    ),
+    fact("t", "unsplitFinalParam keeps spacing in the channel"),
+  ];
+  const own = {
+    ...entry,
+    facts: store,
+    targets: new Set(["t"]),
+  };
+
+  test("a cell knows where length alone puts the needed fact and whether its query names it", () => {
+    expect(baselineOf(own, "channel unsplitfinalparam")).toEqual({ lengthPlace: 1, named: true });
+    expect(baselineOf(own, "the channel setting")).toEqual({ lengthPlace: 1, named: false });
+    const shorter = { ...own, targets: new Set(["g3"]) };
+    // The target and the twenty facts numbered 10 to 29 are longer; g0 to g3 tie, in the data's order.
+    expect(baselineOf(shorter, "x").lengthPlace).toBe(25);
+  });
+
+  test("each section prints the length-alone count and the named split beside the arm's own", async () => {
+    const data = loadReplayData(synthetic());
+    const env = await openEnv(null);
+    try {
+      const rows = await replayShape(env, "own", data.shapes.own, data.labels);
+      const lines = sectionOf("own", "words", rows);
+      expect(lines).toContain(
+        "length alone (the case's facts longest first, the query unread): needed fact in the top 10 in 0 of 3",
+      );
+      const split = lines.find((line) => line.startsWith("by whether the query names")) ?? "";
+      expect(split).toMatch(
+        /named 0 cells: top 10 in 0, length alone 0; not named 3 cells: top 10 in \d, length alone 0$/,
+      );
+    } finally {
+      await env.close();
+    }
+  });
+});
+
+describe("a search runs with the profile its ports carry", () => {
+  test("a profile changes what the store keeps and what the explanation names; none is the fitted one", async () => {
+    const data = loadReplayData(synthetic());
+    const env = await openEnv(null);
+    try {
+      await replayShape(env, "own", data.shapes.own, data.labels);
+      const project = "github.com/replay/x-0";
+      const search = async (profile?: typeof SEARCH_PROFILE) => {
+        const found = await env.caller(
+          project,
+          "probe",
+          profile,
+        )("search_facts", {
+          query: "staging deploy checklist",
+          limit: 50,
           explain: true,
         });
-        return (found.explain?.["profile"] as { passLimit: number }).passLimit;
-      });
-      const after = await env.caller("github.com/replay/x-0", "probe")("search_facts", {
-        query: "staging deploy",
-        explain: true,
-      });
-      expect(inside).toBe(100_000);
-      expect((after.explain?.["profile"] as { passLimit: number }).passLimit).toBe(50);
+        return { ids: found.facts.map((fact) => fact.id), profile: found.explain?.["profile"] };
+      };
+      const fitted = await search();
+      const copy = await search({ ...SEARCH_PROFILE });
+      const narrow = await search({ ...SEARCH_PROFILE, passLimit: 1, vectorCutoff: 1 });
+      expect(fitted.ids.length).toBeGreaterThan(1);
+      expect(copy).toEqual(fitted);
+      expect(fitted.profile).toEqual(SEARCH_PROFILE);
+      expect(narrow.ids).toHaveLength(1);
+      expect(narrow.profile).toMatchObject({ passLimit: 1, vectorCutoff: 1 });
     } finally {
       await env.close();
     }

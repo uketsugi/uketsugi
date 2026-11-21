@@ -7,7 +7,7 @@ import type { Miss } from "./causes.ts";
 import type { Shape } from "./data.ts";
 import type { Arm, BriefRow, CellRow } from "./replay.ts";
 import { briefCounts, briefLength, count, inTop, TOLD, tally, TOP } from "./figures.ts";
-import { namingLines, relaxedLines } from "./tables.ts";
+import { baselineLines, namingLines, relaxedLines } from "./tables.ts";
 
 /** The figures of memory research's round 3 the replay is judged against (top 10 in a cell's first query). */
 export const KEPT_FIGURES: Readonly<Record<string, { top10: number; cells: number }>> = {
@@ -90,6 +90,7 @@ export function sectionOf(shape: Shape, arm: Arm, rows: readonly CellRow[]): str
     `confidence over all cells: ${tally(rows.map((r) => r.confidence))} · over the misses: ${tally(misses.map((r) => r.confidence))}`,
     `per item, top 10 of cells: ${perItem(rows)}`,
     `causes of the ${misses.length} misses (whether a pass admitted the fact): ${tally(withMiss.map(causeName))}`,
+    ...baselineLines(rows),
     ...namingLines(rows),
     ...relaxedLines(rows),
     `control (the fact's own claim as the query): top 10 in ${count(withMiss, (m) => m.control !== null && m.control <= TOP)} of ${withMiss.length}`,

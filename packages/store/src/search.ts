@@ -30,6 +30,17 @@ function coverage(lexemes: RawBuilder<unknown>): RawBuilder<number> {
     / greatest(cardinality(${lexemes}), 1))`;
 }
 
+/**
+ * A fact's keyword score. By coverage, the share of the query's lexemes the fact holds decides and
+ * `ts_rank_cd` (below 1, so a thousandth of it) breaks ties.
+ */
+function keywordScore(query: SearchQuery): RawBuilder<number> {
+  const ranked = sql<number>`ts_rank_cd(f.tsv, q.q_any, 32)::float8`;
+  return query.keywordByCoverage === true
+    ? sql<number>`${coverage(sql`q.q_lexemes`)} + ${ranked} / 1000`
+    : ranked;
+}
+
 /** The facts `f` a search may score: the reader's scope, the project, live facts only. */
 function pool(query: SearchQuery): RawBuilder<boolean> {
   return sql<boolean>`${scoped(query.scope, "f")} and f.project = ${query.project} and ${live("f")}`;
@@ -72,7 +83,7 @@ export class SqlSearch extends Repo implements SearchRepo {
         cross join lateral (values
           ('keyword', case when f.tsv @@ q.q_own
                                 and (c.cosine is null or ${coverage(sql`q.q_lexemes`)} >= ${query.admissionCoverage})
-                           then ts_rank_cd(f.tsv, q.q_any, 32)::float8 end),
+                           then ${keywordScore(query)} end),
           ('identifier', held.idents),
           ('vector', case when c.cosine >= ${query.vectorCutoff} then c.cosine::float8 end)
         ) v(pass, score)

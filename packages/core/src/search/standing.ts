@@ -6,9 +6,9 @@ import type { CandidateRow } from "../search-port.ts";
 import {
   clearsKeywordFloor,
   relevanceOf,
-  SEARCH_PROFILE,
   type FloorEvidence,
   type PassRanks,
+  type SearchProfile,
 } from "./fusion.ts";
 
 const MS_PER_DAY = 86_400_000;
@@ -36,8 +36,12 @@ export function standingWeight(standing: Standing): number {
 }
 
 /** How a fact stands for a reader at an instant. */
-export function factStanding(row: StandingRow, reader: string, now: Date): Standing {
-  const profile = SEARCH_PROFILE;
+export function factStanding(
+  row: StandingRow,
+  reader: string,
+  now: Date,
+  profile: SearchProfile,
+): Standing {
   const lowered = row.status === "unconfirmed" && row.author !== reader;
   const checked = Math.max(row.updatedAt.getTime(), row.confirmedAt?.getTime() ?? 0);
   const ageDays = Math.max(0, now.getTime() - checked) / MS_PER_DAY;
@@ -70,14 +74,15 @@ export function rankCandidates(
   ranks: ReadonlyMap<string, PassRanks>,
   reader: string,
   now: Date,
+  profile: SearchProfile,
 ): RankedCandidate[] {
   const ranked = rows.flatMap((row): RankedCandidate[] => {
     const own = ranks.get(row.factId);
     if (own === undefined) return [];
     const evidence = { ranks: own, cosine: row.cosine, lexemeCoverage: row.lexemeCoverage };
-    if (!clearsKeywordFloor(evidence)) return [];
-    const relevance = relevanceOf(own);
-    const standing = factStanding(row, reader, now);
+    if (!clearsKeywordFloor(evidence, profile)) return [];
+    const relevance = relevanceOf(own, profile);
+    const standing = factStanding(row, reader, now, profile);
     const score = relevance * standingWeight(standing);
     return [
       {
@@ -101,23 +106,31 @@ export function rankCandidates(
 /** What made a result's confidence strong, or `none`. */
 export type ConfidenceTest = "identifier" | "coverage" | "cosine" | "none";
 
-function evidenceOf(candidate: FloorEvidence): ConfidenceTest {
-  if (candidate.ranks.identifier !== undefined) return "identifier";
-  if (candidate.lexemeCoverage >= SEARCH_PROFILE.strongCoverage) return "coverage";
-  if (candidate.cosine !== null && candidate.cosine >= SEARCH_PROFILE.strongCosine) return "cosine";
+/** The strong evidence a fact's own text or vector gives, apart from an identifier, or `none`. */
+export function strongMatch(
+  candidate: Pick<FloorEvidence, "cosine" | "lexemeCoverage">,
+  profile: SearchProfile,
+): ConfidenceTest {
+  if (candidate.lexemeCoverage >= profile.strongCoverage) return "coverage";
+  if (candidate.cosine !== null && candidate.cosine >= profile.strongCosine) return "cosine";
   return "none";
+}
+
+function evidenceOf(candidate: FloorEvidence, profile: SearchProfile): ConfidenceTest {
+  if (candidate.ranks.identifier !== undefined) return "identifier";
+  return strongMatch(candidate, profile);
 }
 
 /**
  * Strong when a fact at the head of the order matched an identifier of the query, holds most of its
  * lexemes, or is close to it in meaning. Low lets the reader abstain.
  */
-export function confidenceOf(ordered: readonly FloorEvidence[]): {
-  confidence: "strong" | "low";
-  test: ConfidenceTest;
-} {
+export function confidenceOf(
+  ordered: readonly FloorEvidence[],
+  profile: SearchProfile,
+): { confidence: "strong" | "low"; test: ConfidenceTest } {
   for (const candidate of ordered.slice(0, CONFIDENCE_WINDOW)) {
-    const test = evidenceOf(candidate);
+    const test = evidenceOf(candidate, profile);
     if (test !== "none") return { confidence: "strong", test };
   }
   return { confidence: "low", test: "none" };

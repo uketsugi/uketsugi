@@ -6,6 +6,7 @@
  */
 import type { SearchFactsResult } from "@uketsugi/contracts";
 import type { ToolCaller } from "@uketsugi/testkit";
+import { baselineOf, type Baseline } from "./baseline.ts";
 import { briefHolds, type BriefHold } from "./brief.ts";
 import { explainMiss, type Miss } from "./causes.ts";
 import {
@@ -17,7 +18,7 @@ import {
   type Shape,
 } from "./data.ts";
 import { SEARCH_LIMIT, searchExplained, type ReplayEnv } from "./env.ts";
-import { VARIANTS, withRelaxed } from "./profile.ts";
+import { relaxedProfile, VARIANTS } from "./profile.ts";
 
 export type Arm = "words" | "model";
 
@@ -41,6 +42,7 @@ export interface CellRow {
   readonly matched: number;
   readonly brief: BriefHold;
   readonly miss: Miss | null;
+  readonly baseline: Baseline;
   /** The place of the needed fact when each fitted value is relaxed in turn; null when not in the 50 shown. */
   readonly relaxed: Readonly<Record<string, number | null>>;
 }
@@ -114,19 +116,18 @@ async function placeOf(
 /** The rows again, each with the places the cells take when one fitted value is relaxed at a time. */
 async function withRelaxedPlaces(
   env: ReplayEnv,
-  reader: ToolCaller,
+  project: string,
   targets: ReadonlyMap<string, ReplayFact>,
   rows: readonly CellRow[],
 ): Promise<CellRow[]> {
   const places: Record<string, number | null>[] = rows.map(() => ({}));
   for (const variant of VARIANTS) {
     if (!env.model && variant === "vectorCutoff") continue;
-    await withRelaxed(variant, async () => {
-      for (const [index, row] of rows.entries()) {
-        const own = places[index];
-        if (own !== undefined) own[variant] = await placeOf(reader, row.query, targets);
-      }
-    });
+    const reader = env.caller(project, "replay-reader", relaxedProfile(variant));
+    for (const [index, row] of rows.entries()) {
+      const own = places[index];
+      if (own !== undefined) own[variant] = await placeOf(reader, row.query, targets);
+    }
   }
   return rows.map((row, index) => ({ ...row, relaxed: places[index] ?? {} }));
 }
@@ -176,10 +177,11 @@ export async function replayCase(
       matched: found.matched,
       brief,
       miss,
+      baseline: baselineOf(entry, first.query),
       relaxed: {},
     });
   }
-  return await withRelaxedPlaces(env, reader, targets, rows);
+  return await withRelaxedPlaces(env, project, targets, rows);
 }
 
 /** What a brief-only run keeps of a cell: the brief its session was handed. */

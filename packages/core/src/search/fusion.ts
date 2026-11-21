@@ -2,35 +2,64 @@
  * Relevance: the passes the store ran are fused by weighted reciprocal rank, and a candidate that
  * only loose wording found is dropped. Pure arithmetic over what the store returned.
  */
-import type { SearchPass } from "../search-port.ts";
+import type { SearchPass, SearchQuery } from "../search-port.ts";
+
+/** The values a search ranks, admits and labels with. */
+export interface SearchProfile {
+  /** The constant added to a rank before it divides its pass's weight. */
+  readonly rankConstant: number;
+  readonly weights: Readonly<Record<SearchPass, number>>;
+  /** How many facts each pass keeps. */
+  readonly passLimit: number;
+  /** A fact with a vector enters the keyword pass only when its own text holds this share of the query's lexemes. */
+  readonly coverageAdmission: number;
+  /** A fact only wording found, far from the query in meaning, must still hold this share of its lexemes. */
+  readonly keywordFloor: number;
+  /** The vector pass keeps facts at or above this cosine. */
+  readonly vectorCutoff: number;
+  /** The trigram pass keeps facts at or above this word similarity. */
+  readonly trigramThreshold: number;
+  /** Evidence that makes a result's confidence strong: this lexeme coverage, or this cosine. */
+  readonly strongCoverage: number;
+  readonly strongCosine: number;
+  /** Standing: another author's unconfirmed fact, a flagged fact, and the recency curve. */
+  readonly otherAuthorUnconfirmed: number;
+  readonly flagged: number;
+  readonly recencyFloor: number;
+  readonly recencyDecayDays: number;
+}
 
 /**
  * The values this build searches with. The admission values and the strong cosine were fitted on the
  * team fact set with the pinned embedding model; another model needs them fitted again.
  */
-export const SEARCH_PROFILE = {
-  /** The constant added to a rank before it divides its pass's weight. */
+export const SEARCH_PROFILE: SearchProfile = {
   rankConstant: 60,
   weights: { keyword: 1.0, identifier: 1.5, trigram: 0.5, vector: 1.0 },
-  /** How many facts each pass keeps. */
   passLimit: 50,
-  /** A fact with a vector enters the keyword pass only when its own text holds this share of the query's lexemes. */
   coverageAdmission: 0.6,
-  /** A fact only wording found, far from the query in meaning, must still hold this share of its lexemes. */
   keywordFloor: 0.25,
-  /** The vector pass keeps facts at or above this cosine. */
   vectorCutoff: 0.78,
-  /** The trigram pass keeps facts at or above this word similarity. */
   trigramThreshold: 0.5,
-  /** Evidence that makes a result's confidence strong: this lexeme coverage, or this cosine. */
   strongCoverage: 0.6,
   strongCosine: 0.83,
-  /** Standing: another author's unconfirmed fact, a flagged fact, and the recency curve. */
   otherAuthorUnconfirmed: 0.85,
   flagged: 0.8,
   recencyFloor: 0.85,
   recencyDecayDays: 90,
-} as const;
+};
+
+/** What the store's statements are given of a profile: the values that admit a fact to a pass. */
+export function passValuesOf(
+  profile: SearchProfile,
+): Pick<SearchQuery, "vectorCutoff" | "admissionCoverage" | "trigramThreshold" | "passLimit"> {
+  return {
+    vectorCutoff: profile.vectorCutoff,
+    admissionCoverage: profile.coverageAdmission,
+    trigramThreshold: profile.trigramThreshold,
+    passLimit: profile.passLimit,
+  };
+}
 
 /** The passes in the order a result lists them. */
 const SEARCH_PASSES: readonly SearchPass[] = ["keyword", "identifier", "trigram", "vector"];
@@ -48,8 +77,8 @@ export function ranksByFact(
 }
 
 /** Weighted reciprocal-rank fusion: the sum over a fact's passes of weight / (rank constant + rank). */
-export function relevanceOf(ranks: PassRanks): number {
-  const { rankConstant, weights } = SEARCH_PROFILE;
+export function relevanceOf(ranks: PassRanks, profile: SearchProfile): number {
+  const { rankConstant, weights } = profile;
   return SEARCH_PASSES.reduce((sum, pass) => {
     const rank = ranks[pass];
     return rank === undefined ? sum : sum + weights[pass] / (rankConstant + rank);
@@ -71,9 +100,9 @@ export interface FloorEvidence {
  * keyword floor of the query's lexemes. Identifier or vector evidence, or no cosine to judge by
  * (a fact not yet embedded, a search with no model), clears it.
  */
-export function clearsKeywordFloor(candidate: FloorEvidence): boolean {
+export function clearsKeywordFloor(candidate: FloorEvidence, profile: SearchProfile): boolean {
   const { ranks, cosine, lexemeCoverage } = candidate;
   if (ranks.identifier !== undefined || ranks.vector !== undefined) return true;
-  if (cosine === null || cosine >= SEARCH_PROFILE.vectorCutoff) return true;
-  return lexemeCoverage >= SEARCH_PROFILE.keywordFloor;
+  if (cosine === null || cosine >= profile.vectorCutoff) return true;
+  return lexemeCoverage >= profile.keywordFloor;
 }

@@ -22,9 +22,15 @@ import { extractIdentifiers, normalizeText } from "../text/analyze.ts";
 
 /** A stored fact whose text holds a stretch at least this similar to the claim, by trigram, is near it. */
 const NEAR_TRIGRAM = 0.8;
-/** A fact that has a vector enters the candidates only when its own text holds this share of the claim's words. */
-const NEAR_COVERAGE = 0.5;
+/** How many near facts are named, nearest first. */
 const NEAR_LIMIT = 20;
+/**
+ * How many facts the word pass hands the trigram test: the ones holding the largest share of the
+ * claim's words. A near fact holds all but a word or two of them, so it is lost only when this
+ * many facts hold more of the claim's words than it does; ordered by `ts_rank_cd`, as search
+ * does, long facts that repeat common words pushed it out.
+ */
+const NEAR_CANDIDATES = 300;
 
 const ARTICLES = new Set(["a", "an", "the"]);
 const NUMBER = /[-+]?\d+(?:[.,:/]\d+)*%?/g;
@@ -75,11 +81,16 @@ export async function nearFacts(
     // No vector pass: see the head of this file.
     embedding: null,
     vectorCutoff: 1,
-    admissionCoverage: NEAR_COVERAGE,
+    // Nothing is admitted or dropped by share of words here (there is no vector, so none could be).
+    admissionCoverage: 0,
     trigramThreshold: NEAR_TRIGRAM,
     passLimit: NEAR_LIMIT,
   };
-  const kept = await store.search.passes(query);
+  const kept = await store.search.passes({
+    ...query,
+    passLimit: NEAR_CANDIDATES,
+    keywordByCoverage: true,
+  });
   const candidates = [...new Set(kept.map((row) => row.factId))];
   const ids = (await store.search.trigram(query, candidates)).map((row) => row.factId);
   const facts = await store.facts.getMany(scope, ids);
