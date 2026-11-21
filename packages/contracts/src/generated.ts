@@ -974,38 +974,53 @@ export interface CapabilityDescriptor {
    */
   degraded: string[];
   /**
-   * The words the dashboard says to a person about how to get in and where the token is, which an edition gives once. A word in backticks is shown as code.
+   * The words the dashboard says to a person about how to get in and where the token is, which an edition gives once. A word in backticks is shown as code. An edition has one of two sets: where a person is given a token for their harness, or where their harness signs in itself and there is none to paste.
    */
-  dashboard: {
-    /**
-     * The paragraphs of the sign-in page, each a way in.
-     */
-    sign_in: string[];
-    /**
-     * Whether the sign-in page asks for a dashboard key.
-     */
-    key_form: boolean;
-    /**
-     * The line that puts the token in the variable the Connect page's shell lines read, typed on the server's host.
-     */
-    token_command: string;
-    /**
-     * What the Connect page says of the token in the row that names it, where the token is read from and where to find it.
-     */
-    token_row: string;
-    /**
-     * The line before the shell lines that set the token, on the server's host.
-     */
-    shell_intro: string;
-    /**
-     * The line after them, for another machine.
-     */
-    shell_elsewhere: string;
-    /**
-     * Said of a harness that keeps the token it was added with, with `{harness}` for its name and `{remove}` for the command that removes the server from it.
-     */
-    token_change: string;
-  };
+  dashboard:
+    | {
+        /**
+         * The paragraphs of the sign-in page, each a way in.
+         */
+        sign_in: string[];
+        /**
+         * Whether the sign-in page asks for a dashboard key.
+         */
+        key_form: boolean;
+        /**
+         * The line that puts the token in the variable the Connect page's shell lines read, typed on the server's host.
+         */
+        token_command: string;
+        /**
+         * What the Connect page says of the token in the row that names it, where the token is read from and where to find it.
+         */
+        token_row: string;
+        /**
+         * The line before the shell lines that set the token, on the server's host.
+         */
+        shell_intro: string;
+        /**
+         * The line after them, for another machine.
+         */
+        shell_elsewhere: string;
+        /**
+         * Said of a harness that keeps the token it was added with, with `{harness}` for its name and `{remove}` for the command that removes the server from it.
+         */
+        token_change: string;
+      }
+    | {
+        /**
+         * The paragraphs of the sign-in page, each a way in.
+         */
+        sign_in: string[];
+        /**
+         * The sign-in page asks for no dashboard key.
+         */
+        key_form: false;
+        /**
+         * What the Connect page says in the row that names the token: why there is none to paste.
+         */
+        no_token: string;
+      };
 }
 /**
  * `GET /api/connect`: everything the Connect page shows.
@@ -1024,13 +1039,13 @@ export interface ConnectInfo {
    */
   needs_token: boolean;
   /**
-   * The environment variable that holds the token. The token itself is never returned.
+   * The environment variable that holds the token. The token itself is never returned. Absent where the edition's harnesses sign in themselves.
    */
-  token_env: string;
+  token_env?: string;
   /**
-   * The line that puts the token in that variable, typed in a shell on the server's host: `export UKT_TOKEN="$(ukt token)"`.
+   * The line that puts the token in that variable, typed in a shell on the server's host: `export UKT_TOKEN="$(ukt token)"`. Absent where the edition's harnesses sign in themselves.
    */
-  token_command: string;
+  token_command?: string;
   commands: {
     setup: ConnectCommand;
     activate: ConnectCommand;

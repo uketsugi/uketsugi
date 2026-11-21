@@ -70,7 +70,11 @@ export interface Edition {
   readonly signedOut?: () => ToolFailure;
   /** What a sign-in link (`GET /sign-in?code=`) that was used or has expired is told, as text. Left out, the open edition's words. */
   readonly staleCode?: string;
-  /** What the dashboard tells a person of getting in and of the token. Left out, the open edition's words. */
+  /**
+   * What the dashboard tells a person of getting in and of the token. Left out, the open edition's
+   * words. The set it is given says which kind of way in the edition has: the token words, or the
+   * sign-in words of an edition whose harnesses sign in themselves and are given no token.
+   */
   readonly dashboard?: DashboardWords;
   /**
    * The edition's own routes, built once the server's sign-in exists. They are served on the

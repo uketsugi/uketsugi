@@ -924,47 +924,74 @@
             "description": "What is incomplete, for example `no_model`."
           },
           "dashboard": {
-            "type": "object",
-            "description": "The words the dashboard says to a person about how to get in and where the token is, which an edition gives once. A word in backticks is shown as code.",
-            "properties": {
-              "sign_in": {
-                "type": "array",
-                "items": { "type": "string" },
-                "description": "The paragraphs of the sign-in page, each a way in."
+            "description": "The words the dashboard says to a person about how to get in and where the token is, which an edition gives once. A word in backticks is shown as code. An edition has one of two sets: where a person is given a token for their harness, or where their harness signs in itself and there is none to paste.",
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "An edition whose harnesses are given a token.",
+                "properties": {
+                  "sign_in": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The paragraphs of the sign-in page, each a way in."
+                  },
+                  "key_form": {
+                    "type": "boolean",
+                    "description": "Whether the sign-in page asks for a dashboard key."
+                  },
+                  "token_command": {
+                    "type": "string",
+                    "description": "The line that puts the token in the variable the Connect page's shell lines read, typed on the server's host."
+                  },
+                  "token_row": {
+                    "type": "string",
+                    "description": "What the Connect page says of the token in the row that names it, where the token is read from and where to find it."
+                  },
+                  "shell_intro": {
+                    "type": "string",
+                    "description": "The line before the shell lines that set the token, on the server's host."
+                  },
+                  "shell_elsewhere": {
+                    "type": "string",
+                    "description": "The line after them, for another machine."
+                  },
+                  "token_change": {
+                    "type": "string",
+                    "description": "Said of a harness that keeps the token it was added with, with `{harness}` for its name and `{remove}` for the command that removes the server from it."
+                  }
+                },
+                "required": [
+                  "sign_in",
+                  "key_form",
+                  "token_command",
+                  "token_row",
+                  "shell_intro",
+                  "shell_elsewhere",
+                  "token_change"
+                ],
+                "additionalProperties": false
               },
-              "key_form": {
-                "type": "boolean",
-                "description": "Whether the sign-in page asks for a dashboard key."
-              },
-              "token_command": {
-                "type": "string",
-                "description": "The line that puts the token in the variable the Connect page's shell lines read, typed on the server's host."
-              },
-              "token_row": {
-                "type": "string",
-                "description": "What the Connect page says of the token in the row that names it, where the token is read from and where to find it."
-              },
-              "shell_intro": {
-                "type": "string",
-                "description": "The line before the shell lines that set the token, on the server's host."
-              },
-              "shell_elsewhere": {
-                "type": "string",
-                "description": "The line after them, for another machine."
-              },
-              "token_change": {
-                "type": "string",
-                "description": "Said of a harness that keeps the token it was added with, with `{harness}` for its name and `{remove}` for the command that removes the server from it."
+              {
+                "type": "object",
+                "description": "An edition whose harnesses sign in themselves: no dashboard key and no token to paste. Its Connect lines add the server by its address alone.",
+                "properties": {
+                  "sign_in": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The paragraphs of the sign-in page, each a way in."
+                  },
+                  "key_form": {
+                    "const": false,
+                    "description": "The sign-in page asks for no dashboard key."
+                  },
+                  "no_token": {
+                    "type": "string",
+                    "description": "What the Connect page says in the row that names the token: why there is none to paste."
+                  }
+                },
+                "required": ["sign_in", "key_form", "no_token"],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "sign_in",
-              "key_form",
-              "token_command",
-              "token_row",
-              "shell_intro",
-              "shell_elsewhere",
-              "token_change"
             ]
           }
         },
@@ -998,11 +1025,11 @@
           },
           "token_env": {
             "type": "string",
-            "description": "The environment variable that holds the token. The token itself is never returned."
+            "description": "The environment variable that holds the token. The token itself is never returned. Absent where the edition's harnesses sign in themselves."
           },
           "token_command": {
             "type": "string",
-            "description": "The line that puts the token in that variable, typed in a shell on the server's host: `export UKT_TOKEN=\"$(ukt token)\"`."
+            "description": "The line that puts the token in that variable, typed in a shell on the server's host: `export UKT_TOKEN=\"$(ukt token)\"`. Absent where the edition's harnesses sign in themselves."
           },
           "commands": {
             "type": "object",
@@ -1027,16 +1054,7 @@
             }
           }
         },
-        "required": [
-          "mcp_url",
-          "server_name",
-          "needs_token",
-          "token_env",
-          "token_command",
-          "commands",
-          "block",
-          "harnesses"
-        ]
+        "required": ["mcp_url", "server_name", "needs_token", "commands", "block", "harnesses"]
       },
       "FactPage": {
         "type": "object",

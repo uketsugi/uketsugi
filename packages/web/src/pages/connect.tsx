@@ -33,10 +33,12 @@ import {
 
 const route = getRouteApi("/connect");
 
-/** What this edition's server says of the token, for every step below. */
-const WordsContext = createContext<CapabilityDescriptor["dashboard"] | null>(null);
+type Words = CapabilityDescriptor["dashboard"];
 
-function useWords(): CapabilityDescriptor["dashboard"] {
+/** What this edition's server says of the token, for every step below. */
+const WordsContext = createContext<Words | null>(null);
+
+function useWords(): Words {
   const words = use(WordsContext);
   if (words === null) throw new Error("the Connect page was rendered without the server's words");
   return words;
@@ -68,7 +70,9 @@ function ServerAndToken({ info }: { info: ConnectInfo }) {
       </dd>
       <dt className="text-ink-muted">Token</dt>
       <dd>
-        {info.needs_token ? (
+        {"no_token" in words ? (
+          <Said text={words.no_token} />
+        ) : info.needs_token ? (
           <Said text={words.token_row} />
         ) : (
           "none: this server takes a harness on this machine by its address alone, while you are its only person."
@@ -85,13 +89,14 @@ function ServerAndToken({ info }: { info: ConnectInfo }) {
  */
 function ShellLines({ lines, label, info }: { lines: string; label: string; info: ConnectInfo }) {
   const words = useWords();
-  if (!info.needs_token) return <CodeBlock text={lines} label={label} />;
+  if (!info.needs_token || !("token_command" in words))
+    return <CodeBlock text={lines} label={label} />;
   return (
     <>
       <p>
         <Said text={words.shell_intro} />
       </p>
-      <CodeBlock text={`${info.token_command}\n${lines}`} label={label} />
+      <CodeBlock text={`${words.token_command}\n${lines}`} label={label} />
       <p className="text-ink-muted">
         <Said text={words.shell_elsewhere} />
       </p>
@@ -114,7 +119,9 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
             label={`what adds the server to ${harness.name}`}
             info={info}
           />
-          {harness.remove === undefined || !info.needs_token ? null : (
+          {harness.remove === undefined ||
+          !info.needs_token ||
+          !("token_change" in words) ? null : (
             <p className="text-ink-muted">
               <Said
                 text={words.token_change

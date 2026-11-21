@@ -56,7 +56,8 @@ import {
   type SignIn,
 } from "./auth.ts";
 import type { Edition } from "./compose.ts";
-import { capabilityDescriptor, connectInfo } from "./connect.ts";
+import { capabilityDescriptor, connectInfo, withoutToken } from "./connect.ts";
+import { signsIn } from "./dashboard-words.ts";
 import { errorHandler, failed, noSnapshot, notFound, personOnly, unauthorized } from "./errors.ts";
 import { LOOPBACK_ADDRESSES, reachedAt } from "./guard.ts";
 import { answerClaudeCode, CAPTURE_HEADER, isOn, ORIGIN_HEADER } from "./hooks.ts";
@@ -199,10 +200,14 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   const { ports } = deps;
   api.get("/connect", async (c) => {
     // The lines depend on whether a harness added from where this request came needs a token.
-    const tokenless = await takesNoToken(deps.app, deps.alone(c));
-    const info = connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins), !tokenless);
     const words = deps.edition.dashboard;
-    return c.json(words === undefined ? info : { ...info, token_command: words.token_command });
+    const signedIn = words !== undefined && signsIn(words);
+    const tokenless = signedIn || (await takesNoToken(deps.app, deps.alone(c)));
+    const info = connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins), !tokenless);
+    if (words === undefined) return c.json(info);
+    // An edition whose harnesses sign in has no token to name; any other says its own command.
+    if (signsIn(words)) return c.json(withoutToken(info));
+    return c.json({ ...info, token_command: words.token_command });
   });
   api.get("/facts", query("FactListParams"), async (c) =>
     c.json(await listFacts(ports, c.get("caller"), c.req.valid("query"))),

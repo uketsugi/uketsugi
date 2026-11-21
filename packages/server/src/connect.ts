@@ -352,7 +352,7 @@ export async function capabilityDescriptor(
 /**
  * Everything the Connect page shows, for a server reached at `origin` by someone who would get
  * its plugins from `plugins`; null where the server has none to give. `needsToken` says whether
- * what that person's harness is added with carries a token: the lines differ. The token is never
+ * what that person's harness is added with carries a token: the lines differ.  The token is never
  * among it.
  */
 export function connectInfo(
@@ -397,4 +397,12 @@ export function connectInfo(
       instruction_file_command: harness.instructionFileCommand,
     })),
   };
+}
+
+/** The answer for an edition whose harnesses sign in themselves: it names no variable and no command for a token. */
+export function withoutToken(info: ConnectInfo): ConnectInfo {
+  const named = { ...info };
+  delete named.token_env;
+  delete named.token_command;
+  return named;
 }

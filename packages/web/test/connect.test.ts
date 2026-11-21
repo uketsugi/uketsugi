@@ -1,9 +1,32 @@
 // @vitest-environment jsdom
-import { BLOCK_START } from "@uketsugi/contracts";
+import { BLOCK_START, type CapabilityDescriptor, type ConnectInfo } from "@uketsugi/contracts";
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activity, connect, connectWithToken, hostedCapabilities } from "./fixtures.ts";
+import {
+  activity,
+  capabilities,
+  connect,
+  connectWithToken,
+  hostedCapabilities,
+  hostedWords,
+} from "./fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
+
+/** What an edition whose harnesses sign in themselves says: nothing of a token, and why there is none. */
+const signInWords = {
+  sign_in: ["Open the service's address in your browser and sign in at your provider."],
+  key_form: false as const,
+  no_token: "none to paste: your harness signs in itself, at your provider.",
+};
+
+const signInCapabilities: CapabilityDescriptor = {
+  ...capabilities,
+  edition: "hosted",
+  dashboard: signInWords,
+};
+
+/** What an edition whose harnesses sign in themselves describes: no token, and no word of one. */
+const connectSignIn: ConnectInfo = { ...connect, token_env: undefined, token_command: undefined };
 
 describe("Connect", () => {
   mockApi();
@@ -23,7 +46,7 @@ describe("Connect", () => {
     // No token is asked for, so the line is given as it is: nothing sets a variable first.
     expect(panel.getByText(codeOf(claude?.add ?? "missing"))).toBeTruthy();
     expect(panel.getByText(/none: this server takes a harness on this machine/)).toBeTruthy();
-    expect(panel.queryByText(connect.token_command, { exact: false })).toBeNull();
+    expect(panel.queryByText(connect.token_command ?? "missing", { exact: false })).toBeNull();
     expect(
       panel.getByRole("heading", { name: "Type the activate command in a session" }),
     ).toBeTruthy();
@@ -37,8 +60,8 @@ describe("Connect", () => {
     open("/connect");
     const panel = within(await screen.findByRole("tabpanel"));
     const [claude] = connectWithToken.harnesses;
-    expect(panel.getByText(codeOf(`${connect.token_command}\n${claude?.add}`))).toBeTruthy();
-    expect(panel.getAllByText(connect.token_env).length).toBeGreaterThan(0);
+    expect(panel.getByText(codeOf(`${connect.token_command ?? ""}\n${claude?.add}`))).toBeTruthy();
+    expect(panel.getAllByText(connect.token_env ?? "missing").length).toBeGreaterThan(0);
     expect(panel.getByText("ukt token")).toBeTruthy();
     expect(panel.getByText(claude?.remove ?? "missing")).toBeTruthy();
     expect(await violations()).toEqual([]);
@@ -48,13 +71,13 @@ describe("Connect", () => {
     api.use(
       answer("/api/connect", {
         ...connectWithToken,
-        token_command: hostedCapabilities.dashboard.token_command,
+        token_command: hostedWords.token_command,
       }),
       answer("/api/capabilities", hostedCapabilities),
     );
     open("/connect");
     const panel = within(await screen.findByRole("tabpanel"));
-    const words = hostedCapabilities.dashboard;
+    const words = hostedWords;
     expect(panel.getByText(words.token_row, { exact: false })).toBeTruthy();
     expect(panel.getByText(words.shell_intro)).toBeTruthy();
     expect(panel.getByText(words.shell_elsewhere)).toBeTruthy();
@@ -63,6 +86,19 @@ describe("Connect", () => {
       panel.getByText(codeOf(`${words.token_command}\n${connectWithToken.harnesses[0]?.add}`)),
     ).toBeTruthy();
     expect(panel.queryByText(/ukt token/)).toBeNull();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("says the edition's word for why there is no token where its harnesses sign in themselves, and no tab names one", async () => {
+    api.use(answer("/api/connect", connectSignIn), answer("/api/capabilities", signInCapabilities));
+    const user = open("/connect");
+    for (const { name } of connectSignIn.harnesses) {
+      await user.click(await screen.findByRole("tab", { name }));
+      const panel = within(screen.getByRole("tabpanel"));
+      expect(panel.getByText(signInWords.no_token)).toBeTruthy();
+      expect(panel.queryByText(/takes a harness on this machine/)).toBeNull();
+      expect(panel.queryByText(/token|Bearer|UKT_TOKEN/i, { selector: "code, pre" })).toBe(null);
+    }
     expect(await violations()).toEqual([]);
   });
 

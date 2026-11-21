@@ -53,20 +53,21 @@ export const capabilities: CapabilityDescriptor = {
   },
 };
 
-/** What another edition, which signs a person in at a provider and has no key and no `ukt`, says. */
+/** What another edition, which signs a person in at a provider and has no key and no `ukt`, says of the token it gives. */
+export const hostedWords = {
+  sign_in: ["Open the service's address in your browser and sign in at your provider."],
+  key_form: false,
+  token_command: "hosted-sign-in",
+  token_row: "given to your harness when it signs in; there is nothing to copy.",
+  shell_intro: "Run these in a terminal, then sign in from the harness:",
+  shell_elsewhere: "Run them on any machine you use.",
+  token_change: "{harness} signs in again when it is told to: run `{remove}`, then the lines.",
+};
+
 export const hostedCapabilities: CapabilityDescriptor = {
   ...capabilities,
   edition: "hosted",
-  dashboard: {
-    sign_in: ["Open the service's address in your browser and sign in at your provider."],
-    key_form: false,
-    token_command: "hosted-sign-in",
-    token_row: "given to your harness when it signs in; there is nothing to copy.",
-    shell_intro: "Run these in a terminal, then sign in from the harness:",
-    shell_elsewhere: "Run them on any machine you use.",
-    token_change:
-      "{harness} signs in again when it is told to: run `{remove}`, then the lines above.",
-  },
+  dashboard: hostedWords,
 };
 
 /** What a server that needs no token from a harness on its own machine describes: the harness lines carry none. */

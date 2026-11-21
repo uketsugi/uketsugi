@@ -2,7 +2,7 @@
  * What an edition can add to the server: its own routes on the one listener, a session for a
  * person it has verified, a bound on the logins it holds, and its own words for a key refused.
  */
-import type { CapabilityDescriptor } from "@uketsugi/contracts";
+import type { CapabilityDescriptor, ConnectInfo } from "@uketsugi/contracts";
 import { acceptToken, ToolFailure } from "@uketsugi/core";
 import { eventually } from "@uketsugi/testkit";
 import { Hono } from "hono";
@@ -15,6 +15,7 @@ import {
   type Pending,
   type UketsugiServer,
 } from "../src/index.ts";
+import { connectInfo, withoutToken } from "../src/connect.ts";
 import { HARNESS_REFUSALS } from "../src/errors.ts";
 
 const TOKEN = "ukt_test_token_for_the_edition";
@@ -254,5 +255,58 @@ describe("the words for a browser nobody signed in", () => {
       );
       expect(((await response.json()) as { token_command: string }).token_command).toBe(command);
     }
+  });
+});
+
+describe("the Connect page's lines, by edition and by caller", () => {
+  const WORDS = {
+    sign_in: ["Sign in at the provider."],
+    key_form: false as const,
+    no_token: "hosted: no token to paste",
+  };
+  /** Ordinary JSON: what a client reads. */
+  const plain = (info: ConnectInfo): unknown => JSON.parse(JSON.stringify(info));
+  /** A caller who sent a token, and one who is the machine's only person and sent none, on a real listener. */
+  const callers = async (edition: Omit<Edition, "name" | "refusals">) => {
+    const { local, server } = await composed(edition, false);
+    await acceptToken(local.ports, local.owner, TOKEN, "test");
+    const asked = await server.fetch(
+      new Request("http://127.0.0.1/api/connect", {
+        headers: { host: "127.0.0.1", authorization: `Bearer ${TOKEN}` },
+      }),
+    );
+    const { url } = await server.listen({ port: 0 });
+    const alone = await fetch(`${url}/api/connect`);
+    return {
+      url,
+      tokened: (await asked.json()) as ConnectInfo,
+      sole: (await alone.json()) as ConnectInfo,
+    };
+  };
+
+  test("an edition that gives no words is given the open edition's, with a token for a caller who sent one and none for the machine's only person", async () => {
+    const { url, tokened, sole } = await callers({});
+    expect(tokened).toEqual(plain(connectInfo("http://127.0.0.1", null, true)));
+    expect(sole).toEqual(plain(connectInfo(url, null, false)));
+    expect(sole.needs_token).toBe(false);
+    expect(sole.token_command).toBe('export UKT_TOKEN="$(ukt token)"');
+  });
+
+  test("an edition that gives the sign-in words is given the plain lines and no token's name, whoever asks", async () => {
+    const { url, tokened, sole } = await callers({ dashboard: WORDS });
+    expect(tokened).toEqual(plain(withoutToken(connectInfo("http://127.0.0.1", null, false))));
+    expect(sole).toEqual(plain(withoutToken(connectInfo(url, null, false))));
+    for (const info of [tokened, sole]) {
+      expect(info.needs_token).toBe(false);
+      expect(info).not.toHaveProperty("token_env");
+      expect(info).not.toHaveProperty("token_command");
+      expect(JSON.stringify(info.harnesses)).not.toMatch(/Bearer|UKT_TOKEN|bearer-token|configure/);
+    }
+  });
+
+  test("an edition that gives the sign-in words says them in its descriptor, and no other", async () => {
+    const { server } = await composed({ dashboard: WORDS });
+    const body = (await (await get(server, "/api/capabilities")).json()) as Told;
+    expect(body.dashboard).toEqual(WORDS);
   });
 });

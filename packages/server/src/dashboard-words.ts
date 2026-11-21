@@ -6,9 +6,17 @@
 import { TOKEN_ENV, type CapabilityDescriptor } from "@uketsugi/contracts";
 
 export type DashboardWords = CapabilityDescriptor["dashboard"];
+/** The words of an edition whose harnesses sign in themselves: it gives no token, so it says none of the token's. */
+export type SignInWords = Extract<DashboardWords, { no_token: string }>;
+export type TokenWords = Exclude<DashboardWords, SignInWords>;
+
+/** Whether these are the words of an edition whose harnesses sign in themselves. */
+export function signsIn(words: DashboardWords): words is SignInWords {
+  return "no_token" in words;
+}
 
 /** The open edition's: a person runs `ukt ui` on the server's host, or pastes the key they were given. */
-export const OPEN_DASHBOARD_WORDS: DashboardWords = {
+export const OPEN_DASHBOARD_WORDS: TokenWords = {
   sign_in: [
     "On the computer the server runs on, run `ukt ui` in a terminal: it opens the dashboard signed in, or prints a link that does.",
     "From any other computer, paste the dashboard key you were given.",
