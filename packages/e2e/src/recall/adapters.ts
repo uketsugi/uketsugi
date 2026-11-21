@@ -1,8 +1,9 @@
 /** The memory products the suite can run against, by the name `--product` takes. */
 import type { Adapter } from "./adapter.ts";
+import { none } from "./none.ts";
 import { uketsugi } from "./uketsugi.ts";
 
-const ADAPTERS: Record<string, Adapter> = { uketsugi };
+const ADAPTERS: Record<string, Adapter> = { uketsugi, none };
 
 export const DEFAULT_PRODUCT = "uketsugi";
 export const DEFAULT_MODEL = "haiku";

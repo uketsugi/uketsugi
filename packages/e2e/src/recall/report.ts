@@ -8,6 +8,7 @@
  * cells where memory delivered the item before the agent's first write, from what an earlier session
  * put there, over all needed cells). It is the first line of the output and of `--compare`.
  */
+import type { End } from "./ending.ts";
 import type { Items } from "./items.ts";
 import type { Recalled, Stored } from "./measure.ts";
 import { difference, interval, type PerItem } from "./stats.ts";
@@ -48,6 +49,8 @@ export interface CaseRecord {
   killed_stops?: number;
   recovered_starts?: number;
   error?: string;
+  /** How the case ended when a session ended in a way that is not done: a void (provider, machine), a miss of the product's server, a harness failure. */
+  end?: End;
   note?: string;
   /** Search results of the case that were marked `no_model`; absent where the case was not scored from its transcripts. */
   no_model?: number;

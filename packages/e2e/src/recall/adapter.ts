@@ -9,6 +9,7 @@
 import type { Environment } from "./environment.ts";
 import type { Forwarder } from "./forwarder.ts";
 import type { Tools } from "./preflight.ts";
+import type { ProcessExit } from "./process.ts";
 import type { Release } from "./release.ts";
 import type { Delivery, Transcript } from "./transcript.ts";
 import type { Workspace } from "./workspace.ts";
@@ -23,6 +24,8 @@ export interface AdapterContext {
   readonly model: string;
   /** A model directory a person's `ukt setup` made (the embedding model); copied, never downloaded. */
   readonly modelDir: string;
+  /** Whether the harness's sessions keep Claude Code's own memory, as a person's do. */
+  readonly harnessMemory?: boolean;
   /** A file in shell syntax exporting GEMINI_API_KEY, for a product's own model step. Never read here. */
   readonly llmKeyFile?: string;
 }
@@ -32,6 +35,8 @@ export interface Serving {
   readonly port: number;
   readonly url: string;
   stop(): Promise<void>;
+  /** How the product ended when this run did not stop it; null while it is up, after a stop, and for a product with no server. */
+  exit(): ProcessExit | null;
   /** The forwarder that records the product's own model calls, when it makes any. */
   readonly modelStep?: Forwarder;
 }

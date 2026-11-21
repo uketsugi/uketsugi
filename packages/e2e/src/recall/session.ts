@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { MODEL_PORT, type Environment } from "./environment.ts";
 import { start, stop } from "./process.ts";
 import { WriteWatch, type FirstWrite } from "./firstwrite.ts";
+import { sessionEnd, type End } from "./ending.ts";
+import { withBoxRetries } from "./boxstart.ts";
 import { parseTranscript, type Init, type Transcript } from "./transcript.ts";
 
 const BASE_TOOLS = "Bash,Read,Edit,Write,Glob,Grep,Agent";
@@ -35,6 +37,10 @@ export interface SessionOptions {
   readonly baseline?: ReadonlySet<string>;
   readonly stopAtFirstWrite?: boolean;
   readonly env?: Readonly<Record<string, string>>;
+  /** Claude Code's own memory as a person has it. Off (the flag set) unless a run says true: the recall suite's sessions must not carry memory of their own. */
+  readonly harnessMemory?: boolean;
+  /** The session is stopped this long after it starts: its record says `capped`. */
+  readonly capMs?: number;
 }
 
 export interface InstructionFile {
@@ -58,6 +64,7 @@ export interface SessionResult {
   readonly code: number | null;
   readonly transcript: Transcript;
   readonly setup: SetupRecord;
+  readonly end: End;
 }
 
 /** The sign-in token: CLAUDE_CODE_OAUTH_TOKEN, else the access token of the credentials file CLAUDE_SIGN_IN names. */
@@ -142,27 +149,20 @@ function readFrom(path: string, offset: number): Buffer {
   }
 }
 
-export async function runSession(
-  environment: Environment,
+/** One run of the harness in its box: tailed as it is written, ended at its first write in quick mode and at its deadline. */
+async function launch(
+  sandbox: { command: string; args: string[]; env: Record<string, string> },
   options: SessionOptions,
-): Promise<SessionResult> {
-  const files = await instructionFiles(options.home, options.tree);
-  const sandbox = await environment.command({
-    home: options.home,
-    tree: options.tree,
-    cmd: argvOf(options),
-    claude: true,
-    env: {
-      ANTHROPIC_BASE_URL: `http://127.0.0.1:${MODEL_PORT}`,
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-      GIT_ALLOW_PROTOCOL: "file",
-      CLAUDE_CODE_OAUTH_TOKEN: await signInToken(),
-      ...options.env,
-    },
-  });
+): Promise<{
+  code: number | null;
+  killed: boolean;
+  capped: number | null;
+  write: FirstWrite | null;
+}> {
   await writeFile(options.transcript, "");
   const out = openSync(options.transcript, "a");
   const err = openSync(`${options.transcript}.err`, "w");
+  const began = Date.now();
   const child = start(sandbox.command, sandbox.args, {
     env: sandbox.env,
     stdio: ["ignore", out, err],
@@ -173,6 +173,7 @@ export async function runSession(
     child.once("close", (code) => resolve(code)),
   );
   let killed = false;
+  let capped: number | null = null;
   let offset = 0;
   let pending = "";
   let done = false;
@@ -194,16 +195,56 @@ export async function runSession(
       killed = true;
       await stop(child, "SIGKILL");
     }
+    if (!killed && options.capMs !== undefined && Date.now() - began >= options.capMs) {
+      killed = true;
+      capped = Math.round((Date.now() - began) / 1000);
+      await stop(child, "SIGKILL");
+    }
   }
   await batch(readFrom(options.transcript, offset).toString() + "\n");
-  const code = await closed;
-  const transcript = parseTranscript(await readFile(options.transcript, "utf8"));
+  return { code: await closed, killed, capped, write: watch?.write ?? null };
+}
+
+export async function runSession(
+  environment: Environment,
+  options: SessionOptions,
+): Promise<SessionResult> {
+  const files = await instructionFiles(options.home, options.tree);
+  const sandbox = await environment.command({
+    home: options.home,
+    tree: options.tree,
+    cmd: argvOf(options),
+    claude: true,
+    env: {
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${MODEL_PORT}`,
+      ...(options.harnessMemory === true ? {} : { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" }),
+      GIT_ALLOW_PROTOCOL: "file",
+      CLAUDE_CODE_OAUTH_TOKEN: await signInToken(),
+      ...options.env,
+    },
+  });
+  let ran!: Awaited<ReturnType<typeof launch>>;
+  const { started } = await withBoxRetries(async () => {
+    ran = await launch(sandbox, options);
+    const stderr = await readFile(`${options.transcript}.err`, "utf8").catch(() => "");
+    return { failed: ran.code !== 0 && !ran.killed, stderr };
+  });
+  const text = await readFile(options.transcript, "utf8");
+  const transcript = parseTranscript(text);
   const result: SessionResult = {
-    sessionId: sessionIdOf(await readFile(options.transcript, "utf8")),
-    killed,
-    firstWrite: watch?.write ?? null,
-    code,
+    sessionId: sessionIdOf(text),
+    killed: ran.killed,
+    firstWrite: ran.write,
+    code: ran.code,
     transcript,
+    end: sessionEnd({
+      capped: ran.capped,
+      killed: ran.killed,
+      started,
+      code: ran.code,
+      transcript: text,
+      stderr: await readFile(`${options.transcript}.err`, "utf8").catch(() => ""),
+    }),
     setup: {
       ...transcript.init,
       modelRequested: options.model,

@@ -55,9 +55,10 @@ export async function judgeChain(
   context: JudgeContext,
   rebuilt: Rebuilt,
   workspace: Workspace,
+  tasks: readonly string[] = Object.keys(context.chain.tasks),
 ): Promise<boolean> {
   let allOk = true;
-  for (const task of Object.keys(context.chain.tasks)) {
+  for (const task of tasks) {
     const row = await judgeTask(context, rebuilt, workspace, task);
     say(row);
     allOk &&= row.endsWith("-> ok");
@@ -71,10 +72,11 @@ export async function prepare(
   chain: ChainData,
   ergo: string,
   verify = true,
+  options: { tasks?: readonly string[]; releaseCache?: string } = {},
 ): Promise<Prepared> {
   say(`workspace ${workspace.path}`);
   say(`cloning ergo from ${ergo}, rebuilding the chain`);
-  const rebuilt = await rebuildChain(chain, ergo, workspace.at("mirror"));
+  const rebuilt = await rebuildChain(chain, ergo, workspace.at("mirror"), options.tasks);
   const context: JudgeContext = {
     chain,
     tools,
@@ -84,11 +86,11 @@ export async function prepare(
   let verified = true;
   if (verify) {
     say("judging every task at its parent and at its squash, in the sandbox");
-    verified = await judgeChain(context, rebuilt, workspace);
+    verified = await judgeChain(context, rebuilt, workspace, options.tasks);
   }
   say("building the working tree");
   const build = await describeBuild(REPOSITORY);
-  const release = await buildRelease(workspace);
+  const release = await buildRelease(workspace, REPOSITORY, options.releaseCache);
   const home = workspace.at("ukt-home");
   const version = await installRelease(release, home);
   say(

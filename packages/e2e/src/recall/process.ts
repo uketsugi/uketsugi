@@ -8,6 +8,8 @@ import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
 
 const children = new Set<ChildProcess>();
+/** Children this run ended itself with `stop`: their exit is not news. */
+const stoppedHere = new WeakSet<ChildProcess>();
 let ending = false;
 
 export interface Finished {
@@ -97,6 +99,7 @@ export async function stop(
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null)
     return { killed: false };
   const gone = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  stoppedHere.add(child);
   let killed = false;
   killGroup(child, signal);
   const timer = setTimeout(() => {
@@ -106,6 +109,18 @@ export async function stop(
   await gone;
   clearTimeout(timer);
   return { killed };
+}
+
+export interface ProcessExit {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
+/** Watches a child: what it will say of how it ended, or null while it runs and when this run stopped it. */
+export function watchExit(child: ChildProcess): () => ProcessExit | null {
+  let ended: ProcessExit | null = null;
+  child.once("close", (code, signal) => (ended = { code, signal }));
+  return () => (stoppedHere.has(child) ? null : ended);
 }
 
 function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {

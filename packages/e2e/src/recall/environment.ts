@@ -4,8 +4,8 @@
  * (the server at 127.0.0.1:7410, which is the README's address, the model API at 7420). Outside, each
  * case's server and forwarder take a port the system assigns, so cases can run side by side.
  */
-import { createServer } from "node:net";
 import { join } from "node:path";
+import { withBoxRetries } from "./boxstart.ts";
 import { run, type Finished } from "./process.ts";
 import type { Tools } from "./preflight.ts";
 import { REPOSITORY } from "./release.ts";
@@ -30,8 +30,8 @@ export class Environment {
   readonly socks: string;
   private readonly workspace: Workspace;
   private readonly tools: Tools;
-  private readonly ports: number[] = [];
-  private readonly relays: Relay[] = [];
+  /** The relay that answers each inside port. */
+  private readonly relays = new Map<number, Relay>();
 
   private constructor(workspace: Workspace, tools: Tools, socks: string) {
     this.workspace = workspace;
@@ -45,10 +45,13 @@ export class Environment {
     return new Environment(workspace, tools, socks);
   }
 
-  /** Makes the host's `127.0.0.1:<hostPort>` reachable inside at `127.0.0.1:<inside>`. */
+  /**
+   * Makes the host's `127.0.0.1:<hostPort>` reachable inside at `127.0.0.1:<inside>`. Exposing an inside
+   * port again (the server restarted on a port of its own) points it at the new host port.
+   */
   async expose(inside: number, hostPort: number): Promise<void> {
-    this.relays.push(await serveUnixToTcp(join(this.socks, `${inside}.sock`), hostPort));
-    this.ports.push(inside);
+    this.relays.get(inside)?.close();
+    this.relays.set(inside, await serveUnixToTcp(join(this.socks, `${inside}.sock`), hostPort));
   }
 
   command(invocation: Invocation): Promise<Command> {
@@ -56,7 +59,7 @@ export class Environment {
       home: invocation.home,
       tree: invocation.tree,
       socks: this.socks,
-      ports: this.ports,
+      ports: [...this.relays.keys()],
       hide: [this.workspace.path, REPOSITORY],
       ...(invocation.readOnly === undefined ? {} : { readOnly: invocation.readOnly }),
       ...(invocation.claude === true && this.tools.claude !== undefined
@@ -70,35 +73,16 @@ export class Environment {
   /** Runs a command to its end in the sandbox. */
   async exec(invocation: Invocation): Promise<Finished> {
     const sandbox = await this.command(invocation);
-    return run(sandbox.command, sandbox.args, { env: sandbox.env, allowFailure: true });
+    let finished!: Finished;
+    await withBoxRetries(async () => {
+      finished = await run(sandbox.command, sandbox.args, { env: sandbox.env, allowFailure: true });
+      return { failed: finished.code !== 0, stderr: finished.stderr };
+    });
+    return finished;
   }
 
   async close(): Promise<void> {
-    for (const relay of this.relays) relay.close();
-    this.relays.length = 0;
+    for (const relay of this.relays.values()) relay.close();
+    this.relays.clear();
   }
-}
-
-const handedOut = new Set<number>();
-
-/** A port on loopback that nothing holds now and no other case of this run was just given. */
-export async function freePort(): Promise<number> {
-  for (;;) {
-    const port = await probePort();
-    if (!handedOut.has(port)) {
-      handedOut.add(port);
-      return port;
-    }
-  }
-}
-
-function probePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as { port: number };
-      server.close(() => resolve(port));
-    });
-  });
 }

@@ -69,3 +69,19 @@ export async function sweepStale(): Promise<string[]> {
   }
   return swept;
 }
+
+/** Runs `body` in a workspace that is removed when it ends, on SIGINT and SIGTERM too. */
+export async function withWorkspace<T>(body: (workspace: Workspace) => Promise<T>): Promise<T> {
+  const workspace = await Workspace.create();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      void workspace.close().then(() => process.exit(signal === "SIGINT" ? 130 : 143));
+    });
+  }
+  try {
+    return await body(workspace);
+  } finally {
+    await workspace.close();
+    console.log("workspace removed");
+  }
+}

@@ -28,6 +28,40 @@ beforeAll(async () => {
 });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+/** A running session whose steps all end as `end` says. */
+function fakeRun(prompts: string[], end: unknown): Running {
+  return {
+    c: {
+      dir: root,
+      stepOf: () => 0,
+      session: (o: { prompt: string }) => {
+        prompts.push(o.prompt);
+        return Promise.resolve({
+          code: 0,
+          killed: false,
+          firstWrite: null,
+          sessionId: "s1",
+          end,
+        });
+      },
+    },
+    suite: {
+      adapter: { session: () => ({}) },
+      chain: { tasks: { T8: { prompt: "do T8" } }, maxFollowups: 1, followup: "try again" },
+      judge: {},
+    },
+    plan: {
+      id: "S1",
+      steps: [{ task: "T8" }, { say_after_task: "make 90 and 14 the defaults" }],
+    },
+    config: "activate",
+    tree: root,
+    baseline: undefined,
+    ident: null,
+    setup: undefined,
+  } as unknown as Running;
+}
+
 describe("D5's plant", () => {
   test("works T6, resets to T8's parent, works T8, and then says the reversal", () => {
     const plant = caseSessions(items["D5"] as never, chain, "quick", 2, false)[0];
@@ -39,34 +73,21 @@ describe("D5's plant", () => {
 
   test("is said when T8 has not passed after every follow-up", async () => {
     const prompts: string[] = [];
-    const run = {
-      c: {
-        dir: root,
-        stepOf: () => 0,
-        session: (o: { prompt: string }) => {
-          prompts.push(o.prompt);
-          return Promise.resolve({ code: 0, killed: false, firstWrite: null, sessionId: "s1" });
-        },
-      },
-      suite: {
-        adapter: { session: () => ({}) },
-        chain: { tasks: { T8: { prompt: "do T8" } }, maxFollowups: 1, followup: "try again" },
-        judge: {},
-      },
-      plan: {
-        id: "S1",
-        steps: [{ task: "T8" }, { say_after_task: "make 90 and 14 the defaults" }],
-      },
-      config: "activate",
-      tree: root,
-      baseline: undefined,
-      ident: null,
-      setup: undefined,
-    } as unknown as Running;
+    const run = fakeRun(prompts, { kind: "done" });
 
     await steps(run);
 
     expect(prompts).toEqual(["do T8", "try again", "make 90 and 14 the defaults"]);
+  });
+
+  test("a harness that exits badly does not end the recall suite's case; a void or a miss does", async () => {
+    const harness = fakeRun([], { kind: "harness", code: 1, detail: "x" });
+    await steps(harness);
+    expect(harness.harness).toMatchObject({ kind: "harness", code: 1 });
+    await expect(
+      steps(fakeRun([], { kind: "void", cause: "provider", detail: "x" })),
+    ).rejects.toThrow(/void/);
+    await expect(steps(fakeRun([], { kind: "miss", detail: "x" }))).rejects.toThrow(/miss/);
   });
 });
 

@@ -65,20 +65,25 @@ export async function overlayTests(task: Task, name: string, dest: string): Prom
 }
 
 /**
- * Clones ergo (a URL or a local path) into `mirror` and rebuilds the chain there. Throws unless all 24
- * trees equal `trees.json`; returns what the cases need to clone from.
+ * Clones ergo (a URL or a local path) into `mirror` and rebuilds the chain there. Throws unless every
+ * tree rebuilt equals `trees.json`; returns what the cases need to clone from. With `tasks`, only the
+ * patches up to the last of them are applied, and only those tasks get their hidden-test commit: the
+ * trees a run uses, and no more.
  */
 export async function rebuildChain(
   chain: ChainData,
   ergo: string,
   mirror: string,
+  tasks?: readonly string[],
 ): Promise<Rebuilt> {
   await run("git", ["clone", "-q", "--no-checkout", "--no-hardlinks", ergo, mirror]);
   const base = await git(mirror, "rev-parse", `${chain.repo.base}^{commit}`);
   await git(mirror, "checkout", "-q", "-b", "ref", base);
+  const last = tasks === undefined ? Infinity : Math.max(...tasks.map((t) => Number(t.slice(1))));
   const patches = (await readdir(join(DATA, "reference")))
     .filter((f) => f.endsWith(".patch"))
-    .sort();
+    .sort()
+    .slice(0, last);
   const trees: Record<string, string> = {};
   const parent: Record<string, string> = {};
   const refs: string[] = [];
@@ -100,6 +105,7 @@ export async function rebuildChain(
   const squash: Record<string, string> = {};
   for (const [index, ref] of refs.entries()) {
     const name = `T${index + 1}`;
+    if (tasks !== undefined && !tasks.includes(name)) continue;
     await git(mirror, "checkout", "-q", "-B", `bench/${name}`, ref);
     await overlayTests(chain.tasks[name] as Task, name, mirror);
     await git(mirror, "add", "-f", "benchtests");
@@ -112,11 +118,14 @@ export async function rebuildChain(
     string,
     string
   >;
-  const different = Object.keys(want).filter((key) => trees[key] !== want[key]);
+  const checked = Object.keys(want).filter((key) => key in trees);
+  const different = checked.filter((key) => trees[key] !== want[key]);
   if (different.length > 0) {
     throw new Error(`the rebuilt chain's trees are not the chain's: ${different.join(" ")}`);
   }
-  console.log(`${Object.keys(want).length} of ${Object.keys(want).length} trees equal`);
+  console.log(
+    `${checked.length} of ${Object.keys(want).length} trees equal (${checked.length} rebuilt)`,
+  );
   return { mirror, parent, squash };
 }
 

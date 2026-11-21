@@ -44,7 +44,7 @@ interface CaseChain {
 const load = async <T>(out: string, name: string): Promise<T> =>
   JSON.parse(await readFile(join(out, name), "utf8")) as T;
 
-async function stepRows(out: string): Promise<StepRow[]> {
+export async function stepRows(out: string): Promise<StepRow[]> {
   const text = await readFile(join(out, "steps.jsonl"), "utf8");
   return text
     .split("\n")
@@ -53,7 +53,7 @@ async function stepRows(out: string): Promise<StepRow[]> {
 }
 
 /** The session's deliveries over its steps' transcripts, in order. */
-async function deliveriesOf(
+export async function deliveriesOf(
   out: string,
   rows: readonly StepRow[],
   spec: MemorySpec,
@@ -67,7 +67,7 @@ async function deliveriesOf(
 }
 
 /** The session's first write as the runner recorded it: its step and the line of the call. */
-function writeOf(rows: readonly StepRow[]): Write | null {
+export function writeOf(rows: readonly StepRow[]): Write | null {
   const row = [...rows].sort((a, b) => a.step - b.step).find((r) => r.first_write !== null);
   return row?.first_write ? { step: row.step, line: row.first_write.call_line } : null;
 }

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { Adapter, AdapterContext } from "./adapter.ts";
 import { Case, PROJECT } from "./case.ts";
 import { excludeBuildOutputs, makeTree, resetTree, type ChainData, type Rebuilt } from "./chain.ts";
+import { SessionEnded, type End } from "./ending.ts";
 import { scoreCase, type Scoring } from "./evidence.ts";
 import { judge, type JudgeContext } from "./judge.ts";
 import { probeTasks, type Item, type Items } from "./items.ts";
@@ -73,6 +74,23 @@ export interface Running {
   readonly baseline: ReadonlySet<string> | undefined;
   ident: string | null;
   setup: unknown;
+  /** When the session must end, as a time: a step is stopped there, and no step starts after it. */
+  readonly deadline?: number;
+  readonly startedAt?: number;
+  /** Set when the session was stopped at its deadline: nothing more is asked of it. */
+  capped?: End;
+  /** Set when the harness failed on its own (the recall suite goes on and judges the tree, as it always has; a live run records it). */
+  harness?: End;
+}
+
+/** Whether the deadline has passed; the session is then capped, with the time it ran. */
+function expired(run: Running): boolean {
+  if (run.deadline === undefined || Date.now() < run.deadline) return run.capped !== undefined;
+  run.capped ??= {
+    kind: "capped",
+    seconds: Math.round((Date.now() - (run.startedAt ?? run.deadline)) / 1000),
+  };
+  return true;
 }
 
 async function step(
@@ -89,8 +107,12 @@ async function step(
     prompt,
     resume: run.ident,
     ...(run.baseline === undefined ? {} : { baseline: run.baseline }),
+    ...(run.deadline === undefined ? {} : { capMs: Math.max(1, run.deadline - Date.now()) }),
     stopAtFirstWrite: plan.kill_after === "write",
   });
+  if (result.end.kind === "capped") run.capped = result.end;
+  else if (result.end.kind === "harness") run.harness ??= result.end;
+  else if (result.end.kind !== "done") throw new SessionEnded(result.end);
   run.ident ??= result.sessionId;
   if (index === 0) run.setup = result.setup;
   await appendFile(
@@ -116,12 +138,13 @@ async function task(run: Running, name: string): Promise<void> {
   const { c, suite, plan } = run;
   let prompt = (suite.chain.tasks[name] as { prompt: string }).prompt;
   for (let attempt = 0; attempt <= suite.chain.maxFollowups; attempt++) {
+    if (expired(run)) return;
     const result = await step(run, attempt === 0 ? "task" : "followup", prompt, name);
-    if (result.killed) return;
+    if (result.killed && run.capped === undefined) return;
     const judged = await judge(suite.judge, name, run.tree);
     await mkdir(join(c.dir, "judge"), { recursive: true });
     await writeJson(join(c.dir, "judge", `${plan.id}.${name}.${attempt}.json`), judged);
-    if (judged.passed) return;
+    if (judged.passed || run.capped !== undefined) return;
     prompt = suite.chain.followup;
   }
 }
@@ -132,6 +155,7 @@ export async function steps(run: Running): Promise<void> {
   const row = suite.adapter.session(run.config);
   if (row.firstMessage !== undefined) await step(run, "activate", row.firstMessage, null);
   for (const x of plan.steps) {
+    if (expired(run)) return;
     if ("reset" in x)
       await resetTree(suite.rebuilt, suite.rebuilt.parent[x.reset] as string, run.tree);
     else if ("task" in x) await task(run, x.task);
@@ -139,15 +163,39 @@ export async function steps(run: Running): Promise<void> {
   }
 }
 
-/** A session on its own tree at the reference before its first task, with a fresh mail relay. */
+/** A session in `tree` (already at its reference), with the case's mail relay; its home is dropped when it ends. */
+export async function sessionIn(
+  c: Case,
+  suite: Suite,
+  plan: SessionPlan,
+  config: string,
+  tree: string,
+  deadline?: number,
+): Promise<Running> {
+  const baseline = plan.role === "probe" ? await treeStatus(tree) : undefined;
+  const run: Running = {
+    c,
+    suite,
+    plan,
+    config,
+    tree,
+    baseline,
+    ident: null,
+    setup: undefined,
+    startedAt: Date.now(),
+    ...(deadline === undefined ? {} : { deadline }),
+  };
+  await steps(run);
+  return run;
+}
+
+/** A session on its own tree at the reference before its first task. */
 async function session(c: Case, suite: Suite, plan: SessionPlan, config: string): Promise<unknown> {
   const first = plan.steps.find((x): x is { task: string } => "task" in x) as { task: string };
   const tree = join(c.dir, "trees", plan.id, "repo");
   await makeTree(suite.chain, suite.rebuilt, suite.rebuilt.parent[first.task] as string, tree);
   await excludeBuildOutputs(tree, suite.chain.exclude);
-  const baseline = plan.role === "probe" ? await treeStatus(tree) : undefined;
-  const run: Running = { c, suite, plan, config, tree, baseline, ident: null, setup: undefined };
-  await c.withMailRelay(suite.chain, () => steps(run));
+  const run = await sessionIn(c, suite, plan, config, tree);
   await rm(join(c.dir, "trees", plan.id), { recursive: true, force: true });
   await c.dropHome(plan.id);
   return run.setup;
@@ -225,6 +273,7 @@ export async function runCase(suite: Suite, job: Job): Promise<CaseOutcome> {
     record.setup = await sessions(c, suite, chain.sessions, job.config);
     Object.assign(record, await scoreCase(c.dir, key, suite.scoring));
   } catch (error) {
+    if (error instanceof SessionEnded) record.end = error.end;
     record.error = (
       error instanceof Error ? `${error.name}: ${error.message}` : String(error)
     ).slice(0, 500);
@@ -232,6 +281,13 @@ export async function runCase(suite: Suite, job: Job): Promise<CaseOutcome> {
   record.minutes = Math.round((Date.now() - started) / 6000) / 10;
   if (c !== undefined) await keep(c, name, suite, record);
   return record;
+}
+
+/** Copies what a case kept (`KEPT`) from its folder to `dest`. */
+export async function copyEvidence(dir: string, dest: string): Promise<void> {
+  await mkdir(dest, { recursive: true });
+  for (const file of KEPT)
+    await cp(join(dir, file), join(dest, file), { recursive: true }).catch(() => undefined);
 }
 
 /** Copies the evidence to the results, then stops the case and removes what is big. */
@@ -242,10 +298,8 @@ export async function keep(
   record: CaseOutcome,
 ): Promise<void> {
   const dest = join(suite.resultsDir, "cases", name);
-  await mkdir(dest, { recursive: true });
   try {
-    for (const file of KEPT)
-      await cp(join(c.dir, file), join(dest, file), { recursive: true }).catch(() => undefined);
+    await copyEvidence(c.dir, dest);
     Object.assign(record, await spendOf(c.dir).catch(() => ({})));
     if (c.serving.modelStep !== undefined)
       record.model_step_usd = Math.round(modelStepUsd(c.serving.modelStep) * 1e4) / 1e4;

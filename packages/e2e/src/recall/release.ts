@@ -3,6 +3,7 @@
  * changes included, the commit and the diff recorded), its three files copied into the workspace at
  * once so that another build cannot change them mid-run, and installed into a home of its own.
  */
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -39,20 +40,38 @@ export async function describeBuild(repo: string): Promise<Build> {
   };
 }
 
-/** Builds the working tree and copies the release into `<workspace>/release`. */
-export async function buildRelease(workspace: Workspace, repo = REPOSITORY): Promise<Release> {
-  await run("bash", [join(repo, "deploy", "build.sh")], { cwd: repo });
-  const dist = join(repo, "deploy", "dist");
-  const dir = workspace.at("release");
-  await mkdir(dir);
+const FILES = (tarball: string): string[] => [tarball, `${tarball}.sha256`, "install.sh"];
+
+/**
+ * Builds the working tree and copies the release into `<workspace>/release`. With `cache`, a release of
+ * a clean tree is kept in `<cache>/<commit>` and taken from there the next time the commit is built:
+ * a tree with uncommitted changes is never cached or taken from it.
+ */
+export async function buildRelease(
+  workspace: Workspace,
+  repo = REPOSITORY,
+  cache?: string,
+): Promise<Release> {
   const manifest = JSON.parse(
     await readFile(join(repo, "packages", "cli", "package.json"), "utf8"),
   ) as {
     version: string;
   };
   const tarball = `uketsugi-${manifest.version}-linux-x64.tar.gz`; // the name build.sh gives it
-  for (const name of [tarball, `${tarball}.sha256`, "install.sh"]) {
-    await copyFile(join(dist, name), join(dir, name));
+  const build = cache === undefined ? undefined : await describeBuild(repo);
+  const kept = build === undefined || build.dirty ? undefined : join(cache as string, build.head);
+  const dir = workspace.at("release");
+  await mkdir(dir);
+  if (kept !== undefined && existsSync(join(kept, tarball))) {
+    for (const name of FILES(tarball)) await copyFile(join(kept, name), join(dir, name));
+    return { dir, tarball, installScript: join(dir, "install.sh") };
+  }
+  await run("bash", [join(repo, "deploy", "build.sh")], { cwd: repo });
+  const dist = join(repo, "deploy", "dist");
+  for (const name of FILES(tarball)) await copyFile(join(dist, name), join(dir, name));
+  if (kept !== undefined) {
+    await mkdir(kept, { recursive: true });
+    for (const name of FILES(tarball)) await copyFile(join(dist, name), join(kept, name));
   }
   return { dir, tarball, installScript: join(dir, "install.sh") };
 }

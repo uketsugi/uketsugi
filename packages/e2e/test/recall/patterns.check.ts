@@ -212,10 +212,12 @@ async function rewordedLines(): Promise<Record<string, string[]>> {
     .tasks;
   const live = JSON.parse(await readFile(join(DATA, "live.json"), "utf8")) as Prompts;
   return Object.fromEntries(
-    Object.entries(live).map(([task, entry]) => {
-      const old = new Set((chain[task]?.prompt ?? "").split("\n"));
-      return [task, entry.prompt.split("\n").filter((l) => !old.has(l))];
-    }),
+    Object.entries(live)
+      .filter(([task]) => task !== "told")
+      .map(([task, entry]) => {
+        const old = new Set((chain[task]?.prompt ?? "").split("\n"));
+        return [task, entry.prompt.split("\n").filter((l) => !old.has(l))];
+      }),
   );
 }
 

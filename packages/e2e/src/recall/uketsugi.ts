@@ -69,7 +69,7 @@ const addCommand = [
 ];
 
 /** The commands of a configuration's set-up, run in the sandbox as the person of the home. */
-function installCommands(config: string): string[][] {
+export function installCommands(config: string): string[][] {
   const install = ["sh", `${RELEASE_AT}/install.sh`, "--tarball", "<tarball>"];
   const plugin = [
     "claude",
@@ -201,6 +201,7 @@ export const uketsugi: Adapter = {
         await server.stop();
         await forwarder?.stop();
       },
+      exit: () => server.exit(),
       ...(forwarder === undefined ? {} : { modelStep: forwarder }),
     };
   },
@@ -219,6 +220,7 @@ export const uketsugi: Adapter = {
         model: context.model,
         allowedTools: "mcp__uketsugi,Read,Edit,Write",
         permissionMode: "bypassPermissions",
+        ...(context.harnessMemory === true ? { harnessMemory: true } : {}),
         transcript: join(dirname(home), "setup.jsonl"),
       });
     }

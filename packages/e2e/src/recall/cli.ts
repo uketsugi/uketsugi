@@ -34,13 +34,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import type { Adapter, AdapterContext } from "./adapter.ts";
+import type { AdapterContext } from "./adapter.ts";
 import { adapterFor, configurationOf, DEFAULT_MODEL, DEFAULT_PRODUCT } from "./adapters.ts";
 import { seedOf } from "./case.ts";
 import { loadChain } from "./chain.ts";
 import type { Scoring } from "./evidence.ts";
 import { loadItems, type Items } from "./items.ts";
-import { validatePatterns } from "./measure.ts";
+import { refuseBrokenPatterns } from "./patterns.ts";
 import { DEFAULT_GAP } from "./plan.ts";
 import { prepare } from "./prepare.ts";
 import { preflight } from "./preflight.ts";
@@ -48,7 +48,7 @@ import { failed, headline, table } from "./report.ts";
 import { merge, rescore } from "./results.ts";
 import { modelDirProblem } from "./server.ts";
 import { report, runSuite, type RunOptions } from "./suite.ts";
-import { Workspace } from "./workspace.ts";
+import { withWorkspace } from "./workspace.ts";
 
 const USAGE = [
   "usage: recall [--product uketsugi] [--config activate] [--model haiku] [--items D1,D5] [--quick|--full]",
@@ -86,22 +86,6 @@ type Values = ReturnType<
   typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>
 >["values"];
 
-/** How a run is told what to do, and who may stop it. */
-async function withWorkspace<T>(body: (workspace: Workspace) => Promise<T>): Promise<T> {
-  const workspace = await Workspace.create();
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(signal, () => {
-      void workspace.close().then(() => process.exit(signal === "SIGINT" ? 130 : 143));
-    });
-  }
-  try {
-    return await body(workspace);
-  } finally {
-    await workspace.close();
-    console.log("workspace removed");
-  }
-}
-
 async function prepareOnly(values: Values): Promise<void> {
   const chain = await loadChain();
   const tools = await preflight({ sessions: false });
@@ -138,17 +122,6 @@ async function scoringFor(
     mode,
   };
   return { items, scoring };
-}
-
-/** Refuses to start when an item's pattern matches what no earlier session put there. */
-async function refuseBrokenPatterns(adapter: Adapter, items: Items): Promise<void> {
-  const seed = (await seedOf()) as { claim: string; detail?: string }[];
-  const problems = validatePatterns(items, seed, adapter.boilerplate);
-  if (problems.length > 0) {
-    throw new Error(
-      `refusing to start: an item's pattern matches what no earlier session put there:\n${problems.join("\n")}`,
-    );
-  }
 }
 
 async function afterTheFact(values: Values, folders: string[]): Promise<void> {

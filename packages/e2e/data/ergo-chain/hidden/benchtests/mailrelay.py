@@ -2,6 +2,8 @@
 test inbox that says what it did.
 
     python3 mailrelay.py --port 2525 [--state DIR]     as a service: SMTP, and `GET /` on the same port shows the inbox
+    python3 mailrelay.py --port 0 --token T            binds a port of its own, says which as the first line of standard output
+                                                       ({"port": n, "token": "T"}), and answers `GET /token` with T: so whoever started it can tell it from any other listener
     r = Relay(port=0, greylist=0, quarantine=False, single=False); r.start(); ...; r.delivered     in a test (all three off: it accepts)
 
 - Greylisting: the first time it sees a sender and recipient pair it answers `451 4.7.1` to RCPT TO and asks for a retry after
@@ -26,8 +28,8 @@ SLOW = 0.3  # seconds a client waits for the greeting: a busy relay, and the tim
 
 
 class Relay:
-    def __init__(self, port=0, state=None, greylist=0, quarantine=False, single=False, slow=SLOW):
-        self.greylist, self.quarantine, self.single, self.state, self.slow = greylist, quarantine, single, state, slow
+    def __init__(self, port=0, state=None, greylist=0, quarantine=False, single=False, slow=SLOW, token=""):
+        self.greylist, self.quarantine, self.single, self.state, self.slow, self.token = greylist, quarantine, single, state, slow, token
         self.delivered, self.quarantined, self.refused = [], [], []  # refused: (kind, sender, recipient)
         self.log = []  # every event: (time, kind, detail)
         self.connections = 0
@@ -109,7 +111,7 @@ class Relay:
                 first = h.connection.recv(4096, __import__("socket").MSG_PEEK)
                 if first.startswith(b"GET "):
                     h.connection.recv(4096)
-                    body = self.inbox().encode()
+                    body = (self.token + "\n" if first.startswith(b"GET /token ") else self.inbox()).encode()
                     h.wfile.write(b"HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
                     return
             say("220 relay.example.org ESMTP stand-in")
@@ -187,9 +189,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=2525)
     ap.add_argument("--state", default=None)
+    ap.add_argument("--token", default="", help="what `GET /token` answers")
     ap.add_argument("--lenient", action="store_true", help="accept everything: no greylisting, quarantine or connection limit")
     a = ap.parse_args()
     if a.state:
         os.makedirs(a.state, exist_ok=True)
-    r = Relay(a.port, a.state, **({} if a.lenient else {"greylist": GREYLIST, "quarantine": True, "single": True}))
+    r = Relay(a.port, a.state, token=a.token, **({} if a.lenient else {"greylist": GREYLIST, "quarantine": True, "single": True}))
+    print(json.dumps({"port": r.port, "token": a.token}), flush=True)
     r.server.serve_forever()

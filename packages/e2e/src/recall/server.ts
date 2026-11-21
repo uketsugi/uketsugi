@@ -10,7 +10,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
-import { start, stop } from "./process.ts";
+import { start, stop, watchExit, type ProcessExit } from "./process.ts";
 import type { Forwarder } from "./forwarder.ts";
 
 export interface ServerOptions {
@@ -33,6 +33,8 @@ export interface RunningServer {
   readonly port: number;
   readonly mcpUrl: string;
   stop(): Promise<void>;
+  /** How the server ended when this run did not stop it; null while it is up or after a stop. */
+  exit(): ProcessExit | null;
 }
 
 /**
@@ -148,6 +150,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       process.stderr.write(`${said}\n`);
     }
   };
+  const exit = watchExit(child);
   const lines = createInterface({ input: child.stdout ?? process.stdin });
   const exited = once(child, "close").then(() => {
     throw new Error(`the server exited before it listened (see ${options.log})`);
@@ -187,5 +190,6 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     port: Number(new URL(started.mcpUrl).port),
     mcpUrl: started.mcpUrl,
     stop: stopServer,
+    exit,
   };
 }
