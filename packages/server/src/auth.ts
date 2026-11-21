@@ -38,6 +38,7 @@ import { bearerAuth } from "hono/bearer-auth";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
 import { failed, foreign, notOperator, unauthorized, type TokenRefusals } from "./errors.ts";
+import type { Edition } from "./compose.ts";
 import { overTls } from "./guard.ts";
 
 /** How long a one-time code can be exchanged. */
@@ -146,6 +147,10 @@ export interface SignIn {
    */
   cookieAuth: MiddlewareHandler<AuthEnv>;
 }
+
+/** What a sign-in link that was used or has expired is told, in the open edition's words. */
+const OPEN_STALE_CODE =
+  "This sign-in link was already used or has expired. Run `ukt ui` for a new one.";
 
 /** What the sign-in page was given was no person's dashboard key. */
 function unknownKey(): ToolFailure {
@@ -257,9 +262,12 @@ function cookieSessions({ secret, nowMs }: Sources): CookieSessions {
 export function createSignIn(
   ports: { clock: Clock; ids: IdGen },
   app: Pick<App, "signIn" | "current">,
-  /** What a key no person owns is told; the open edition's words where left out. */
-  refusal: () => ToolFailure = unknownKey,
+  /** What a key no person owns is told, and what a request nobody signed; the open edition's words where left out. */
+  words: Pick<Edition, "unknownKey" | "signedOut" | "staleCode"> = {},
 ): SignIn {
+  const refusal = words.unknownKey ?? unknownKey;
+  const signedOut = words.signedOut ?? unauthorized;
+  const staleCode = words.staleCode ?? OPEN_STALE_CODE;
   const codes = new Map<string, { caller: Caller; expiresAt: Date }>();
   const fromOwnPage = csrf();
   const secret = (): string => Buffer.from(ports.ids.bytes(32)).toString("base64url");
@@ -280,10 +288,7 @@ export function createSignIn(
       codes.delete(key);
       c.header("Cache-Control", "no-store");
       if (pending === undefined || pending.expiresAt.getTime() <= nowMs()) {
-        return c.text(
-          "This sign-in link was already used or has expired. Run `ukt ui` for a new one.",
-          401,
-        );
+        return c.text(staleCode, 401);
       }
       open(c, pending.caller);
       return c.redirect("/", 303);
@@ -306,7 +311,7 @@ export function createSignIn(
       const caller = login === null ? null : await app.current(login.caller);
       if (login === null || caller === null) {
         end(c);
-        return failed(c, unauthorized());
+        return failed(c, signedOut());
       }
       c.set("caller", caller);
       if (SAFE_METHODS.has(c.req.method)) return next();

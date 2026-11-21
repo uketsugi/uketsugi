@@ -3,7 +3,7 @@ import { API_CSRF_HEADER } from "@uketsugi/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
-import { session, unauthorized, unknownKey } from "./fixtures.ts";
+import { hostedCapabilities, session, unauthorized, unknownKey } from "./fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
 
 /** How the sign-in page is headed for someone who has not signed in yet, and for someone who was. */
@@ -33,6 +33,22 @@ describe("the shell and sign-in", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("navigation")).toBeNull();
     expect(document.title).toBe("Sign in · Uketsugi");
+    expect(await violations()).toEqual([]);
+  });
+
+  it("tells a signed-out visitor of an edition with no key and no ukt that edition's way in, and shows no key field", async () => {
+    api.use(
+      answer("/api/session", unauthorized, 401),
+      answer("/api/capabilities", hostedCapabilities),
+    );
+    open("/facts");
+    expect(await screen.findByRole("heading", { name: SIGN_IN })).toBeTruthy();
+    const page = within(screen.getByRole("main"));
+    expect(page.getByText(hostedCapabilities.dashboard.sign_in[0] ?? "missing")).toBeTruthy();
+    expect(page.queryByText(/ukt ui/)).toBeNull();
+    expect(page.queryByText(/dashboard key/)).toBeNull();
+    expect(page.queryByLabelText("Your dashboard key")).toBeNull();
+    expect(page.queryByRole("button", { name: "Sign in" })).toBeNull();
     expect(await violations()).toEqual([]);
   });
 

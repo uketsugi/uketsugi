@@ -2,6 +2,7 @@
  * What an edition can add to the server: its own routes on the one listener, a session for a
  * person it has verified, a bound on the logins it holds, and its own words for a key refused.
  */
+import type { CapabilityDescriptor } from "@uketsugi/contracts";
 import { acceptToken, ToolFailure } from "@uketsugi/core";
 import { eventually } from "@uketsugi/testkit";
 import { Hono } from "hono";
@@ -186,5 +187,72 @@ describe("navigates", () => {
     expect(navigates("text/html,application/xhtml+xml,*/*;q=0.8")).toBe(true);
     expect(navigates("application/json")).toBe(false);
     expect(navigates(undefined)).toBe(false);
+  });
+});
+
+interface Told {
+  error: { what: string; next: string };
+  dashboard: CapabilityDescriptor["dashboard"];
+}
+
+/** What a sign-in link no code opens answers. */
+const staleLink = async (server: UketsugiServer) =>
+  (await get(server, "/sign-in?code=used")).text();
+
+describe("the words for a browser nobody signed in", () => {
+  const asked = async (server: UketsugiServer, path: string) => {
+    const response = await get(server, path);
+    return { status: response.status, body: (await response.json()) as Told };
+  };
+  const hostedWords = {
+    sign_in: ["Open the dashboard's address again and sign in at the provider."],
+    key_form: false,
+    token_command: "hosted: command",
+    token_row: "hosted: token row",
+    shell_intro: "hosted: shell intro",
+    shell_elsewhere: "hosted: shell elsewhere",
+    token_change: "hosted: {harness} {remove}",
+  };
+
+  test("are the open edition's where the edition gives none", async () => {
+    const { server } = await composed({}, true);
+    const capabilities = (await asked(server, "/api/capabilities")).body;
+    expect(capabilities.dashboard.key_form).toBe(true);
+    expect(capabilities.dashboard.sign_in.join(" ")).toMatch(/`ukt ui`.*dashboard key/);
+    expect(await staleLink(server)).toMatch(/Run `ukt ui` for a new one/);
+    const session = await asked(server, "/api/session");
+    expect(session.status).toBe(401);
+    expect(session.body.error.next).toMatch(/dashboard key/);
+  });
+
+  test("are the edition's where it gives them, to the page and to a request nobody signed", async () => {
+    const signedOut = () =>
+      new ToolFailure("unauthorized", { what: "hosted: signed out", meaning: "m", next: "n" });
+    const { server } = await composed({
+      dashboard: hostedWords,
+      signedOut,
+      staleCode: "hosted: link used",
+    });
+    expect((await asked(server, "/api/capabilities")).body.dashboard).toEqual(hostedWords);
+    const session = await asked(server, "/api/session");
+    expect(session.body.error.what).toBe("hosted: signed out");
+    expect(await staleLink(server)).toBe("hosted: link used");
+    expect((await asked(server, "/api/facts")).body.error.what).toBe("hosted: signed out");
+  });
+
+  test("give the Connect page the edition's command for the token, and the open edition's where none is given", async () => {
+    for (const [edition, command] of [
+      [{ dashboard: hostedWords }, "hosted: command"],
+      [{}, 'export UKT_TOKEN="$(ukt token)"'],
+    ] as const) {
+      const { local, server } = await composed(edition);
+      await acceptToken(local.ports, local.owner, TOKEN, "test");
+      const response = await server.fetch(
+        new Request("http://127.0.0.1/api/connect", {
+          headers: { host: "127.0.0.1", authorization: `Bearer ${TOKEN}` },
+        }),
+      );
+      expect(((await response.json()) as { token_command: string }).token_command).toBe(command);
+    }
   });
 });

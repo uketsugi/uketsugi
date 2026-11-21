@@ -2,7 +2,7 @@
 import { BLOCK_START } from "@uketsugi/contracts";
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activity, connect, connectWithToken } from "./fixtures.ts";
+import { activity, connect, connectWithToken, hostedCapabilities } from "./fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
 
 describe("Connect", () => {
@@ -41,6 +41,28 @@ describe("Connect", () => {
     expect(panel.getAllByText(connect.token_env).length).toBeGreaterThan(0);
     expect(panel.getByText("ukt token")).toBeTruthy();
     expect(panel.getByText(claude?.remove ?? "missing")).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("says another edition's words about the token, and none of the open edition's", async () => {
+    api.use(
+      answer("/api/connect", {
+        ...connectWithToken,
+        token_command: hostedCapabilities.dashboard.token_command,
+      }),
+      answer("/api/capabilities", hostedCapabilities),
+    );
+    open("/connect");
+    const panel = within(await screen.findByRole("tabpanel"));
+    const words = hostedCapabilities.dashboard;
+    expect(panel.getByText(words.token_row, { exact: false })).toBeTruthy();
+    expect(panel.getByText(words.shell_intro)).toBeTruthy();
+    expect(panel.getByText(words.shell_elsewhere)).toBeTruthy();
+    expect(panel.getByText(/signs in again when it is told to/)).toBeTruthy();
+    expect(
+      panel.getByText(codeOf(`${words.token_command}\n${connectWithToken.harnesses[0]?.add}`)),
+    ).toBeTruthy();
+    expect(panel.queryByText(/ukt token/)).toBeNull();
     expect(await violations()).toEqual([]);
   });
 

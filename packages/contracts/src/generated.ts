@@ -972,6 +972,39 @@ export interface CapabilityDescriptor {
    * What is incomplete, for example `no_model`.
    */
   degraded: string[];
+  /**
+   * The words the dashboard says to a person about how to get in and where the token is, which an edition gives once. A word in backticks is shown as code.
+   */
+  dashboard: {
+    /**
+     * The paragraphs of the sign-in page, each a way in.
+     */
+    sign_in: string[];
+    /**
+     * Whether the sign-in page asks for a dashboard key.
+     */
+    key_form: boolean;
+    /**
+     * The line that puts the token in the variable the Connect page's shell lines read, typed on the server's host.
+     */
+    token_command: string;
+    /**
+     * What the Connect page says of the token in the row that names it, where the token is read from and where to find it.
+     */
+    token_row: string;
+    /**
+     * The line before the shell lines that set the token, on the server's host.
+     */
+    shell_intro: string;
+    /**
+     * The line after them, for another machine.
+     */
+    shell_elsewhere: string;
+    /**
+     * Said of a harness that keeps the token it was added with, with `{harness}` for its name and `{remove}` for the command that removes the server from it.
+     */
+    token_change: string;
+  };
 }
 /**
  * `GET /api/connect`: everything the Connect page shows.

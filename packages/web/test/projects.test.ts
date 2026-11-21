@@ -200,6 +200,33 @@ describe("Projects", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("sends the display name typed beside the slug, and shows it in the table where the readers show it", async () => {
+    const sent: unknown[] = [];
+    const named = { ...FERRY, name: "Ferry notes" };
+    api.use(
+      http.post("*/api/projects", async ({ request }) => {
+        sent.push(await request.json());
+        api.use(answer("/api/projects", { ...projects, projects: [...projects.projects, named] }));
+        return HttpResponse.json(named, { status: 201 });
+      }),
+    );
+    const user = open("/projects");
+    const section = await naming();
+    const name = section.getByRole<HTMLInputElement>("textbox", {
+      name: "Display name (optional)",
+    });
+    expect(name.maxLength).toBe(120);
+    expect(name.required).toBe(false);
+    await user.type(section.getByRole("textbox", { name: "Slug" }), "ferry-notes");
+    await user.type(name, "Ferry notes{Enter}");
+    expect(await section.findByText(/^me\/ferry-notes is made\./)).toBeTruthy();
+    expect(sent).toEqual([{ slug: "ferry-notes", name: "Ferry notes" }]);
+    expect(name.value).toBe("");
+    const table = within(screen.getByRole("table", { name: /Your projects/ }));
+    expect(table.getByText("Ferry notes (me/ferry-notes)")).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
   it("keeps the line of a named project made earlier, with a button that copies it", async () => {
     const user = open("/projects");
     const section = await naming();

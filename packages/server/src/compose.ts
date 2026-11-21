@@ -42,6 +42,7 @@ import {
   responseHeaders,
 } from "./guard.ts";
 import { createMcpEndpoint } from "./mcp.ts";
+import type { DashboardWords } from "./dashboard-words.ts";
 import { createPending, type Pending, type PendingOptions } from "./pending.ts";
 import { pluginRoutes, PLUGINS_PATH, pluginsFolder } from "./plugins.ts";
 import { startingApp, type Starting } from "./starting.ts";
@@ -65,6 +66,12 @@ export interface Edition {
   readonly refusals: HarnessRefusals;
   /** What a dashboard key no person owns is told. Left out, the open edition's words. */
   readonly unknownKey?: () => ToolFailure;
+  /** What a request nobody signed is told, the sign-in page's first answer included. Left out, the open edition's words. */
+  readonly signedOut?: () => ToolFailure;
+  /** What a sign-in link (`GET /sign-in?code=`) that was used or has expired is told, as text. Left out, the open edition's words. */
+  readonly staleCode?: string;
+  /** What the dashboard tells a person of getting in and of the token. Left out, the open edition's words. */
+  readonly dashboard?: DashboardWords;
   /**
    * The edition's own routes, built once the server's sign-in exists. They are served on the
    * server's listener behind its request guard, with its response headers, and ahead of its own
@@ -293,7 +300,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   const toolUses = createToolUses(ports);
   const mcp = createMcpEndpoint(app, ports, toolUses, onError);
   const plugins = pluginsFolder(options.pluginsDir);
-  const signIn = createSignIn(ports, app, edition.unknownKey);
+  const signIn = createSignIn(ports, app, edition);
   // An address given with a slash at its end makes `//mcp` of `/mcp`: a path is read with its
   // repeated slashes as one, so a person who types the address that way is still served.
   const http = new Hono<AuthEnv>({
@@ -340,7 +347,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   http.post(SIGN_IN_PATH, bodyLimit({ maxSize: SIGN_IN_BODY_BYTES }), body("SignInRequest"), (c) =>
     signIn.withKey(c, c.req.valid("json").key),
   );
-  const api = { app, ports, edition: edition.name, signIn, onError, operator, snapshot, toolUses };
+  const api = { app, ports, edition, signIn, onError, operator, snapshot, toolUses };
   http.route("/api", apiRoutes({ ...api, plugins, alone }));
   if (plugins !== null) http.route(PLUGINS_PATH, pluginRoutes(plugins));
   if (webDir !== undefined && existsSync(webDir)) serveDashboard(http, webDir);

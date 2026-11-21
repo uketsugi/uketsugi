@@ -922,6 +922,50 @@
               "type": "string"
             },
             "description": "What is incomplete, for example `no_model`."
+          },
+          "dashboard": {
+            "type": "object",
+            "description": "The words the dashboard says to a person about how to get in and where the token is, which an edition gives once. A word in backticks is shown as code.",
+            "properties": {
+              "sign_in": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "The paragraphs of the sign-in page, each a way in."
+              },
+              "key_form": {
+                "type": "boolean",
+                "description": "Whether the sign-in page asks for a dashboard key."
+              },
+              "token_command": {
+                "type": "string",
+                "description": "The line that puts the token in the variable the Connect page's shell lines read, typed on the server's host."
+              },
+              "token_row": {
+                "type": "string",
+                "description": "What the Connect page says of the token in the row that names it, where the token is read from and where to find it."
+              },
+              "shell_intro": {
+                "type": "string",
+                "description": "The line before the shell lines that set the token, on the server's host."
+              },
+              "shell_elsewhere": {
+                "type": "string",
+                "description": "The line after them, for another machine."
+              },
+              "token_change": {
+                "type": "string",
+                "description": "Said of a harness that keeps the token it was added with, with `{harness}` for its name and `{remove}` for the command that removes the server from it."
+              }
+            },
+            "required": [
+              "sign_in",
+              "key_form",
+              "token_command",
+              "token_row",
+              "shell_intro",
+              "shell_elsewhere",
+              "token_change"
+            ]
           }
         },
         "required": [
@@ -932,7 +976,8 @@
           "model_runners",
           "tools",
           "prompts",
-          "degraded"
+          "degraded",
+          "dashboard"
         ]
       },
       "ConnectInfo": {

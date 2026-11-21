@@ -20,6 +20,8 @@ import {
   type PromptName,
 } from "@uketsugi/contracts";
 import { JOB_KINDS, type App, type AppPorts } from "@uketsugi/core";
+import type { Edition } from "./compose.ts";
+import { OPEN_DASHBOARD_WORDS } from "./dashboard-words.ts";
 import { embeddingState } from "./embedding.ts";
 
 /** Claude Code, as its MCP client names itself: the harness whose hooks the server answers. */
@@ -321,14 +323,14 @@ async function degradedBy(ports: Pick<AppPorts, "embedder" | "store">): Promise<
 
 /** The descriptor of this server as it is composed now, for the edition of that name. */
 export async function capabilityDescriptor(
-  edition: string,
+  edition: Pick<Edition, "name" | "dashboard">,
   app: App,
   ports: Pick<AppPorts, "embedder" | "runner" | "store">,
 ): Promise<CapabilityDescriptor> {
   const tools = app.tools.map((tool) => tool.name);
   const runner = ports.runner?.kind ?? "rules";
   return {
-    edition,
+    edition: edition.name,
     contract_version: CONTRACT_VERSION,
     mcp_revisions: [...MCP_REVISIONS],
     features: {
@@ -343,6 +345,7 @@ export async function capabilityDescriptor(
     tools,
     prompts: Object.keys(PROMPT_DESCRIPTIONS),
     degraded: await degradedBy(ports),
+    dashboard: edition.dashboard ?? OPEN_DASHBOARD_WORDS,
   };
 }
 
@@ -371,7 +374,7 @@ export function connectInfo(
     server_name: SERVER_NAME,
     needs_token: needsToken,
     token_env: TOKEN_ENV,
-    token_command: `export ${TOKEN_ENV}="$(ukt token)"`,
+    token_command: OPEN_DASHBOARD_WORDS.token_command,
     commands: { setup: command("setup"), activate: command("activate") },
     block: FENCED_BLOCK,
     harnesses: HARNESSES.map((harness) => ({

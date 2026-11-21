@@ -37,6 +37,36 @@ export const capabilities: CapabilityDescriptor = {
   tools: [...TOOL_NAMES],
   prompts: ["setup", "activate"],
   degraded: ["no_model"],
+  // What the open edition's server says, as the pages show it.
+  dashboard: {
+    sign_in: [
+      "On the computer the server runs on, run `ukt ui` in a terminal: it opens the dashboard signed in, or prints a link that does.",
+      "From any other computer, paste the dashboard key you were given.",
+    ],
+    key_form: true,
+    token_command: `export ${TOKEN_ENV}="$(ukt token)"`,
+    token_row: `read from the environment variable \`${TOKEN_ENV}\`; this page never shows the token itself. On the server's host, \`ukt token\` prints yours.`,
+    shell_intro: `Run these in one terminal on the server's host. The first line puts your token in \`${TOKEN_ENV}\`, where the rest read it:`,
+    shell_elsewhere: `On another machine, set \`${TOKEN_ENV}\` to the token you were given in place of the first line.`,
+    token_change:
+      "{harness} keeps the token it was added with. To give it another, after `ukt token --rotate` for one, first remove the server with `{remove}`, then run the lines above again.",
+  },
+};
+
+/** What another edition, which signs a person in at a provider and has no key and no `ukt`, says. */
+export const hostedCapabilities: CapabilityDescriptor = {
+  ...capabilities,
+  edition: "hosted",
+  dashboard: {
+    sign_in: ["Open the service's address in your browser and sign in at your provider."],
+    key_form: false,
+    token_command: "hosted-sign-in",
+    token_row: "given to your harness when it signs in; there is nothing to copy.",
+    shell_intro: "Run these in a terminal, then sign in from the harness:",
+    shell_elsewhere: "Run them on any machine you use.",
+    token_change:
+      "{harness} signs in again when it is told to: run `{remove}`, then the lines above.",
+  },
 };
 
 /** What a server that needs no token from a harness on its own machine describes: the harness lines carry none. */

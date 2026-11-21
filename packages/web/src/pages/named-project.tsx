@@ -15,6 +15,8 @@ import { Button, Card, CodeBlock, ErrorPanel, INLINE_CODE } from "../ui.tsx";
 const TITLE = "A project for a directory with no origin remote";
 /** The most characters a slug may have: the contract's limit on `NewProjectRequest.slug`. */
 const SLUG_LENGTH = 63;
+/** The most characters a display name may have: the contract's limit on `NewProjectRequest.name`. */
+const NAME_LENGTH = 120;
 
 /**
  * The line that tells an agent the project of a directory. These are the words that were tried:
@@ -30,10 +32,12 @@ function Make() {
   const { csrf } = useSession();
   const client = useQueryClient();
   const [slug, setSlug] = useState("");
+  const [name, setName] = useState("");
   const make = useMutation({
-    mutationFn: () => createProject({ slug }, csrf),
+    mutationFn: () => createProject(name.trim() === "" ? { slug } : { slug, name }, csrf),
     onSuccess: () => {
       setSlug("");
+      setName("");
       return client.invalidateQueries({ queryKey: projectsQuery.queryKey });
     },
   });
@@ -72,6 +76,17 @@ function Make() {
         named <code className={INLINE_CODE}>me/</code> followed by the slug, and the slug never
         changes.
       </p>
+      <label htmlFor="project-name" className="block font-medium">
+        Display name (optional)
+      </label>
+      <Input
+        id="project-name"
+        maxLength={NAME_LENGTH}
+        autoComplete="off"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        className="h-8 w-80 max-w-full rounded-md border border-line-strong bg-surface px-3"
+      />
       <p role="status" className="empty:hidden">
         {make.isSuccess
           ? `${make.data.key} is made. Your agent does not know it yet: put its line, shown below, in the instruction file of the directory you work in.`

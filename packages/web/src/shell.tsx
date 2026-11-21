@@ -19,7 +19,7 @@ import {
   type ReactNode,
 } from "react";
 import { capabilitiesQuery, isSignedOut, sessionQuery, signIn, signOut } from "./api.ts";
-import { Button, ErrorPanel, INLINE_CODE, inWords, Loading, QueryFailed } from "./ui.tsx";
+import { Button, ErrorPanel, inWords, Loading, QueryFailed, Said } from "./ui.tsx";
 
 const SessionContext = createContext<DashboardSession | null>(null);
 
@@ -205,6 +205,21 @@ function KeySignIn() {
  * longer is, which is said first.
  */
 function SignIn({ ended }: { ended: boolean }) {
+  const capabilities = useQuery(capabilitiesQuery);
+  if (capabilities.isPending)
+    return (
+      <Alone>
+        <Loading what="the way in" />
+      </Alone>
+    );
+  if (capabilities.isError) {
+    return (
+      <Alone>
+        <QueryFailed query={capabilities} />
+      </Alone>
+    );
+  }
+  const { sign_in, key_form } = capabilities.data.dashboard;
   return (
     <Alone>
       <title>Sign in · Uketsugi</title>
@@ -212,12 +227,12 @@ function SignIn({ ended }: { ended: boolean }) {
         {ended ? "You are signed out" : "Sign in to Uketsugi"}
       </h1>
       {ended ? <p>This browser’s session has ended. Sign in again to carry on.</p> : null}
-      <p>
-        On the computer the server runs on, run <code className={INLINE_CODE}>ukt ui</code> in a
-        terminal: it opens the dashboard signed in, or prints a link that does.
-      </p>
-      <p>From any other computer, paste the dashboard key you were given.</p>
-      <KeySignIn />
+      {sign_in.map((way) => (
+        <p key={way}>
+          <Said text={way} />
+        </p>
+      ))}
+      {key_form ? <KeySignIn /> : null}
     </Alone>
   );
 }

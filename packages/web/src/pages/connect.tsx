@@ -6,12 +6,17 @@
  */
 import { Collapsible } from "@base-ui/react/collapsible";
 import { Tabs } from "@base-ui/react/tabs";
-import type { ActivitySession, ConnectHarness, ConnectInfo } from "@uketsugi/contracts";
+import type {
+  ActivitySession,
+  CapabilityDescriptor,
+  ConnectHarness,
+  ConnectInfo,
+} from "@uketsugi/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
 import { Ban, ChevronRight, Search, Upload } from "lucide-react";
-import type { ReactNode } from "react";
-import { activityQuery, connectQuery } from "../api.ts";
+import { createContext, use, type ReactNode } from "react";
+import { activityQuery, capabilitiesQuery, connectQuery } from "../api.ts";
 import { Page } from "../shell.tsx";
 import {
   Ago,
@@ -22,10 +27,20 @@ import {
   INLINE_CODE,
   Mark,
   QueryState,
+  Said,
   type Look,
 } from "../ui.tsx";
 
 const route = getRouteApi("/connect");
+
+/** What this edition's server says of the token, for every step below. */
+const WordsContext = createContext<CapabilityDescriptor["dashboard"] | null>(null);
+
+function useWords(): CapabilityDescriptor["dashboard"] {
+  const words = use(WordsContext);
+  if (words === null) throw new Error("the Connect page was rendered without the server's words");
+  return words;
+}
 
 /** How often the recent sessions are read again, so that a first session is seen to arrive. */
 const REFRESH_MS = 5000;
@@ -43,6 +58,7 @@ function Step({ title, children }: { title: string; children: ReactNode }) {
 
 /** Where the server is and what it asks of a harness: what every way of connecting starts from. */
 function ServerAndToken({ info }: { info: ConnectInfo }) {
+  const words = useWords();
   return (
     <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5">
       <dt className="text-ink-muted">Server URL</dt>
@@ -53,11 +69,7 @@ function ServerAndToken({ info }: { info: ConnectInfo }) {
       <dt className="text-ink-muted">Token</dt>
       <dd>
         {info.needs_token ? (
-          <>
-            read from the environment variable <code className={INLINE_CODE}>{info.token_env}</code>
-            ; this page never shows the token itself. On the server&apos;s host,{" "}
-            <code className={INLINE_CODE}>ukt token</code> prints yours.
-          </>
+          <Said text={words.token_row} />
         ) : (
           "none: this server takes a harness on this machine by its address alone, while you are its only person."
         )}
@@ -72,17 +84,16 @@ function ServerAndToken({ info }: { info: ConnectInfo }) {
  * no token and the server refuses it. Where it needs none the lines are shown as they are.
  */
 function ShellLines({ lines, label, info }: { lines: string; label: string; info: ConnectInfo }) {
+  const words = useWords();
   if (!info.needs_token) return <CodeBlock text={lines} label={label} />;
-  const variable = <code className={INLINE_CODE}>{info.token_env}</code>;
   return (
     <>
       <p>
-        Run these in one terminal on the server&apos;s host. The first line puts your token in{" "}
-        {variable}, where the rest read it:
+        <Said text={words.shell_intro} />
       </p>
       <CodeBlock text={`${info.token_command}\n${lines}`} label={label} />
       <p className="text-ink-muted">
-        On another machine, set {variable} to the token you were given in place of the first line.
+        <Said text={words.shell_elsewhere} />
       </p>
     </>
   );
@@ -90,6 +101,7 @@ function ShellLines({ lines, label, info }: { lines: string; label: string; info
 
 /** How the server is added to a harness by its URL: a command to run, or the URL to give the client. */
 function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectInfo }) {
+  const words = useWords();
   const typed = harness.add_kind === "command";
   const filed = harness.add_kind === "file";
   return (
@@ -104,10 +116,11 @@ function AddServer({ harness, info }: { harness: ConnectHarness; info: ConnectIn
           />
           {harness.remove === undefined || !info.needs_token ? null : (
             <p className="text-ink-muted">
-              {harness.name} keeps the token it was added with. To give it another, after{" "}
-              <code className={INLINE_CODE}>ukt token --rotate</code> for one, first remove the
-              server with <code className={INLINE_CODE}>{harness.remove}</code>, then run the lines
-              above again.
+              <Said
+                text={words.token_change
+                  .replaceAll("{harness}", harness.name)
+                  .replaceAll("{remove}", harness.remove)}
+              />
             </p>
           )}
         </>
@@ -365,11 +378,20 @@ function RecentSessions() {
 
 export function ConnectPage() {
   const connect = useQuery(connectQuery);
+  const capabilities = useQuery(capabilitiesQuery);
   return (
     <Page title="Connect an agent" lead="Pick where you work, then run what it shows.">
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <QueryState query={connect} what="the set-up">
-          {(data) => <Harnesses info={data} />}
+        <QueryState query={capabilities} what="the set-up">
+          {({ dashboard }) => (
+            <QueryState query={connect} what="the set-up">
+              {(data) => (
+                <WordsContext value={dashboard}>
+                  <Harnesses info={data} />
+                </WordsContext>
+              )}
+            </QueryState>
+          )}
         </QueryState>
         <RecentSessions />
       </div>

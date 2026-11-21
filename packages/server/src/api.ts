@@ -53,6 +53,7 @@ import {
   type Operator,
   type SignIn,
 } from "./auth.ts";
+import type { Edition } from "./compose.ts";
 import { capabilityDescriptor, connectInfo } from "./connect.ts";
 import { errorHandler, failed, noSnapshot, notFound, personOnly, unauthorized } from "./errors.ts";
 import { LOOPBACK_ADDRESSES, reachedAt } from "./guard.ts";
@@ -63,8 +64,8 @@ import type { ToolUses } from "./tool-uses.ts";
 export interface ApiDeps {
   readonly app: App;
   readonly ports: AppPorts;
-  /** The edition's name, for the capability descriptor. */
-  readonly edition: string;
+  /** The edition: its name and the dashboard's words, for the capability descriptor, and what it says to a request nobody signed. */
+  readonly edition: Edition;
   readonly signIn: SignIn;
   readonly onError: (error: unknown) => void;
   /** Whoever runs this server. Left out, nobody does, and its routes for them do not exist. */
@@ -193,7 +194,9 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   api.get("/connect", async (c) => {
     // The lines depend on whether a harness added from where this request came needs a token.
     const tokenless = await takesNoToken(deps.app, deps.alone(c));
-    return c.json(connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins), !tokenless));
+    const info = connectInfo(reachedAt(c), pluginsFrom(c, deps.plugins), !tokenless);
+    const words = deps.edition.dashboard;
+    return c.json(words === undefined ? info : { ...info, token_command: words.token_command });
   });
   api.get("/facts", query("FactListParams"), async (c) =>
     c.json(await listFacts(ports, c.get("caller"), c.req.valid("query"))),

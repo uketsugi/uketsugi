@@ -287,6 +287,19 @@ export function CopyButton({ text, label, tone }: { text: string; label: string;
 /** How a command or a name is drawn inside a sentence. */
 export const INLINE_CODE = "rounded-sm bg-neutral-soft px-1 py-0.5 font-mono text-[0.8125rem]";
 
+/** A sentence the server says, with what it puts in backticks shown as code. */
+export function Said({ text }: { text: string }) {
+  return text.split("`").map((part, index) =>
+    index % 2 === 1 ? (
+      <code key={index} className={INLINE_CODE}>
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  );
+}
+
 /** Text a person copies or types: a command, a URL, a configuration. It wraps and never scrolls. */
 export function CodeBlock({ text, label }: { text: string; label: string }) {
   return (
