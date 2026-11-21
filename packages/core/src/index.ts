@@ -5,7 +5,7 @@
 export * from "./domain.ts";
 export type * from "./store-port.ts";
 export type * from "./search-port.ts";
-export { AuthError, EmbedError, ModelError } from "./ports.ts";
+export { AnswerError, AuthError, EmbedError, ModelError } from "./ports.ts";
 export type {
   AuthFailure,
   Chore,
@@ -24,7 +24,7 @@ export { ToolFailure } from "./failure.ts";
 export { validateRequest } from "./validate.ts";
 export { createWorker } from "./jobs/worker.ts";
 export { armDigest } from "./digest/arm.ts";
-export { MIN_DAILY_TOKENS, RESERVE_TOKENS, SESSION_TOKENS } from "./digest/budget.ts";
+export { MIN_DAILY_TOKENS, RESERVE_TOKENS, SESSION_TOKENS, WAIT_MS } from "./digest/budget.ts";
 export { MOST_TURNS_KEPT } from "./digest/record.ts";
 export type { DigestReport } from "./jobs/digest.ts";
 export {

@@ -65,6 +65,11 @@ const readColumns = readColumn.columns([
   }),
   readColumn.accessor((row) => row.digest.input_tokens, { id: "in", header: "Tokens in" }),
   readColumn.accessor((row) => row.digest.output_tokens, { id: "out", header: "Tokens out" }),
+  readColumn.accessor((row) => row.digest.failure?.reason ?? "", {
+    id: "provider",
+    header: "Provider",
+    cell: (cell) => (cell.getValue() === "" ? "" : `Failed or refused: ${cell.getValue()}`),
+  }),
 ]);
 
 /**
@@ -80,7 +85,9 @@ function ReadByModel({ sessions }: { sessions: ActivitySession[] }) {
       <h2 className="px-4 pt-4 font-semibold">Sessions a language model read</h2>
       <p className="px-4 pb-2 text-ink-muted">
         Once a session is over, the model this server was given reads what its agent said and writes
-        down what the agent did not. The facts it wrote say so on the Facts page.
+        down what the agent did not. The facts it wrote say so on the Facts page. Where the provider
+        failed or refused the call (a key or an account it refuses), the reading waits, is tried
+        again, and is given up after twelve hours: the provider's words are shown beside it.
       </p>
       <DataTable table={table} caption="Your recent sessions a language model read" />
     </Card>

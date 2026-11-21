@@ -10,7 +10,7 @@
  * name is never picked up. A chore's material is sent as the user's message and its instructions
  * as the system's, and the answer comes back as JSON, which core checks.
  */
-import { ModelError, type Caller, type Chore, type ModelRunner } from "@uketsugi/core";
+import { AnswerError, ModelError, type Caller, type Chore, type ModelRunner } from "@uketsugi/core";
 import type * as AiSdk from "ai";
 
 /** What a provider's model is made with: a configured model's settings, its provider by name. */
@@ -141,7 +141,7 @@ function failureOf(sdk: typeof AiSdk, error: unknown, key: string): ModelError {
     return new ModelError("the model did not answer in time", true);
   }
   // An answer that is not the JSON asked for would be given again.
-  return new ModelError(`the model's answer could not be read (${name})`, false);
+  return new AnswerError(`the model's answer could not be read (${name})`);
 }
 
 /** A configured model as a person reads it: its provider and its name there. */

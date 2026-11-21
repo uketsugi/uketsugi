@@ -145,6 +145,17 @@ export class ModelError extends Error {
   }
 }
 
+/**
+ * An answer that is not what the chore asked for (not the JSON, no list in it): asking again would
+ * get the same, so a reading is given up at once. Every other `ModelError` is the provider's
+ * failure (a hiccup, an outage, a key or an account it refuses), which a reading waits out.
+ */
+export class AnswerError extends ModelError {
+  constructor(message: string) {
+    super(message, false);
+  }
+}
+
 /** The ports a use case works with. */
 export interface CorePorts {
   readonly store: Store;

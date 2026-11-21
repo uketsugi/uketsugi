@@ -6,7 +6,7 @@
  * by every rule a publish keeps.
  */
 import { Ajv, type ValidateFunction } from "ajv";
-import { ModelError, type Chore } from "../ports.ts";
+import { AnswerError, type Chore } from "../ports.ts";
 import type { Said } from "./record.ts";
 
 type Schema = Readonly<Record<string, unknown>>;
@@ -137,7 +137,7 @@ function listIn(output: unknown, field: string): unknown[] {
       ? (output as Record<string, unknown>)[field]
       : undefined;
   if (Array.isArray(list)) return list as unknown[];
-  throw new ModelError(`the model's answer holds no list of ${field}`, false);
+  throw new AnswerError(`the model's answer holds no list of ${field}`);
 }
 
 /** The candidates an extraction answered with, and how many entries were not one. */

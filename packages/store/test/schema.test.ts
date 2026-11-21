@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { CONTRACT_DOCUMENT } from "@uketsugi/contracts";
 import {
   AUDIENCE_KINDS,
@@ -9,6 +10,7 @@ import {
   TREATMENTS,
 } from "@uketsugi/core";
 import { sql } from "kysely";
+import ts from "typescript";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { startEngine, type Engine } from "../src/embedded.ts";
 import { migrate } from "../src/migrations.ts";
@@ -66,4 +68,52 @@ test("each coded column's CHECK lists exactly the values the code declares", asy
       .map(([column, values]) => [column, [...values].sort()]),
   );
   expect(inSchema).toEqual(inCode);
+});
+
+const snake = (name: string): string => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/** Every column `schema.ts` types, as `table.column`, with whether its type admits null. */
+function typedColumns(): Map<string, boolean> {
+  const file = new URL("../src/schema.ts", import.meta.url);
+  const source = ts.createSourceFile(
+    "schema.ts",
+    readFileSync(file, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const typed = new Map<string, boolean>();
+  source.forEachChild((node) => {
+    if (!ts.isInterfaceDeclaration(node) || node.name.text !== "Database") return;
+    for (const table of node.members) {
+      if (!ts.isPropertySignature(table) || !ts.isTypeLiteralNode(table.type ?? node)) continue;
+      for (const column of (table.type as ts.TypeLiteralNode).members) {
+        if (!ts.isPropertySignature(column) || column.type === undefined) continue;
+        const name = `${snake(table.name.getText(source))}.${snake(column.name.getText(source))}`;
+        typed.set(name, /\bnull\b/.test(column.type.getText(source)));
+      }
+    }
+  });
+  return typed;
+}
+
+test("the types in schema.ts name exactly the columns the migrations make, as null or not", async () => {
+  const rows = await sql<{ name: string; nullable: string; generated: string }>`
+    select table_name || '.' || column_name as name, is_nullable as nullable,
+      is_generated as generated
+    from information_schema.columns
+    where table_schema = 'public' and table_name not like 'kysely_%' order by 1`.execute(engine.db);
+  const made = new Map(rows.rows.map((row) => [row.name, row.nullable === "YES"]));
+  // The database reports a generated column as nullable; its type says what the expression gives.
+  const generated = new Set(
+    rows.rows.filter((row) => row.generated === "ALWAYS").map((row) => row.name),
+  );
+  const typed = typedColumns();
+  expect([...made.keys()].filter((name) => !typed.has(name))).toEqual([]);
+  expect([...typed.keys()].filter((name) => !made.has(name))).toEqual([]);
+  expect(
+    [...made]
+      .filter(([name, nullable]) => !generated.has(name) && typed.get(name) !== nullable)
+      .map(([name]) => name),
+  ).toEqual([]);
+  expect(made.size).toBeGreaterThan(100);
 });

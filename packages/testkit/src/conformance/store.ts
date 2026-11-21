@@ -83,7 +83,7 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
       expect(jobs.map((job) => [job.kind, job.subject, job.attempts])).toEqual([["embed", id, 1]]);
       const [job] = jobs;
       if (job !== undefined) await store.jobs.complete(job);
-      expect(await store.jobs.counts()).toEqual({ waiting: 0, dead: 0 });
+      expect(await store.jobs.counts()).toMatchObject({ waiting: 0, dead: 0 });
     });
 
     test("a unit that throws leaves nothing behind, and the next event takes the next sequence", async () => {

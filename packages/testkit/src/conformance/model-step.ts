@@ -178,7 +178,7 @@ export function describeModelStepConformance(name: string, harness: StoreHarness
       });
     });
 
-    test("a failed reading is kept on the session, replaced by the next failure, and cleared by a reading that finishes", async () => {
+    test("a failed reading is kept on the session with the latest reason and the time of the first failure, and cleared by a reading that finishes", async () => {
       const session = await open(alice);
       const first = { at: new Date("2026-11-14T10:00:00Z"), reason: "status 402: no credit" };
       const second = { at: new Date("2026-11-14T11:00:00Z"), reason: "status 404: retired" };
@@ -187,7 +187,10 @@ export function describeModelStepConformance(name: string, harness: StoreHarness
       await store.sessions.digestFailed(bob.orgId, session.id, { ...second, reason: "not hers" });
       expect(await stored(session)).toMatchObject({ digestFailure: first });
       await store.sessions.digestFailed(alice.orgId, session.id, second);
-      expect(await stored(session)).toMatchObject({ digestFailure: second });
+      // What waits is counted from the first failure of a run of them.
+      expect(await stored(session)).toMatchObject({
+        digestFailure: { at: first.at, reason: second.reason },
+      });
       await store.sessions.digested(alice.orgId, session.id, { at: clock.now(), turns: [] });
       expect(await stored(session)).toMatchObject({ digestFailure: null });
     });

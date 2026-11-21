@@ -20,6 +20,7 @@ import {
   type PromptName,
 } from "@uketsugi/contracts";
 import { JOB_KINDS, type App, type AppPorts } from "@uketsugi/core";
+import { embeddingState, type EmbeddingState } from "./embedding.ts";
 
 /** Claude Code, as its MCP client names itself: the harness whose hooks the server answers. */
 export const CLAUDE_CODE = "claude-code";
@@ -305,6 +306,12 @@ export function instructionFileOf(clientName: string): string | null {
   return harness?.instructionFile ?? null;
 }
 
+/** What an embedding model's state leaves incomplete: `no_model`, `embedder_unavailable` (it did not load), `embedder_loading`. */
+function degradedBy(state: EmbeddingState): string[] {
+  const left = { none: "no_model", failed: "embedder_unavailable", loading: "embedder_loading" };
+  return state === "loaded" ? [] : [left[state]];
+}
+
 /** The descriptor of this server as it is composed now, for the edition of that name. */
 export function capabilityDescriptor(
   edition: string,
@@ -328,7 +335,7 @@ export function capabilityDescriptor(
     model_runners: runner === "rules" ? [] : [runner],
     tools,
     prompts: Object.keys(PROMPT_DESCRIPTIONS),
-    degraded: ports.embedder === null ? ["no_model"] : [],
+    degraded: degradedBy(embeddingState(ports.embedder)),
   };
 }
 

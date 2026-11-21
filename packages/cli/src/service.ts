@@ -25,6 +25,15 @@ export const SERVICE_COMMANDS = {
   log: `journalctl --user -u ${NAME}`,
 } as const;
 
+/**
+ * How long the manager lets the server take to stop, in seconds: the unit says it, and `ukt` waits
+ * for a stop that long, and a little more for the manager to report what came of it.
+ */
+const STOP_SECONDS = 600;
+const STOP_WITHIN_MS = (STOP_SECONDS + 30) * 1000;
+/** The verbs of `systemctl` that stop the server, and so may take as long as a stop does. */
+const STOPPING = new Set(["stop", "restart", "disable"]);
+
 /** What clears a unit the manager stopped starting after repeated failures. */
 export const RESET_FAILED = `systemctl --user reset-failed ${NAME}`;
 
@@ -82,10 +91,10 @@ export function unitText(command: readonly string[], home: Home): string {
     // `ukt serve` ends once its store is closed, a run of syncs that took 187 s on a disk under
     // other writes. The manager's default of 90 s would kill it mid-close, and the next start
     // would then recover a store that was cut off. Ten minutes still ends a server that hangs.
-    // This covers `systemctl --user stop`, `restart` and an upgrade. It does not cover the
-    // machine's shutdown or the last logout, where the user manager itself is stopped after its
-    // own 120 s (`user@.service`) whatever this unit says.
-    "TimeoutStopSec=600",
+    // This covers `systemctl --user stop`, `restart` and an upgrade, and `ukt` waits as long for
+    // those (`systemctl`). It does not cover the machine's shutdown or the last logout, where the
+    // user manager itself is stopped after its own 120 s (`user@.service`) whatever this unit says.
+    `TimeoutStopSec=${STOP_SECONDS}`,
     "",
     "[Install]",
     "WantedBy=default.target",
@@ -185,7 +194,8 @@ async function systemctl(
   ...commands: (readonly string[])[]
 ): Promise<string | null> {
   for (const args of commands) {
-    const ran = await io.run("systemctl", ["--user", ...args], { env });
+    const within = args.some((arg) => STOPPING.has(arg)) ? STOP_WITHIN_MS : undefined;
+    const ran = await io.run("systemctl", ["--user", ...args], { env, within });
     if (ran === null || ran.code !== 0)
       return `\`systemctl --user ${args.join(" ")}\` failed${ran === null ? "" : `: ${lastLine(ran)}`}`;
   }

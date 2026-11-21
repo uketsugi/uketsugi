@@ -58,6 +58,8 @@ export function digestLine(report: DigestReport): string {
   const left = refused.uncited + refused.repeat + refused.invalid;
   const why = `${refused.uncited} without a source, ${refused.repeat} already held, ${refused.invalid} not valid`;
   const budget = `${day.used} of ${day.limit} tokens used in the last day`;
+  if (report.waited && report.failure !== null)
+    return `language model: session ${report.session} waits, the provider failed: ${report.failure} (${budget})`;
   if (report.waited)
     return `language model: session ${report.session} waits, the day's budget has no room for it yet (${budget})`;
   return [
@@ -67,7 +69,12 @@ export function digestLine(report: DigestReport): string {
     ...(report.merged === 0 ? [] : [`merged ${report.merged}`]),
     ...(report.flagged === 0 ? [] : [`raised ${count(report.flagged, "flag")}`]),
     ...(report.chose ? ["chose the next brief's facts"] : []),
-    ...(report.kept === 0 ? [] : [`${count(report.kept, "turn")} wait for the day's budget`]),
+    ...(report.failure === null ? [] : [`the provider failed: ${report.failure}`]),
+    ...(report.kept === 0
+      ? []
+      : [
+          `${count(report.kept, "turn")} wait for ${report.failure === null ? "the day's budget" : "the provider"}`,
+        ]),
     ...(report.unread === 0
       ? []
       : [

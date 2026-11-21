@@ -1,4 +1,4 @@
-import { isUuid, type ClaimedJob, type JobsRepo } from "@uketsugi/core";
+import { isUuid, type ClaimedJob, type JobCounts, type JobsRepo } from "@uketsugi/core";
 import { sql } from "kysely";
 import { live, Repo } from "./codec.ts";
 
@@ -48,22 +48,52 @@ export class SqlJobs extends Repo implements JobsRepo {
       .execute();
   }
 
-  async counts(): Promise<{ waiting: number; dead: number }> {
-    return this.db
+  async counts(): Promise<JobCounts> {
+    const jobs = await this.db
       .selectFrom("outbox")
       .select([
         sql<number>`count(*) filter (where not dead)`.as("waiting"),
         sql<number>`count(*) filter (where dead)`.as("dead"),
+        sql<number>`count(*) filter (where dead and run_after > now() - interval '24 hours')`.as(
+          "deadRecent",
+        ),
+        sql<number>`count(*) filter (where dead and kind = 'embed')`.as("deadEmbeds"),
       ])
       .executeTakeFirstOrThrow();
+    // A failure kept on a session counts only with its reading: one that is due, or one given up in the last day.
+    const readings = await this.db
+      .selectFrom("sessions as s")
+      .innerJoin("outbox as o", (join) =>
+        join
+          .onRef("o.orgId", "=", "s.orgId")
+          .onRef("o.id", "=", "s.id")
+          .on("o.kind", "=", "digest"),
+      )
+      .select([
+        sql<number>`count(*) filter (where not o.dead)`.as("readingsWaiting"),
+        sql<number>`count(*) filter (where o.dead)`.as("readingsGivenUp"),
+        sql<string | null>`(array_agg(s.digest_failure order by o.run_after desc))[1]`.as(
+          "lastReadingFailure",
+        ),
+      ])
+      .where("s.digestFailure", "is not", null)
+      .where(sql<boolean>`(not o.dead or o.run_after > now() - interval '24 hours')`)
+      .executeTakeFirstOrThrow();
+    return { ...jobs, ...readings };
   }
 
   /**
-   * One statement: a job for each live fact with no vector and no embed job, dead ones counted, so
-   * a fact whose embedding kept failing is not tried for ever. A job's id is its fact's id: the
-   * store makes no ids of its own, and a fact has one such job at a time.
+   * Brings back the dead `embed` jobs of live facts that have no vector, so that a fact whose
+   * embedding failed once (the model did not load, say) is tried again by the next start, then
+   * leaves a job for every such fact that has none. A job made by a write has an id of its own, so
+   * a dead one is found by its subject; the one this leaves takes its fact's id. Returns how many
+   * jobs it brought back or left.
    */
   async embedMissing(now: Date): Promise<number> {
+    const missing = sql`select f.org_id, f.id from facts f where f.vector is null and ${live("f")}`;
+    const revived = await sql`
+      update outbox set dead = false, attempts = 0, run_after = ${now}, locked_until = null
+      where kind = 'embed' and dead and (org_id, subject) in (${missing})`.execute(this.db);
     const left = await sql`
       insert into outbox (org_id, id, audience_id, kind, subject, run_after)
       select f.org_id, f.id, f.audience_id, 'embed', f.id, ${now}
@@ -73,7 +103,7 @@ export class SqlJobs extends Repo implements JobsRepo {
           select 1 from outbox o
           where o.org_id = f.org_id and o.subject = f.id and o.kind = 'embed')
       on conflict do nothing`.execute(this.db);
-    return Number(left.numAffectedRows ?? 0n);
+    return Number(revived.numAffectedRows ?? 0n) + Number(left.numAffectedRows ?? 0n);
   }
 
   async armDigest(orgId: string, sessionId: string, dueAt: Date): Promise<void> {

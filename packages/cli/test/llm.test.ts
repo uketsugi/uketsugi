@@ -220,6 +220,7 @@ describe("the line ukt serve prints for a session a model read", () => {
     tokens: { input: 5210, output: 640 },
     unread: 0,
     waited: false,
+    failure: null,
     kept: 0,
     day: { used: 6000, limit: 1_000_000 },
   };
@@ -237,6 +238,16 @@ describe("the line ukt serve prints for a session a model read", () => {
     expect(digestLine({ ...report, waited: true })).toBe(
       "language model: session s-41ab waits, the day's budget has no room for it yet (6000 of 1000000 tokens used in the last day)",
     );
+  });
+
+  test("says that the provider failed, for a session that waits whole and for one that waits in part", () => {
+    const failure = "the provider refused the call (status 503): overloaded";
+    expect(digestLine({ ...report, waited: true, failure })).toBe(
+      `language model: session s-41ab waits, the provider failed: ${failure} (6000 of 1000000 tokens used in the last day)`,
+    );
+    const partly = digestLine({ ...report, failure, kept: 2 });
+    expect(partly).toContain(`the provider failed: ${failure} · 2 turns wait for the provider`);
+    expect(partly).not.toContain("day's budget");
   });
 
   test("says only what happened", () => {

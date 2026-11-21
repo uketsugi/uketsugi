@@ -282,7 +282,6 @@ export class SqlFacts extends Repo implements FactsRepo {
   async list(scope: ReadScope, query: FactListQuery): Promise<Fact[]> {
     let rows = factsIn(this.db, scope);
     if (query.project !== undefined) rows = rows.where("project", "=", query.project);
-    if (query.author !== undefined) rows = rows.where("author", "=", query.author);
     if (query.before !== undefined) {
       const { updatedAt, id } = query.before;
       rows = rows.where((eb) => eb(eb.refTuple("updatedAt", "id"), "<", eb.tuple(updatedAt, id)));

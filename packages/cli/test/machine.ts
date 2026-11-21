@@ -15,6 +15,9 @@ import { serve } from "../src/serve.ts";
 import type { SetupOptions } from "../src/setup-parts.ts";
 import { fakeIo, tempDir, type FakeIoOptions } from "./support.ts";
 
+/** How long `ukt` waits for a program that it was not told to wait longer for. */
+const RUN_WITHIN_MS = 120_000;
+
 const ok = (stdout = ""): Ran => ({ code: 0, stdout, stderr: "" });
 const failed = (stderr: string): Ran => ({ code: 1, stdout: "", stderr });
 
@@ -39,6 +42,10 @@ export class Machine {
   /** What the manager does to start the unit's server, handed the unit, and to stop it: a test's own server. */
   onStart: ((unit: string) => Promise<void>) | undefined;
   onStop: (() => Promise<void>) | undefined;
+  /** How long a stop of the unit takes, in milliseconds; null where it is instant. */
+  stopTakes: number | null = null;
+  /** How long each command that ran was waited for, as `ukt` said: left out where it said nothing. */
+  readonly waits: { line: string; within: number | undefined }[] = [];
   private readonly options: MachineOptions;
 
   constructor(options: MachineOptions) {
@@ -55,23 +62,33 @@ export class Machine {
     return this.ran.filter((line) => !/ show |show-user|^journalctl /.test(line));
   }
 
-  readonly run: Io["run"] = async (program, args) => {
-    this.ran.push([program, ...args].join(" "));
+  readonly run: Io["run"] = async (program, args, { within }) => {
+    const line = [program, ...args].join(" ");
+    this.ran.push(line);
+    this.waits.push({ line, within });
     if (program === "systemctl")
-      return this.options.manager === undefined ? null : this.systemctl(args.slice(1));
+      return this.options.manager === undefined ? null : this.systemctl(args.slice(1), within);
     if (program === "loginctl")
       return this.options.linger === undefined ? null : ok(`${this.options.linger}\n`);
     return null;
   };
 
-  private async systemctl([verb = "", ...rest]: readonly string[]): Promise<Ran> {
+  private async systemctl(
+    [verb = "", ...rest]: readonly string[],
+    within = RUN_WITHIN_MS,
+  ): Promise<Ran> {
     if (this.options.manager !== true) return failed("Failed to connect to bus: No medium found");
     const unit = await readFile(this.unitFile, "utf8").catch(() => null);
     if (verb === "show") return ok(this.shown(unit !== null));
     if (verb === "daemon-reload") return ok();
     if (unit === null) return failed("Unit uketsugi.service not found.");
     if (this.failing === verb) return failed("Job for uketsugi.service failed.");
+    const stopping = this.running && (rest.includes("--now") || ["stop", "restart"].includes(verb));
     await this.obey(verb, rest.includes("--now"), unit);
+    // A command that is not waited for as long as the stop takes is ended, and counts as failed; the
+    // manager goes on with the stop all the same.
+    if (stopping && this.stopTakes !== null && within < this.stopTakes)
+      return failed("the command was ended before the manager had stopped the unit");
     return ok();
   }
 

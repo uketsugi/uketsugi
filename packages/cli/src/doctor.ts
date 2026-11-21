@@ -8,8 +8,10 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { CATALOG, openLocalEmbedder } from "@uketsugi/embed";
+import type { JobCounts } from "@uketsugi/core";
 import type { Starting } from "@uketsugi/server";
 import { describeRecovery, ENGINE_DIR, usable } from "@uketsugi/store";
+import { jobsFinding, plural, serverModelFindings } from "./doctor-jobs.ts";
 import { checkService, foreignAnswer, listensAt } from "./doctor-service.ts";
 import { connectLines } from "./harness-lines.ts";
 import {
@@ -28,6 +30,7 @@ import {
   connect,
   connectAsHost,
   connectInfo,
+  jobCounts,
   modelCheck,
   projects,
   servingNow,
@@ -45,6 +48,7 @@ export interface Finding {
     | "store"
     | "model"
     | "language model"
+    | "jobs"
     | "harnesses";
   readonly state: "ok" | "warn" | "fail";
   readonly detail: string;
@@ -52,8 +56,6 @@ export interface Finding {
   /** What else a person may want of it, a line each: the commands that run the service. */
   readonly notes?: readonly string[];
 }
-
-const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /** A failed request as a finding: the failure's own words and its next step. */
 function failed(check: Finding["check"], error: unknown): Finding {
@@ -169,7 +171,12 @@ async function checkServer(
   home: Home,
   fix: string,
   askModel: boolean,
-): Promise<{ findings: Finding[]; vector: boolean | null }> {
+): Promise<{
+  findings: Finding[];
+  vector: boolean | null;
+  jobs: JobCounts | null;
+  degraded: string[];
+}> {
   const check = "server";
   const record = await servingNow(home);
   if (record === null) {
@@ -178,6 +185,8 @@ async function checkServer(
       return {
         findings: [startingFinding(starting), notChecked("store"), notChecked("language model")],
         vector: null,
+        jobs: null,
+        degraded: [],
       };
     const left = await readRecord(home);
     const detail =
@@ -200,7 +209,12 @@ async function checkServer(
             detail: `not running: something that is not this data directory's server answers at ${origin}, the address it listens on`,
             fix: "stop that program, or choose another port: ukt setup --port <a free port>",
           };
-    return { findings: [stopped, store, notChecked("language model")], vector: null };
+    return {
+      findings: [stopped, store, notChecked("language model")],
+      vector: null,
+      jobs: null,
+      degraded: [],
+    };
   }
   try {
     const described = await capabilities(record);
@@ -210,12 +224,20 @@ async function checkServer(
     const runners: unknown = described.model_runners;
     const configured = Array.isArray(runners) && runners.length > 0;
     const llm = await checkLanguageModel(home, configured, askModel);
+    const jobs = await connectAsHost(home).then(jobCounts, () => null);
     return {
-      findings: [serving, await checkStore(home), llm],
+      findings: [
+        serving,
+        await checkStore(home),
+        llm,
+        jobs === null ? notChecked("jobs") : jobsFinding(jobs),
+      ],
       vector: described.features.vector,
+      jobs,
+      degraded: Array.isArray(described.degraded) ? described.degraded : [],
     };
   } catch (error) {
-    return { findings: [failed(check, error)], vector: null };
+    return { findings: [failed(check, error)], vector: null, jobs: null, degraded: [] };
   }
 }
 
@@ -361,7 +383,9 @@ export async function doctor(
     ...about("server"),
     ...storeFindings(home, store, about("store")[0]),
     await checkModel(home, server.vector, start),
+    ...serverModelFindings(start, server),
     ...about("language model"),
+    ...about("jobs"),
     ...(server.vector === null ? [] : await checkHarnesses(home, dirFlag(options))),
   ];
   const count = (state: Finding["state"]): number =>
@@ -377,7 +401,7 @@ export async function doctor(
     ({ state, check }) => state === "fail" && ["token", "server", "store"].includes(check),
   );
   return {
-    data: { data_dir: home.dataDir, findings },
+    data: { data_dir: home.dataDir, findings, jobs: server.jobs },
     lines: [...linesOf(findings), summary],
     ...(failures === 0
       ? {}

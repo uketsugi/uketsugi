@@ -66,13 +66,14 @@ export interface Io {
   open(url: string): Promise<boolean>;
   /**
    * Runs a program of this machine's and waits for it to end: the service manager. `env` is the
-   * whole environment it gets, and its PATH is where the program is looked for. Null when there
-   * is no such program.
+   * whole environment it gets, and its PATH is where the program is looked for. `within` is how
+   * long, in milliseconds, it is waited for before it is ended and counts as failed: two minutes
+   * where it is left out. Null when there is no such program.
    */
   run(
     program: string,
     args: readonly string[],
-    options: { readonly env: NodeJS.ProcessEnv },
+    options: { readonly env: NodeJS.ProcessEnv; readonly within?: number },
   ): Promise<Ran | null>;
 }
 

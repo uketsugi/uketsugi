@@ -125,7 +125,7 @@ export interface Fact {
   readonly audienceId: string;
   /** The canonical key of the project the fact was published in. */
   readonly project: string;
-  /** Null in a stub: a redacted fact, or a superseded one past its undo window. */
+  /** Null in a stub: a redacted fact. */
   readonly claim: string | null;
   readonly detail: string | null;
   readonly question: string | null;
@@ -445,8 +445,8 @@ export interface ActivityRow {
 }
 
 /**
- * Who ran the step a job's act came from: a rule, a model at the endpoint the server's operator
- * configured, or a hosted edition's own model.
+ * Who ran the step a job's act came from: a rule, or a model at the endpoint the server's operator
+ * configured.
  */
 export type RunnerKind = "rules" | "endpoint";
 

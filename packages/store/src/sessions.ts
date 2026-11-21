@@ -337,7 +337,11 @@ export class SqlSessions extends Repo implements SessionsRepo {
 
   async digestFailed(orgId: string, id: string, failure: DigestFailure): Promise<void> {
     await this.one(orgId, id)
-      .set({ digestFailedAt: failure.at, digestFailure: failure.reason })
+      .set({
+        // The time stays that of the first failure of a run of them: what waits is counted from it.
+        digestFailedAt: sql<Date>`coalesce(digest_failed_at, ${failure.at})`,
+        digestFailure: failure.reason,
+      })
       .execute();
   }
 

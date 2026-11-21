@@ -17,6 +17,7 @@ import {
   type SignInCode,
   type TokenRevoked,
 } from "@uketsugi/contracts";
+import type { JobCounts } from "@uketsugi/core";
 import { hostProof, type Starting } from "@uketsugi/server";
 import { readHostKey, readRecord, readToken, type Home, type ServerRecord } from "./home.ts";
 import { CliFailure, describe } from "./report.ts";
@@ -254,6 +255,14 @@ export async function modelCheck(server: Running): Promise<ModelCheck> {
   const init = { ...signed(server), method: "POST" };
   const asked = await request(server, "/api/model-check", init, MODEL_ANSWERS_WITHIN_MS);
   return (await asked.json()) as ModelCheck;
+}
+
+/** The jobs the server holds, as it tells whoever runs it and no one else. */
+export async function jobCounts(server: Running): Promise<JobCounts> {
+  const answered = (await (await request(server, "/healthz", signed(server))).json()) as {
+    jobs: JobCounts;
+  };
+  return answered.jobs;
 }
 
 /** Everyone on the server with their tokens: for whoever runs it. */

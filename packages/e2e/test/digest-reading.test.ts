@@ -3,7 +3,14 @@
  * it, what a reading costs, what a failure leaves, and the choice of the next brief's facts.
  */
 import { LIMITS } from "@uketsugi/contracts";
-import { activityReport, ModelError, SESSION_IDLE_MS, type ModelRunner } from "@uketsugi/core";
+import {
+  activityReport,
+  AnswerError,
+  ModelError,
+  SESSION_IDLE_MS,
+  WAIT_MS,
+  type ModelRunner,
+} from "@uketsugi/core";
 import { eventually } from "@uketsugi/testkit";
 import { expect, test, vi } from "vitest";
 import { candidate, FOUND, scripted, serverWith } from "./digest-world.ts";
@@ -43,7 +50,7 @@ describeUseCases("when and what the model step reads", (w) => {
     });
     expect(server.reports).toEqual([expect.objectContaining({ read: 2, written: 1 })]);
     expect(await w.store.sessions.turns(orgId, id)).toEqual([]);
-    expect(await w.store.jobs.counts()).toEqual({ waiting: 0, dead: 0 });
+    expect(await w.store.jobs.counts()).toMatchObject({ waiting: 0, dead: 0 });
     const read = await server.session();
     expect(read.digestedAt).not.toBeNull();
     // What a reading cost is kept with its session, and Activity shows it.
@@ -140,50 +147,36 @@ describeUseCases("when and what the model step reads", (w) => {
     expect(runner.askedFor("digest.extract")).toHaveLength(1);
   });
 
-  test("a reading that fails is tried again later, counts what it spent, and is given up with what it could not read", async () => {
+  test("a reading the provider fails before it has cost anything waits, as for a spent budget, and is read when the provider answers", async () => {
     let fails = 2;
     const down = new ModelError("the provider refused the call (status 503): overloaded", true);
-    const runner = scripted({
-      extract: () => (fails-- > 0 ? down : { facts: [] }),
-    });
+    const runner = scripted({ extract: () => (fails-- > 0 ? down : { facts: [] }) });
     const server = serverWith(w, runner);
     await server.end(FOUND);
     await server.drain();
-    expect(server.failures).toEqual([down]);
-    expect(server.reports).toEqual([]);
+    // Not a failure of the job: nothing is dead and nothing is lost; the reading says why it waits.
+    expect(server.failures).toEqual([]);
+    expect(server.reports).toEqual([
+      expect.objectContaining({ waited: true, failure: down.message }),
+    ]);
+    expect(await server.session()).toMatchObject({
+      digestedAt: null,
+      digestFailure: { reason: down.message },
+    });
+    expect(await w.store.jobs.counts()).toMatchObject({ waiting: 1, dead: 0 });
+    clock.advance(WAIT_MS - 1000);
     await server.drain();
     expect(runner.asked).toHaveLength(1);
-    clock.advance(10_000);
+    clock.advance(1000);
     await server.drain();
-    clock.advance(20_000);
+    expect(runner.asked).toHaveLength(2);
+    expect(await w.store.jobs.counts()).toMatchObject({ waiting: 1, dead: 0 });
+    clock.advance(WAIT_MS);
     await server.drain();
-    expect(runner.asked).toHaveLength(3);
-    expect(server.reports).toEqual([expect.objectContaining({ read: 1, written: 0 })]);
-
-    // An answer that is not one is not asked for again: the reading is given up at once, and the
-    // turns it could not read go with it. What the asking cost is still counted.
-    const garbled = scripted({ extract: () => ({ answer: "Sure! Here are the facts." }) });
-    const other = serverWith(w, garbled);
-    await other.call("search_facts", { query: "how are webhooks retried" });
-    const { orgId, id } = await other.session();
-    await w.store.sessions.addTurn(orgId, id, {
-      id: w.ids.uuid(),
-      request: null,
-      answer: FOUND,
-      at: clock.now(),
-    });
-    await other.end(FOUND);
-    await other.drain();
-    clock.advance(3_600_000);
-    await other.drain();
-    expect(garbled.asked).toHaveLength(1);
-    expect(other.failures).toEqual([expect.objectContaining({ retryable: false })]);
-    expect(await w.store.sessions.turns(orgId, id)).toEqual([]);
-    expect(await other.session()).toMatchObject({
-      digestedAt: null,
-      modelTokens: { output: 10 },
-    });
-    expect((await w.store.jobs.counts()).waiting).toBe(0);
+    expect(runner.asked.length).toBeGreaterThanOrEqual(3);
+    expect(await server.session()).toMatchObject({ digestFailure: null });
+    expect((await server.session()).digestedAt).not.toBeNull();
+    expect(await w.store.jobs.counts()).toMatchObject({ waiting: 0, dead: 0 });
   });
 
   test("a reading that fails leaves its reason where Activity reads it, until a reading finishes", async () => {
@@ -228,7 +221,7 @@ describeUseCases("when and what the model step reads", (w) => {
   });
 
   test("a store that cannot keep the reason does not hide the failure it is the reason of", async () => {
-    const refused = new ModelError("the provider refused the call (status 402): no credit", false);
+    const refused = new AnswerError("the model's answer could not be read (SyntaxError)");
     const keeping = vi
       .spyOn(w.store.sessions, "digestFailed")
       .mockRejectedValue(new Error("the store is down"));

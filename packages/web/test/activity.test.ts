@@ -114,8 +114,31 @@ describe("Activity", () => {
       readByModel.project,
       "4210",
       "380",
+      "",
     ]);
     expect(cells[3]).toMatch(/ ago$/);
+    expect(await violations()).toEqual([]);
+  });
+
+  it("says why a reading waits where the provider failed or refused the call", async () => {
+    const reason = "the provider refused the call (status 401): the key was refused";
+    const failed = {
+      ...readByModel,
+      digest: {
+        at: null,
+        input_tokens: 0,
+        output_tokens: 0,
+        failure: { at: "2026-11-13T10:41:00Z", reason },
+      },
+    };
+    api.use(answer("/api/activity", { ...activity, recent: [...activity.recent, failed] }));
+    open("/activity");
+    const table = await screen.findByRole("table", {
+      name: "Your recent sessions a language model read",
+    });
+    const [cells = []] = rows(table);
+    expect(cells[3]).toBe("not yet");
+    expect(cells[6]).toBe(`Failed or refused: ${reason}`);
     expect(await violations()).toEqual([]);
   });
 

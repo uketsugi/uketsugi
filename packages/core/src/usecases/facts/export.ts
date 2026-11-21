@@ -25,7 +25,7 @@ type ReadPorts = Pick<CorePorts, "store" | "clock">;
 export async function allFacts(
   ports: Pick<CorePorts, "store">,
   scope: ReadScope,
-  query: Pick<FactListQuery, "project" | "author">,
+  query: Pick<FactListQuery, "project">,
 ): Promise<Fact[]> {
   const facts: Fact[] = [];
   for (;;) {

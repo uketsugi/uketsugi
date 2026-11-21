@@ -68,7 +68,7 @@ describeUseCases("the model step among several people", (w) => {
     expect(runner.asked).toEqual([]);
     const [mine] = await w.store.sessions.recent(s.bob.orgId, s.bob.principalId, 1);
     expect(mine).toMatchObject({ digestedAt: null, modelTokens: { input: 0, output: 0 } });
-    expect(await w.store.jobs.counts()).toEqual({ waiting: 0, dead: 0 });
+    expect(await w.store.jobs.counts()).toMatchObject({ waiting: 0, dead: 0 });
 
     await server.end(s.ann, FOUND);
     await server.drain();

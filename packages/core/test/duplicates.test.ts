@@ -82,7 +82,7 @@ describe("the merge rule", () => {
     expect(takeCitations(took.citations, member, new Set(["f1", "f2"])).taken).toEqual([]);
   });
 
-  test("a failed job waits longer each time, and an hour at most", () => {
-    expect([1, 2, 3, 20].map(backoffMs)).toEqual([10_000, 20_000, 40_000, 3_600_000]);
+  test("a failed job waits twice as long each time", () => {
+    expect([1, 2, 3, 4].map(backoffMs)).toEqual([10_000, 20_000, 40_000, 80_000]);
   });
 });

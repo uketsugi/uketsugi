@@ -31,11 +31,10 @@ const MAX_ATTEMPTS = 5;
 /** The longest the worker sleeps when nothing wakes it: a job waiting to be retried is found within this. */
 const POLL_MS = 5_000;
 const BASE_BACKOFF_MS = 5_000;
-const MAX_BACKOFF_MS = 3_600_000;
 
-/** How long a job waits after its `attempts`-th failure: 10 s, 20 s, 40 s and so on, an hour at most. */
+/** How long a job waits after its `attempts`-th failure: 10 s, 20 s, 40 s and so on; the fifth failure is its last. */
 export function backoffMs(attempts: number): number {
-  return Math.min(2 ** attempts * BASE_BACKOFF_MS, MAX_BACKOFF_MS);
+  return 2 ** attempts * BASE_BACKOFF_MS;
 }
 
 export interface WorkerOptions {

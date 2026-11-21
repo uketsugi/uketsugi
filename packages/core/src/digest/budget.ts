@@ -5,7 +5,8 @@
  *   however many turns it holds, cannot cost without limit;
  * - what a server spends in a day stays within what its operator set (`ModelRunner.dailyTokens`):
  *   a reading that would pass it waits;
- * - a reading that has cost something is not asked again if it fails, so a retry pays nothing twice.
+ * - a reading that fails after it has cost something is not asked again for what it read: those turns
+ *   are deleted, the facts drawn from them written, and the rest waits for the provider.
  * `costOf` is an estimate made before a call, taken high. The provider's own count is what is
  * kept and added up, and a call is asked only while that count so far plus this estimate for the
  * call stays within the bound: the estimate guards the call about to be made, never the total.
@@ -22,8 +23,8 @@ export const MIN_DAILY_TOKENS = 20_000;
 const ANSWER_TOKENS = 2_000;
 /** How far back the operator's daily budget looks. */
 export const BUDGET_WINDOW_MS = 24 * 3_600_000;
-/** How long a reading that is over the budget waits before it looks again: the window frees as the day goes. */
-export const BUDGET_WAIT_MS = 30 * 60_000;
+/** How long a reading that cannot go on now (the day's budget is spent, the provider fails) waits before it looks again. */
+export const WAIT_MS = 30 * 60_000;
 
 /** Characters to a token, taken low so that the estimate is high: English text is about four, code and JSON fewer. */
 const CHARS_PER_TOKEN = 3;

@@ -253,8 +253,6 @@ export interface Unit extends UnitWrites {
 /** A page of facts for the dashboard and the export, newest first. Stubs are among them: a caller that shows only text leaves them out. */
 export interface FactListQuery {
   readonly project?: string;
-  /** Only facts this person wrote. */
-  readonly author?: string;
   /** Returns facts strictly older than this position: the last fact of the page before. */
   readonly before?: { readonly updatedAt: Date; readonly id: string };
   readonly limit: number;
@@ -343,6 +341,21 @@ export interface ReviewRepo {
  * jobs about its facts (`UnitWrites.enqueue`); the job about a session is armed here, since a
  * session is written outside any unit.
  */
+/** What the outbox holds: jobs that will run, jobs given up, the embeddings among those, and the readings that failed with the provider's reason. */
+export interface JobCounts {
+  readonly waiting: number;
+  readonly dead: number;
+  /** Of the dead, those given up in the last 24 hours: what a person is told of, once. */
+  readonly deadRecent: number;
+  readonly deadEmbeds: number;
+  /** Readings that wait now because the provider failed or refused the call: a session with a failure kept and a reading due. */
+  readonly readingsWaiting: number;
+  /** Readings given up in the last 24 hours after the provider's failure or an answer that could not be read. */
+  readonly readingsGivenUp: number;
+  /** The provider's words for the latest failure of those readings, without any key; null when there is none. */
+  readonly lastReadingFailure: string | null;
+}
+
 export interface JobsRepo {
   /** Claims up to `limit` due jobs until `now + leaseMs`, oldest first. No other claim takes them meanwhile. */
   claim(now: Date, leaseMs: number, limit: number): Promise<ClaimedJob[]>;
@@ -354,11 +367,11 @@ export interface JobsRepo {
   /** Releases a failed job to run again at `retryAt`, or marks it dead when `retryAt` is null. */
   fail(job: Pick<ClaimedJob, "orgId" | "id">, retryAt: Date | null): Promise<void>;
   /** How many jobs wait and how many are dead, for the health route. */
-  counts(): Promise<{ waiting: number; dead: number }>;
+  counts(): Promise<JobCounts>;
   /**
-   * Leaves an `embed` job, due at `now`, for every live fact that has no vector and no embed job:
-   * what a host owes the facts published while it had no model. The job takes its fact's id.
-   * Returns how many it left.
+   * Leaves an `embed` job, due at `now`, for every live fact that has no vector and no embed job
+   * that will still run: what a host owes the facts published while it had no model, and those
+   * whose job died. The job takes its fact's id. Returns how many it left or brought back.
    */
   embedMissing(now: Date): Promise<number>;
   /**
@@ -450,7 +463,10 @@ export interface SessionsRepo {
     id: string,
     read: { at: Date; turns: readonly string[]; picks?: readonly string[] },
   ): Promise<void>;
-  /** Records that a model's reading of the session failed, in place of any earlier failure: the next finished reading clears it. */
+  /**
+   * Records that a model's reading of the session failed, with the latest reason. The time kept is that of the first
+   * failure since a reading last finished, which the next finished reading clears.
+   */
   digestFailed(orgId: string, id: string, failure: DigestFailure): Promise<void>;
   /** Adds what model calls about the session cost, made at `at`, to what it has cost so far and to the server's account. */
   spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void>;

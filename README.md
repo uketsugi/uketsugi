@@ -468,7 +468,11 @@ The server spends on the model only within bounds you can see and set:
   unless you set `--llm-budget <tokens>` on `ukt setup` (remembered) or `ukt serve`. It takes no
   less than 20,000, which is about what one reading needs, and refuses a smaller number. Once the budget is reached, readings
   wait, and the turns they would read are kept until there is room.
-- A reading that failed after it had cost tokens is not asked again.
+- A reading that fails after it had cost tokens does not send again the turns it had read: they are
+  deleted, and the facts drawn from them are kept. The turns it had not read wait, as they do for
+  the budget, and are read when the provider answers. A provider that fails before a reading has
+  cost anything, or refuses your key or account, makes the whole reading wait the same way, and
+  `ukt doctor` says so. What waits is dropped after twelve hours.
 - `ukt serve` prints a line for every session it read, with the tokens the model took in and gave
   out, and the dashboard's Activity page lists them. `ukt doctor` shows what the last 24 hours cost
   against the budget.
@@ -500,7 +504,7 @@ printf '{"capture":"true"}' | claude plugin configure uketsugi@uketsugi --values
 
 The plugin then also sends what you ask and the agent's final answer of every turn. The server
 scans each like any write, keeps it for the model alone, and deletes it once the model has read
-it. A session holds at most 100 turns, and a turn is cut to 4,000 characters of request and 16,000
+it, or after twelve hours unread when the model cannot be reached. A session holds at most 100 turns, and a turn is cut to 4,000 characters of request and 16,000
 of answer. A server with no model keeps none of it, but the plugin still sends it there, and it is
 dropped on arrival: where the server is on another machine, that text crosses the network.
 

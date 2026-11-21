@@ -240,6 +240,55 @@ describe("a server that runs as the service", () => {
     expect(findingsOf(after, "server")[0]).toMatchObject({ state: "ok" });
   });
 
+  describe("whose stop takes minutes, as a store closing on a busy disk does", () => {
+    /** Longer than the two minutes `ukt` gives a program unless it is told more, shorter than the unit's own limit. */
+    const SLOW_STOP_MS = 300_000;
+
+    test("restore completes and the server is back, token --rotate leaves it running, and setup does not disable the unit", async () => {
+      const { dataDir, machine, env, io, options } = await served();
+      machine.stopTakes = SLOW_STOP_MS;
+      const snapshot = String((await backup({ dataDir }, env)).data["file"]);
+
+      const restored = await restore(io(), snapshot, { dataDir, yes: true }, env).catch(
+        (error: unknown) => error,
+      );
+      expect(restored).toMatchObject({
+        lines: expect.arrayContaining([
+          "The service is running again, on the restored store.",
+        ]) as string[],
+      });
+      expect(machine.running).toBe(true);
+
+      const rotated = await token(io(), { dataDir, rotate: true, yes: true }, env).catch(
+        (error: unknown) => error,
+      );
+      expect(rotated).toMatchObject({
+        lines: expect.arrayContaining([
+          "The service is running again, with the new token.",
+        ]) as string[],
+      });
+      expect(machine.running).toBe(true);
+
+      const before = machine.changes.length;
+      await setup(io(), { ...options, yes: true }, env);
+      expect(machine.changes.slice(before).some((line) => line.includes(" disable "))).toBe(false);
+      expect(machine.enabled).toBe(true);
+      expect(machine.running).toBe(true);
+    });
+
+    test("is waited for as long as the unit lets it take", async () => {
+      const { dataDir, machine, env, io } = await served();
+      const snapshot = String((await backup({ dataDir }, env)).data["file"]);
+      await restore(io(), snapshot, { dataDir, yes: true }, env);
+
+      const unit = await readFile(machine.unitFile, "utf8");
+      const allowed = Number(/^TimeoutStopSec=(\d+)$/m.exec(unit)?.[1]) * 1000;
+      const stops = machine.waits.filter(({ line }) => / (stop|restart) /.test(line));
+      expect(stops.length).toBeGreaterThan(0);
+      for (const { within } of stops) expect(within).toBeGreaterThanOrEqual(allowed);
+    });
+  });
+
   test("is not stopped from a shell that cannot reach its manager: the verb is refused and says where to run it", async () => {
     const { home, dataDir, env } = await served();
     // The same account entered with `su`: its unit is on disk, its manager out of reach.

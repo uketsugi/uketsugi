@@ -28,12 +28,12 @@
 import { scopeOf } from "../context.ts";
 import { armDigest } from "../digest/arm.ts";
 import {
-  BUDGET_WAIT_MS,
   BUDGET_WINDOW_MS,
   costOf,
   countedFor,
   RESERVE_TOKENS,
   SESSION_TOKENS,
+  WAIT_MS,
 } from "../digest/budget.ts";
 import type { Actor, ClaimedJob, FactContent, ModelTokens, Session, Turn } from "../domain.ts";
 import { draftOf, type Reading, type Refusal } from "../digest/candidates.ts";
@@ -48,7 +48,7 @@ import {
 import { choosePicks } from "../digest/picks.ts";
 import { piecesOf, RUNNING_TURN_MS, saidIn, textOf, type Said } from "../digest/record.ts";
 import { isLive, type LiveFact } from "../facts/duplicates.ts";
-import { ModelError, type Chore, type CorePorts, type ModelRunner } from "../ports.ts";
+import { AnswerError, ModelError, type Chore, type CorePorts, type ModelRunner } from "../ports.ts";
 import { sessionState } from "../sessions.ts";
 import type { JobHandler } from "./registry.ts";
 import { headOf } from "../render.ts";
@@ -88,8 +88,10 @@ export interface DigestReport {
   readonly unread: number;
   /** How many turns were left for a later reading because the day's budget ran out part-way through this one. */
   readonly kept: number;
-  /** True for a reading that did not happen: the server's budget for the day is spent, and the session waits. */
+  /** True for a reading that did not happen: the day's budget is spent or the provider failed, and the session waits. */
   readonly waited: boolean;
+  /** The provider's failure that stopped the reading, in its own words without the key; null when none did. */
+  readonly failure: string | null;
   /** What the server has spent on model calls in the last day, and what its operator allows. */
   readonly day: { readonly used: number; readonly limit: number };
 }
@@ -103,6 +105,26 @@ interface Run {
   readonly spent: { input: number; output: number };
   /** Aborts when the server is stopping: a question in flight is given up, and asked again later. */
   readonly halt: AbortSignal;
+  /** The provider's failure that stopped the reading, once one has: nothing more is asked of it. */
+  failure: ModelError | null;
+}
+
+/**
+ * Runs a step that asks the model. The provider's failure (a hiccup, an outage, a key or account
+ * it refuses) is kept on the run and the step gives nothing, so that what the reading has found
+ * so far is still written. An answer that is not the JSON asked for, and the server's stopping,
+ * are not that: they go on up.
+ */
+async function attempt<T>(run: Run, step: () => Promise<T>): Promise<T | undefined> {
+  if (run.failure !== null) return undefined;
+  try {
+    return await step();
+  } catch (error) {
+    const provider = error instanceof ModelError && !(error instanceof AnswerError);
+    if (!provider || run.halt.aborted) throw error;
+    run.failure = error;
+    return undefined;
+  }
 }
 
 /** Puts one question to the model, within its time, and counts what it cost: the provider's own count. */
@@ -134,8 +156,8 @@ type Refused = Record<Refusal, number>;
 interface Extracted {
   drafts: FactContent[];
   read: number;
-  /** `session`: the session's limit, so the rest is dropped. `day`: the day's budget, so the rest waits. */
-  stoppedBy: "session" | "day" | null;
+  /** `session`: the session's limit, so the rest is dropped. `day`: the day's budget, `provider`: its failure, so the rest waits. */
+  stoppedBy: "session" | "day" | "provider" | null;
 }
 
 /**
@@ -166,7 +188,9 @@ async function extract(
     const needed = run.spent.input + run.spent.output + costOf(chore) + RESERVE_TOKENS;
     if (needed > room.session) return { drafts, read, stoppedBy: "session" };
     if (needed > room.day) return { drafts, read, stoppedBy: "day" };
-    const { candidates, malformed } = candidatesIn(await ask(run, chore));
+    const answer = await attempt(run, () => ask(run, chore));
+    if (run.failure !== null) return { drafts, read, stoppedBy: "provider" };
+    const { candidates, malformed } = candidatesIn(answer);
     read += 1;
     refused.invalid += malformed;
     const shown = textOf(piece);
@@ -224,8 +248,10 @@ async function judgeAndWrite(
   ];
   const comparisons = await comparisonsOf(ports, reading, subjects);
   const pairs = comparisons.map(({ n, a, b }) => ({ n, a, b }));
+  const answer = pairs.length === 0 ? null : await attempt(run, () => ask(run, judgeChore(pairs)));
+  // A provider that failed has judged nothing: what was drawn is written as it stands.
   const verdicts =
-    pairs.length === 0 ? new Map<number, never>() : verdictsIn(await ask(run, judgeChore(pairs)));
+    pairs.length === 0 || run.failure !== null ? new Map<number, never>() : verdictsIn(answer);
   const near = (subject: number, verdict: "same" | "contradicts") =>
     heldAs(comparisons, verdicts, subject, verdict);
   const done: Written = { written: 0, merged: 0, flagged: 0 };
@@ -286,10 +312,60 @@ function sortedTurns(session: Session, turns: readonly Turn[], now: Date) {
   };
 }
 
+/** The bound on how long a reading may wait on a failing provider: the one a turn that is running already has. */
+const GIVE_UP_AFTER_MS = RUNNING_TURN_MS;
+
+/**
+ * Keeps the provider's failure, if one stopped the reading, where Activity and the server's
+ * terminal read it, until a reading finishes. Its time stays that of the first failure of a run of
+ * them, which is what the bound is counted from.
+ */
+async function keepFailure(run: Run): Promise<void> {
+  if (run.failure === null) return;
+  const { session } = run.reading;
+  const at = run.ports.clock.now();
+  await run.ports.store.sessions.digestFailed(session.orgId, session.id, {
+    at,
+    reason: run.failure.message,
+  });
+}
+
+/** Leaves the session for a later look, due again after `WAIT_MS`, with the failure that made it wait, if one did. */
+async function waitWhole(run: Run, startedAt: Date): Promise<void> {
+  const { session } = run.reading;
+  const dueAt = new Date(startedAt.getTime() + WAIT_MS);
+  await run.ports.store.jobs.armDigest(session.orgId, session.id, dueAt);
+  await keepFailure(run);
+}
+
+/** Whether something the provider's failure kept from being read is still there: a turn, or a note, from before it began. */
+function stillWaiting(session: Session, answered: readonly Turn[], since: Date): boolean {
+  const { note, digestedAt } = session;
+  const unreadNote = note !== null && (digestedAt === null || note.at > digestedAt);
+  if (answered.length > 0) return answered.some((turn) => turn.at <= since);
+  return unreadNote && note.at <= since;
+}
+
+/**
+ * Gives up a reading that has waited on a failing provider for as long as a reading may: it fails
+ * for good, and its turns go with it. Only what was there when the failure began counts as
+ * waiting: a failure that left nothing to wait for is no reason to drop what came after it.
+ */
+function giveUpWhenStale(session: Session, answered: readonly Turn[], now: Date): void {
+  const { digestFailure } = session;
+  if (digestFailure === null || now.getTime() - digestFailure.at.getTime() < GIVE_UP_AFTER_MS)
+    return;
+  if (!stillWaiting(session, answered, digestFailure.at)) return;
+  throw new ModelError(
+    `given up: the provider has failed for twelve hours, and the session's text is dropped (${digestFailure.reason})`,
+    false,
+  );
+}
+
 /**
  * Records that a reading is done: the session is stamped as read, and the turns it answered are
- * deleted. What the day's budget kept the reading from stays, to be read once, later; what the
- * session's limit kept it from is dropped. Returns how many turns stay.
+ * deleted. What the day's budget or the provider's failure kept the reading from stays, to be read
+ * once, later; what the session's limit kept it from is dropped. Returns how many turns stay.
  */
 async function closeReading(
   run: Run,
@@ -297,14 +373,15 @@ async function closeReading(
   done: {
     startedAt: Date;
     turnsRead: number;
-    stoppedBy: "session" | "day" | null;
+    stoppedBy: Extracted["stoppedBy"];
     picks: readonly string[] | null;
   },
 ): Promise<number> {
   const { ports, reading } = run;
   const { session } = reading;
   const { startedAt, turnsRead, stoppedBy, picks } = done;
-  const waiting = stoppedBy === "day" ? turns.answered.slice(turnsRead) : [];
+  const waits = stoppedBy === "day" || stoppedBy === "provider";
+  const waiting = waits ? turns.answered.slice(turnsRead) : [];
   const finished = turns.answered.slice(0, turns.answered.length - waiting.length);
   await ports.store.sessions.digested(session.orgId, session.id, {
     at: startedAt,
@@ -312,15 +389,43 @@ async function closeReading(
     turns: [...finished, ...turns.lost].map((turn) => turn.id),
     ...(picks === null ? {} : { picks }),
   });
-  if (waiting.length > 0) {
-    await ports.store.jobs.armDigest(
-      session.orgId,
-      session.id,
-      new Date(startedAt.getTime() + BUDGET_WAIT_MS),
-    );
-  }
+  // A failure is kept only while a reading waits on it: one that left nothing unread is no news.
+  if (waiting.length > 0) await waitWhole(run, startedAt);
   if (turns.running.length > 0) await armDigest(ports, session, "quiet");
   return waiting.length;
+}
+
+/** Whether a session left anything to ask a model about, and has room for it. */
+function worthAsking(said: readonly Said[], published: readonly LiveFact[], room: number): boolean {
+  return (said.length > 0 || published.length > 0) && room >= RESERVE_TOKENS;
+}
+
+/** What a reading is told of how the session ended when its turns say nothing: the note it left, if any. */
+function lastWord(session: Session): string {
+  return session.note?.text ?? "";
+}
+
+/** Makes the report of a reading from what it has done so far and what `more` says it did. */
+function reporting(
+  run: Run,
+  refused: Refused,
+  budget: { used: number; limit: number },
+): (more: Partial<DigestReport>) => DigestReport {
+  const nothing = { written: 0, merged: 0, flagged: 0 };
+  return (more) => ({
+    session: run.reading.session.displayId,
+    read: 0,
+    ...nothing,
+    refused,
+    chose: false,
+    tokens: { ...run.spent },
+    unread: 0,
+    kept: 0,
+    waited: false,
+    failure: run.failure?.message ?? null,
+    day: { used: budget.used + run.spent.input + run.spent.output, limit: budget.limit },
+    ...more,
+  });
 }
 
 /**
@@ -330,45 +435,35 @@ async function closeReading(
  * session is looked at again later. A session that said nothing a model could read and published
  * nothing costs no call at all, and one whose readings have cost what a session may, or whose
  * reading would take the server past its budget for the day, asks nothing: the first drops what
- * it could not read, the second waits.
+ * it could not read, the second waits. A provider that fails before anything was read makes the
+ * reading wait as a whole; one that fails after turns were read leaves what they gave written,
+ * deletes them, and leaves the rest to wait.
  */
 async function read(run: Run): Promise<DigestReport> {
   const { ports, reading } = run;
   const { session } = reading;
-  const { sessions, jobs } = ports.store;
+  const { sessions } = ports.store;
   // What arrives while the reading runs is newer than this, and is the next reading's.
   const startedAt = ports.clock.now();
   const turns = sortedTurns(session, await sessions.turns(session.orgId, session.id), startedAt);
+  giveUpWhenStale(session, turns.answered, startedAt);
   const said = saidIn(turns.answered, session.note, session.digestedAt);
   const published = await publishedBy(run, session.digestedAt);
   // A session's room for readings, and whether there is any left for more than its closing questions.
   const room = SESSION_TOKENS - session.modelTokens.input - session.modelTokens.output;
   const pieces = piecesOf(said);
   // Nothing is asked of a session that left nothing, or whose room is spent.
-  const asking = !(said.length === 0 && published.length === 0) && room >= RESERVE_TOKENS;
+  const asking = worthAsking(said, published, room);
   const limit = ports.runner.dailyTokens;
   const used = await sessions.spentSince(new Date(startedAt.getTime() - BUDGET_WINDOW_MS));
   const nothing = { written: 0, merged: 0, flagged: 0 };
   const refused: Refused = { invalid: 0, uncited: 0, repeat: 0 };
-  const report = (more: Partial<DigestReport>): DigestReport => ({
-    session: session.displayId,
-    read: 0,
-    ...nothing,
-    refused,
-    chose: false,
-    tokens: { ...run.spent },
-    unread: 0,
-    kept: 0,
-    waited: false,
-    day: { used: used + run.spent.input + run.spent.output, limit },
-    ...more,
-  });
-  /** The reading waits as a whole, for a later one when the day's budget has room again. */
-  const waitWhole = async (): Promise<DigestReport> => {
-    await jobs.armDigest(session.orgId, session.id, new Date(startedAt.getTime() + BUDGET_WAIT_MS));
+  const report = reporting(run, refused, { used, limit });
+  const waited = async (): Promise<DigestReport> => {
+    await waitWhole(run, startedAt);
     return report({ waited: true });
   };
-  if (asking && used + estimatedCost(pieces, room) + RESERVE_TOKENS > limit) return waitWhole();
+  if (asking && used + estimatedCost(pieces, room) + RESERVE_TOKENS > limit) return waited();
   const recorded = published.map((fact) => fact.claim);
   // Neither the session's limit nor the day's budget is passed, by what the provider counts.
   const {
@@ -380,11 +475,15 @@ async function read(run: Run): Promise<DigestReport> {
     : { drafts: [], read: 0, stoppedBy: null };
   const turnsRead = pieces.slice(0, piecesRead).flat().length;
   // The day's budget ran out before anything was read: the reading waits as a whole, as above.
-  if (stoppedBy === "day" && turnsRead === 0) return waitWhole();
+  if (stoppedBy === "day" && turnsRead === 0) return waited();
   const written = asking ? await judgeAndWrite(run, drafts, published, refused) : nothing;
-  const stopped = said.at(-1)?.answer ?? session.note?.text ?? "";
+  // The provider failed before the reading had cost anything: nothing was read, and it waits as a whole.
+  if (run.failure !== null && run.spent.input + run.spent.output === 0) return waited();
+  const stopped = said.at(-1)?.answer ?? lastWord(session);
   const picks = asking
-    ? await choosePicks(ports, reading, stopped, (chore) => ask(run, chore))
+    ? ((await attempt(run, () =>
+        choosePicks(ports, reading, stopped, (chore) => ask(run, chore)),
+      )) ?? null)
     : null;
   const kept = await closeReading(run, turns, { startedAt, turnsRead, stoppedBy, picks });
   return report({
@@ -397,23 +496,11 @@ async function read(run: Run): Promise<DigestReport> {
 }
 
 /**
- * A reading that failed after it had cost something is not asked again: a retry would pay for
- * every question it already paid for, and for the same failure. Only a failure before any cost is
- * left to the worker's retries.
- */
-function paidFor(error: unknown, spent: { input: number; output: number }): unknown {
-  if (!(error instanceof ModelError) || !error.retryable || spent.input + spent.output === 0)
-    return error;
-  return new ModelError(
-    `${error.message} (the reading had cost tokens, so it is not asked again)`,
-    false,
-  );
-}
-
-/**
  * `digest`'s handler. On a server that has no model (it was restarted without the one that armed
  * the job) nothing is read, and what waited to be read is deleted: no model will read it. What
- * the model was asked is counted on the session whether the reading finished or failed.
+ * the model was asked is counted on the session whether the reading finished or failed. A
+ * provider's failure does not fail the job: the reading waits (`read`). What does is an answer
+ * that is not the JSON asked for, which asking again would not mend, and a wait of twelve hours.
  */
 export const digest: JobHandler = async (ports, job, { halt, onDigest }) => {
   const { runner, store } = ports;
@@ -424,10 +511,10 @@ export const digest: JobHandler = async (ports, job, { halt, onDigest }) => {
   const by: Actor = { kind: "job", job: "digest", runner: runner.kind };
   const spent = { input: 0, output: 0 };
   try {
-    const report = await read({ ports: withModel, reading, by, spent, halt });
+    const report = await read({ ports: withModel, reading, by, spent, halt, failure: null });
     onDigest?.(report);
   } catch (error) {
-    // A server that is stopping gives up a question that will be asked again, which is not a failure to pay for.
+    // A server that is stopping gives up a question that will be asked again, which is not a failure.
     if (halt.aborted) throw error;
     // The reason a person is shown is the provider's, which a `ModelError` carries without the key.
     if (error instanceof ModelError) {
@@ -435,7 +522,7 @@ export const digest: JobHandler = async (ports, job, { halt, onDigest }) => {
       // Keeping the reason must not hide the failure it is the reason of.
       await store.sessions.digestFailed(job.orgId, job.subject, failure).catch(() => undefined);
     }
-    throw paidFor(error, spent);
+    throw error;
   } finally {
     if (spent.input + spent.output > 0) {
       await store.sessions.spent(job.orgId, job.subject, spent, ports.clock.now());

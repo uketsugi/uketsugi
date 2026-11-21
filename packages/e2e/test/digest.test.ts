@@ -20,7 +20,7 @@ describeUseCases("what the model step writes", (w) => {
       digestedAt: null,
       modelTokens: { input: 0, output: 0 },
     });
-    expect(await w.store.jobs.counts()).toEqual({ waiting: 0, dead: 0 });
+    expect(await w.store.jobs.counts()).toMatchObject({ waiting: 0, dead: 0 });
     const { recent } = await activityReport(server.ports, w.owner, { days: 1 });
     expect(recent.map((session) => session.digest)).toEqual([null]);
   });

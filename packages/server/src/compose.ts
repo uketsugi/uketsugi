@@ -29,6 +29,7 @@ import {
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
 import { bodyLimit } from "hono/body-limit";
+import { checkEmbedder } from "./embedding.ts";
 import { apiRoutes, body } from "./api.ts";
 import { createSignIn, sentByHost, tokenAuth, type AuthEnv, type Operator } from "./auth.ts";
 import { errorHandler, failed, HARNESS_REFUSALS, type HarnessRefusals } from "./errors.ts";
@@ -282,6 +283,8 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
     onDigest: options.onDigest,
   });
   const ports = { ...options.ports, store: worker.store };
+  // Asked now, so that the first question about the model is answered by what it did.
+  checkEmbedder(ports.embedder);
   const app = createApp(ports, { onError });
   const toolUses = createToolUses(ports);
   const mcp = createMcpEndpoint(app, ports, toolUses, onError);
