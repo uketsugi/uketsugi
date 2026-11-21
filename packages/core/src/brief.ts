@@ -32,8 +32,10 @@ const LIMITS = {
   title: 120,
   taskNote: 240,
   closingNote: 700,
-  claim: 170,
 } as const;
+
+/** The most characters of a claim a brief shows, and a model is shown when it chooses what the brief lists first. */
+export const BRIEF_CLAIM_CHARS = 300;
 
 /**
  * What a brief is composed from: records already read, and what its tasks are viewed for (the
@@ -289,7 +291,7 @@ function factSection(
 function withShortClaims(sources: BriefSources): BriefSources {
   const short = (fact: BriefFact): BriefFact => ({
     ...fact,
-    claim: clip(fact.claim, LIMITS.claim),
+    claim: clip(fact.claim, BRIEF_CLAIM_CHARS),
   });
   const { previous } = sources;
   return {

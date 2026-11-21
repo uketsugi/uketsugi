@@ -4,7 +4,7 @@
  * read, from how that session ended; the brief of the next one reads it and asks no model.
  */
 import { briefSources } from "../brief-sources.ts";
-import { composeBrief } from "../brief.ts";
+import { BRIEF_CLAIM_CHARS, composeBrief } from "../brief.ts";
 import type { CorePorts } from "../ports.ts";
 import { headOf } from "../render.ts";
 import { newSession } from "../sessions.ts";
@@ -14,8 +14,6 @@ import { chooseChore, chosenIn } from "./chores.ts";
 
 /** How much of how the session ended a choice is given. */
 const STOPPED_CHARS = 1200;
-/** How much of each fact's claim: a brief shows no more of it. */
-const CLAIM_CHARS = 170;
 
 /**
  * The facts a model chose for the person's next brief in the project, in order, or null when no
@@ -46,7 +44,7 @@ export async function choosePicks(
   if (candidates.length < 2) return null;
   const chore = chooseChore(
     headOf(stopped.trim(), STOPPED_CHARS),
-    candidates.map((fact) => headOf(fact.claim, CLAIM_CHARS)),
+    candidates.map((fact) => headOf(fact.claim, BRIEF_CLAIM_CHARS)),
   );
   const chosen = chosenIn(await ask(chore), candidates.length);
   return chosen.flatMap((index) => candidates[index]?.id ?? []);

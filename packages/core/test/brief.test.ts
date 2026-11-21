@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import type { BriefFact } from "@uketsugi/contracts";
 import { describe, expect, test } from "vitest";
-import { BRIEF_MAX_CHARS, composeBrief, type BriefSources } from "../src/brief.ts";
+import {
+  BRIEF_CLAIM_CHARS,
+  BRIEF_MAX_CHARS,
+  composeBrief,
+  type BriefSources,
+} from "../src/brief.ts";
 import type { Session, SessionNote, Task, TaskNote } from "../src/domain.ts";
 
 const NOW = new Date("2026-11-13T12:00:00Z");
@@ -293,7 +298,7 @@ describe("the session brief", () => {
         notes: many.map((n) => note(n, long)),
         previous: {
           session: previous({ note: noted(long, minutes(-200)) }),
-          published: many.map((n) => fact(100 + n, long)),
+          published: many.map((n) => fact(100 + n, long.slice(0, 120))),
           digested: [],
         },
         facts: many.map((n) => fact(200 + n, `${n} ${long}`)),
@@ -325,9 +330,8 @@ describe("the brief lists each fact once", () => {
       string,
     ][]
   ).map(([factId, claim]) => ({ id: factId, claim, trust: "unreviewed" }));
-  const D8_FACT = "01a1f1ce-6caf-70e8-a377-0a41e375cc50";
 
-  test("a fact the previous session's section lists is not listed under Facts, and D8's fact fits", () => {
+  test("a fact the previous session's section lists is not listed under Facts: the facts after it take its place", () => {
     const { brief, text } = composeBrief(
       sources({
         previous: { session: previous(), published: store.slice(0, 4), digested: [] },
@@ -338,12 +342,63 @@ describe("the brief lists each fact once", () => {
     const lines = text.split("\n");
     const listed = lines.filter((line) => line.startsWith("- "));
     expect(new Set(listed).size).toBe(listed.length);
-    expect(text).toContain(D8_FACT);
-    expect(brief.facts.map((entry) => entry.id)).toContain(D8_FACT);
-    expect(brief.facts.map((entry) => entry.id)).not.toContain(store[0]?.id);
+    const above = brief.last_session?.published.length ?? 0;
+    expect(above).toBeGreaterThan(0);
+    expect(brief.facts.length).toBeGreaterThan(4);
+    expect(brief.facts.map((entry) => entry.id)).toEqual(
+      store.slice(above, above + brief.facts.length).map((entry) => entry.id),
+    );
     expect(lines).toContain(
-      `Facts (${brief.facts.length + 4} of ${store.length} shown, 4 of them in the previous session above; search_facts finds the rest):`,
+      `Facts (${brief.facts.length + above} of ${store.length} shown, ${above} of them in the previous session above; search_facts finds the rest):`,
     );
     expect(text.length).toBeLessThanOrEqual(BRIEF_MAX_CHARS);
+  });
+});
+
+describe("the brief shows a claim whole", () => {
+  /** Three kept facts (recall-arms, arm r12) whose deciding words sit past character 170 (they are 217, 254 and 261 characters). */
+  const kept: [string, string, string][] = [
+    [
+      "01a1f664-051c-7392-b44e-669a87df157e",
+      "ChanServ NOTE LIST prints newest-first lines in the exact form `#<number> <YYYY-MM-DD HH:MM> UTC <account>: <text>`; the staff dashboard parses this, so it stays in this format while other ChanServ times use RFC 3339.",
+      "other ChanServ times use RFC 3339.",
+    ],
+    [
+      "01a1f662-109a-7383-9c87-78654ae14cbd",
+      "Planned rule, not yet implemented: when commands that only network staff may use are added, every use must send a server notice on the `channels` snomask reading exactly `STAFF <account> <COMMAND> <#channel>` (command in capitals, channel as registered).",
+      "`STAFF <account> <COMMAND> <#channel>` (command in capitals, channel as registered).",
+    ],
+    [
+      "01a1f743-3635-7674-a02d-9629582441d9",
+      "The entry message is delivered by Channel.Join as ChanServ NOTICEs to the joining session only, after the topic and names and before the buffer flush, each line beginning with `[#channel] ` and split at character boundaries so that each line fits in MaxLineLen.",
+      "each line beginning with `[#channel] ` and split at character boundaries so that each line fits in MaxLineLen.",
+    ],
+  ];
+
+  test.each(kept)(
+    "fact %s is shown with its deciding words, in the Facts list and in the previous session's",
+    (factId, claim, deciding) => {
+      expect(claim.indexOf(deciding) + deciding.length).toBeGreaterThan(170);
+      const asFact: BriefFact = { id: factId, claim, trust: "unreviewed" };
+      const facts = composeBrief(sources({ facts: [asFact], factCount: 1 })).text;
+      expect(facts).toContain(deciding);
+      const listed = composeBrief(
+        sources({
+          previous: { session: previous(), published: [asFact], digested: [] },
+          facts: [asFact],
+          factCount: 1,
+        }),
+      ).text;
+      expect(listed).toContain(deciding);
+    },
+  );
+
+  test("a claim past the cut is cut with an ellipsis at the one constant", () => {
+    const claim = "a".repeat(BRIEF_CLAIM_CHARS + 50);
+    const { text } = composeBrief(
+      sources({ facts: [{ id: id(1), claim, trust: "unreviewed" }], factCount: 1 }),
+    );
+    expect(text).toContain(`${"a".repeat(BRIEF_CLAIM_CHARS - 1)}…`);
+    expect(text).not.toContain("a".repeat(BRIEF_CLAIM_CHARS));
   });
 });
