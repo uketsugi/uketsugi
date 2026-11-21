@@ -191,7 +191,8 @@ async function inTheWay(
   origin: string,
   running: boolean,
 ): Promise<{ why: string; next: string } | null> {
-  if ((await whoAnswers(home, origin)) === "other")
+  const who = await whoAnswers(home, origin);
+  if (who === "other" || who === "silent")
     return {
       why: `something that is not this data directory's server is listening at ${origin}`,
       next: "Choose another port: ukt setup --port <port>",
@@ -257,8 +258,9 @@ async function installPart(
 }
 
 /**
- * The server as the person's own service, at `origin`. `restart` says the settings change with
- * this run, so a service that is in place must still start again to run them.
+ * The server as the person's own service, at `origin`. `restartFor` names what this run brings
+ * that a service in place does not have yet (settings, a model): it must still start again to
+ * take them up, and the plan says for what.
  */
 export async function servicePart(
   io: Io,
@@ -266,7 +268,7 @@ export async function servicePart(
   home: Home,
   options: SetupOptions,
   origin: string,
-  restart: boolean,
+  restartFor: readonly string[],
 ): Promise<Part> {
   const part = { id: "service", label: "service", outside: true, pending: false, apply: null };
   const byHand = `The server runs while \`ukt serve${dirFlag(options)}\` does`;
@@ -290,7 +292,7 @@ export async function servicePart(
     };
   const stops = await whenItStops(io, env);
   const text = unitText(ownCommand(env), home);
-  if (state.text === text && state.enabled && state.running && !restart)
+  if (state.text === text && state.enabled && state.running && restartFor.length === 0)
     return {
       ...part,
       state: RUNNING,
@@ -301,7 +303,9 @@ export async function servicePart(
       ? `write ${state.unitFile}, enable it (the manager adds a link to it in ${join(dirname(state.unitFile), "default.target.wants")}) and start it.`
       : state.text !== text
         ? `write ${state.unitFile} again, which runs another command, and start the server on it.`
-        : `${UNIT} is ${state.running ? "running what was set up before" : `not running, ${state.standing}`}: enable it and start it again.`;
+        : state.running
+          ? `${UNIT} is running what was set up before: enable it and start it again, to take up ${restartFor.join(" and ")}.`
+          : `${UNIT} is not running, ${state.standing}: enable it and start it again.`;
   const unit =
     state.text === text
       ? []

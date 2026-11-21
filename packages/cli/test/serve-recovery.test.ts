@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eventually } from "@uketsugi/testkit";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   copyOf,
   held,
@@ -15,6 +16,7 @@ import {
   type Held,
 } from "../../store/test/support/processes.ts";
 import { doctor } from "../src/doctor.ts";
+import type * as support from "./support.ts";
 import { fakeIo, unusedPort } from "./support.ts";
 
 /**
@@ -24,6 +26,20 @@ import { fakeIo, unusedPort } from "./support.ts";
  * held is read from the log, and nothing waits on a clock.
  */
 const everything = 1_000_000;
+
+/** A port that a test says is the next one `unusedPort` gives: one that was free when it was picked and is taken by the time the server binds it. */
+const next = vi.hoisted(() => ({ port: null as number | null }));
+vi.mock("./support.ts", async (original) => {
+  const real = await original<typeof support>();
+  return {
+    ...real,
+    unusedPort: () => {
+      const given = next.port;
+      next.port = null;
+      return given === null ? real.unusedPort() : Promise.resolve(given);
+    },
+  };
+});
 const CLI = join(import.meta.dirname, "..", "src", "index.ts");
 
 let killed: string;
@@ -44,15 +60,33 @@ interface Server {
   readonly dataDir: string;
 }
 
-/** `ukt serve` on a copy of the killed store, its port kept in the data directory's settings as `ukt setup` keeps it. */
+/**
+ * `ukt serve` on a copy of the killed store, its port kept in the data directory's settings as
+ * `ukt setup` keeps it. A port that was free when it was picked can be taken before the server
+ * binds it, by anything on the machine: a server that ended before it started is started again on
+ * another, which is the only way its start can fail here.
+ */
 async function serving(dataDir: string, holdAll = true, flags: string[] = []): Promise<Server> {
-  const port = await unusedPort();
-  await writeFile(
-    join(dataDir, "settings.json"),
-    JSON.stringify({ host: "127.0.0.1", port: String(port) }),
-  );
-  const run = await held([CLI, "serve", "--data-dir", dataDir, ...flags], holdAll);
-  return { run, url: `http://127.0.0.1:${port}`, dataDir };
+  for (let attempt = 1; ; attempt += 1) {
+    const port = await unusedPort();
+    await writeFile(
+      join(dataDir, "settings.json"),
+      JSON.stringify({ host: "127.0.0.1", port: String(port) }),
+    );
+    const run = await held([CLI, "serve", "--data-dir", dataDir, ...flags], holdAll);
+    const url = `http://127.0.0.1:${port}`;
+    // Started: it listens, or it has begun to sync a store (a held sync keeps it from listening yet).
+    await eventually(async () => {
+      const begun = run.log().some((line) => line.startsWith("sync"));
+      if (
+        !run.over &&
+        !begun &&
+        (await ask(url, "/healthz", { signal: AbortSignal.timeout(1000) })) === "refused"
+      )
+        throw new Error("not started yet");
+    });
+    if (!run.over || attempt === 5) return { run, url, dataDir };
+  }
 }
 
 /** What a request is answered, or "refused" where nothing listens. */
@@ -146,6 +180,24 @@ describe("ukt serve on a killed store", () => {
     const at = (start: string): number => lines.findIndex((line) => line.startsWith(start));
     expect(at("uketsugi is recovering")).toBeLessThan(at("recovered:"));
     expect(at("recovered:")).toBeLessThan(at("uketsugi is serving"));
+  });
+
+  test("a port taken between its being picked and its being bound does not end the test's server", async () => {
+    const taker = createServer().listen(0, "127.0.0.1");
+    await once(taker, "listening");
+    next.port = (taker.address() as { port: number }).port;
+    try {
+      const server = await serving(await copyOf(killed));
+
+      expect(await heldBy(server.run, 1)).toBe("worker");
+      expect(server.run.over).toBe(false);
+      server.run.release(everything);
+      await bannerOf(server.run);
+      server.run.child.kill("SIGTERM");
+      await server.run.ended;
+    } finally {
+      taker.close();
+    }
   });
 
   test("with --json every line is JSON: the recovery is told as an event and the report is the one envelope; a stop with SIGTERM leaves the store clean", async () => {

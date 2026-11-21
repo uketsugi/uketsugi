@@ -116,7 +116,8 @@ export function holdsEmbeddedStore(dataDir: string): boolean {
 /** The directories this process holds, by real path. */
 const held = new Set<string>();
 
-interface Owner {
+/** A process as a note names it: which one, and on which host. */
+export interface Owner {
   readonly pid: number;
   readonly host: string;
 }
@@ -126,7 +127,7 @@ function isLocked(error: unknown): boolean {
 }
 
 /** The process that last took the lock, as it wrote itself down; null when the note is unreadable. */
-async function ownerOf(dataDir: string): Promise<Owner | null> {
+export async function lockOwner(dataDir: string): Promise<Owner | null> {
   try {
     const note = JSON.parse(await readFile(join(dataDir, "lock.owner"), "utf8")) as Partial<Owner>;
     return typeof note.pid === "number" && typeof note.host === "string"
@@ -141,16 +142,25 @@ function isThisPid(owner: Owner | null): boolean {
   return owner !== null && owner.host === hostname() && owner.pid === process.pid;
 }
 
-/** Whether the owner is another process this machine can see running. Another host's is not. */
-function isRunningHere(owner: Owner | null): boolean {
-  if (owner === null || owner.host !== hostname() || owner.pid === process.pid) return false;
+/**
+ * Whether the process a note names runs on this machine: true or false, or null where there is no
+ * note, or it names a process of another host, which this machine cannot see. This process
+ * counts as running; a caller that must not count itself says so.
+ */
+export function processRuns(note: Partial<Owner> | null): boolean | null {
+  if (note?.pid === undefined || note.host !== hostname()) return null;
   try {
-    process.kill(owner.pid, 0);
+    process.kill(note.pid, 0);
     return true;
   } catch (error) {
     // EPERM: the process exists and belongs to someone else.
     return error instanceof Error && "code" in error && error.code === "EPERM";
   }
+}
+
+/** Whether the owner is another process this machine can see running. Another host's is not. */
+function isRunningHere(owner: Owner | null): boolean {
+  return owner?.pid !== process.pid && processRuns(owner) === true;
 }
 
 function refusal(
@@ -198,7 +208,7 @@ export async function lockDataDir(
   try {
     release = await lockfile.lock(dataDir, options);
   } catch (error) {
-    const owner = await ownerOf(dataDir);
+    const owner = await lockOwner(dataDir);
     if (!isLocked(error) || held.has(key) || isRunningHere(owner))
       throw refusal(dataDir, owner, staleMs, error);
     const stale = isThisPid(owner) ? Math.min(staleMs, OWN_PID_STALE_MS) : staleMs;

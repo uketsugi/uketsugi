@@ -272,8 +272,9 @@ what to type for each harness. Set-up runs no harness command and writes no harn
 | `--host`, `--allowed-host`   | let other machines reach it: see [Sharing a server](#sharing-a-server) |
 | `--llm <provider/model>`     | gives it a [language model](#a-language-model-if-you-want-one)         |
 
-Run again, set-up changes nothing that is in place and repairs what is not. Where nobody can be
-asked, as in a script, it makes the data directory and installs the model, and leaves the service
+Run again, set-up changes nothing that is in place and repairs what is not. It starts the service
+again when it has installed the model or changed a setting, so that the server runs with it. Where
+nobody can be asked, as in a script, it makes the data directory and installs the model, and leaves the service
 to a run with `--yes`. `ukt setup --help` lists every option.
 
 ### The service

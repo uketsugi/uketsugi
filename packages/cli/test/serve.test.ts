@@ -1,6 +1,6 @@
 import { chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { get } from "node:http";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectMcp } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -37,7 +37,11 @@ describe("ukt serve on a temporary data directory", () => {
     expect((await fetch(`${url}/healthz`)).status).toBe(200);
     expect(serving.report.lines[0]).toBe(`uketsugi is serving ${url}/mcp`);
     expect(serving.report.lines.join("\n")).toContain("model: none installed");
-    expect(JSON.parse(await readFile(join(dataDir, "server.json"), "utf8"))).toEqual({ url });
+    expect(JSON.parse(await readFile(join(dataDir, "server.json"), "utf8"))).toEqual({
+      url,
+      pid: process.pid,
+      host: hostname(),
+    });
   });
 
   test("takes a tool call signed with the token it made", async () => {

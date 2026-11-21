@@ -23,7 +23,8 @@ export async function listensAt(home: Home): Promise<string> {
 /** Where something that is not this data directory's server answers, at the address this one would listen on; null where nothing does. */
 export async function foreignAnswer(home: Home): Promise<string | null> {
   const origin = await listensAt(home);
-  return (await whoAnswers(home, origin)) === "other" ? origin : null;
+  const who = await whoAnswers(home, origin);
+  return who === "other" || who === "silent" ? origin : null;
 }
 
 /**

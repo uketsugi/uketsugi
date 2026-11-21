@@ -43,9 +43,15 @@ export interface Home {
   readonly givenToken: string | undefined;
 }
 
-/** Where a server on this data directory listens. */
+/**
+ * Where a server on this data directory listens. Its process is named too, for a store that has no
+ * lock to name it (on a PostgreSQL server): a verb tells a server that is busy from one that is
+ * gone by it. A record left by release 0.2.0 has none, and an embedded store's lock answers.
+ */
 export interface ServerRecord {
   readonly url: string;
+  readonly pid?: number;
+  readonly host?: string;
 }
 
 /**
@@ -271,7 +277,9 @@ export async function removeStartFailure(home: Home): Promise<void> {
 /** The record of the server on this data directory, or null when none was left or it is unreadable. */
 export async function readRecord(home: Home): Promise<ServerRecord | null> {
   const record = (await readJson(home.recordFile)) as Partial<ServerRecord> | null;
-  return typeof record?.url === "string" ? { url: record.url } : null;
+  if (typeof record?.url !== "string") return null;
+  const { url, pid, host } = record;
+  return typeof pid === "number" && typeof host === "string" ? { url, pid, host } : { url };
 }
 
 /** The language model a host was given: `provider/model`, its provider's key, and its address where it has one of its own. */

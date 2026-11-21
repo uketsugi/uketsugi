@@ -365,7 +365,7 @@ describe("what ukt setup is told of how the server runs", () => {
     await setup(io(), { ...longer, yes: true }, env);
 
     expect(plan.lines.join("\n")).toContain(
-      "uketsugi.service is running what was set up before: enable it and start it again.",
+      "uketsugi.service is running what was set up before: enable it and start it again, to take up the settings given here.",
     );
     expect(machine.changes.slice(before)).toContain("systemctl --user restart uketsugi.service");
   });

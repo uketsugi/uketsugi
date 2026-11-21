@@ -7,6 +7,7 @@
  * type. Run again, it changes nothing that is in place and repairs what is not. `ukt uninstall`
  * undoes it.
  */
+import { stat } from "node:fs/promises";
 import { TOKEN_ENV, type ConnectInfo } from "@uketsugi/contracts";
 import { issueToken } from "@uketsugi/core";
 import { CATALOG } from "@uketsugi/embed";
@@ -35,6 +36,7 @@ import {
   connect,
   connectInfo,
   projects,
+  signInWords,
   toolsListed,
   whoAnswers,
 } from "./server-client.ts";
@@ -123,6 +125,7 @@ function nextLines(
   options: SetupOptions,
   served: "yes" | "no" | "refused",
   info: ConnectInfo | null,
+  signsInThemselves: string | undefined,
 ): string[] {
   const next = nextCommands(options);
   return [
@@ -134,7 +137,7 @@ function nextLines(
         ? [`Once it runs, \`ukt doctor${dirFlag(options)}\` prints what to type for each harness.`]
         : [
             "Add the server to each harness you use, then type its command in a session:",
-            ...connectLines(info, next.token).map((line) => `  ${line}`),
+            ...connectLines(info, next.token, signsInThemselves).map((line) => `  ${line}`),
             "",
             "A session that is open now does not have it. Ask a new one something about the code:",
             `it searches memory first. \`${next.ui}\` opens the dashboard.`,
@@ -186,22 +189,34 @@ async function carryOut(
 async function lastCheck(
   home: Home,
   origin: string,
-): Promise<{ done: Done; info: ConnectInfo | null; degraded: readonly string[] }> {
+): Promise<{
+  done: Done;
+  info: ConnectInfo | null;
+  degraded: readonly string[];
+  signsInThemselves?: string;
+}> {
   if ((await whoAnswers(home, origin)) !== "own")
     return { done: { lines: ["not running"], state: SKIPPED }, info: null, degraded: [] };
   try {
     const server = await connect(home);
     const info = await connectInfo(server);
-    await toolsListed(server, info);
+    const described = await capabilities(server);
+    const signsInThemselves = signInWords(described);
+    // Harnesses that sign in themselves are refused by `/mcp` as it is asked here: no listing to check.
+    if (signsInThemselves === undefined) await toolsListed(server, info);
     await projects(server);
-    const { degraded } = await capabilities(server);
     return {
       done: {
-        lines: ["answers, lists its tools as a harness sees them, and reads its store"],
+        lines: [
+          signsInThemselves === undefined
+            ? "answers, lists its tools as a harness sees them, and reads its store"
+            : "answers and reads its store; its harnesses sign in themselves, so its tools are not listed from here",
+        ],
         state: RUNNING,
       },
       info,
-      degraded,
+      degraded: described.degraded,
+      signsInThemselves,
     };
   } catch (error) {
     if (!(error instanceof CliFailure)) throw error;
@@ -221,12 +236,40 @@ async function survey(
   const { changed } = await settingsWith(home, toldOf(options));
   const llm = await llmPart(io, env, home, options);
   const model = await modelPart(io, home, options.model);
-  return [
-    model,
-    llm,
-    // A service in place runs the settings, the language model and the embedding model it started with.
-    await servicePart(io, env, home, options, origin, changed || llm.pending || model.pending),
+  // A service in place runs the settings, the language model and the embedding model it started with.
+  const restartFor = [
+    ...(changed ? ["the settings given here"] : []),
+    ...(llm.pending ? ["the language model"] : []),
+    ...(model.pending || (await runsWithoutModel(home, origin, model))
+      ? ["the embedding model"]
+      : []),
   ];
+  return [model, llm, await servicePart(io, env, home, options, origin, restartFor)];
+}
+
+/**
+ * Whether this data directory's server runs without a model that is installed, and a restart
+ * would change that: it says it has none, and it started (its record was written) before the
+ * model directory last changed, so it has not yet had the chance to find the model. A server that
+ * started after the model was in place and still has none is not helped by another start: set-up
+ * leaves it, and its last lines say what is wrong. A model directory the service cannot see (the
+ * shell's `UKT_MODEL_DIR`) is the same.
+ */
+async function runsWithoutModel(home: Home, origin: string, model: Part): Promise<boolean> {
+  if (model.state !== "present" || !home.modelIsOurs) return false;
+  if ((await whoAnswers(home, origin)) !== "own") return false;
+  const degraded = await capabilities({ url: origin }).then(
+    (described) => described.degraded,
+    (): string[] => [],
+  );
+  const started = await stat(home.recordFile).catch(() => null);
+  const installed = await stat(home.modelDir).catch(() => null);
+  return (
+    degraded.includes("no_model") &&
+    started !== null &&
+    installed !== null &&
+    started.mtimeMs <= installed.ctimeMs
+  );
 }
 
 /** What set-up does about a data directory or secret file that other accounts can reach: before it is done, and after. */
@@ -270,7 +313,7 @@ export async function setup(
   await ensureHostKey(home);
   const done = await carryOut(io, options, parts, chosen);
   const ended = (id: string): Done => done.get(id) ?? { lines: [], state: SKIPPED };
-  const { done: checked, info, degraded } = await lastCheck(home, origin);
+  const { done: checked, info, degraded, signsInThemselves } = await lastCheck(home, origin);
   // A server that started before the model was installed has none until it starts again.
   const modelUnused =
     ["installed", "present"].includes(ended("model").state) && degraded.includes("no_model")
@@ -306,7 +349,7 @@ export async function setup(
       `server URL      ${origin}/mcp`,
       ...outside.flatMap((part) => column(part.label, ended(part.id).lines)),
       ...column("server", [...checked.lines, ...modelUnused]),
-      ...nextLines(options, serviceStanding(ended("service")), info),
+      ...nextLines(options, serviceStanding(ended("service")), info, signsInThemselves),
     ],
     failure: [...parts.map((part) => ended(part.id).failure), checked.failure].find(
       (failure) => failure !== undefined,

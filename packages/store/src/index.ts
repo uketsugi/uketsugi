@@ -7,6 +7,8 @@ export {
   BACKUPS_DIR,
   ENGINE_DIR,
   holdsEmbeddedStore,
+  lockOwner,
+  processRuns,
   StoreInUseError,
   StoreUnreadableError,
   usable,

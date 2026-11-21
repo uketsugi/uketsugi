@@ -1,4 +1,5 @@
 /** `ukt serve`: the server on this machine's data directory, until it is told to stop. */
+import { hostname } from "node:os";
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { RevokedTokenError, type DigestReport } from "@uketsugi/core";
 import { CATALOG, openLocalEmbedder, type LocalEmbedder } from "@uketsugi/embed";
@@ -301,7 +302,7 @@ export async function serve(
     await removeStartFailure(home);
     return serving;
   } catch (error) {
-    if ((await servingNow(home)) === null)
+    if ((await servingNow(home).catch(() => null)) === null)
       await keepStartFailure(home, failureText(error)).catch(() => undefined);
     throw error;
   }
@@ -358,7 +359,7 @@ async function startServing(
   await rememberStore(home, store);
   if (server.issuedToken !== null) await writeToken(home, server.issuedToken);
   // The server names the address it is reached at; the other verbs and the person use that one.
-  await writeRecord(home, { url: server.url });
+  await writeRecord(home, { url: server.url, pid: process.pid, host: hostname() });
   return {
     report: {
       data: {

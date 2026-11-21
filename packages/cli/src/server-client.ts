@@ -19,6 +19,7 @@ import {
   type TokenRevoked,
 } from "@uketsugi/contracts";
 import type { JobCounts } from "@uketsugi/core";
+import { lockOwner, processRuns } from "@uketsugi/store";
 import { hostProof, type Starting } from "@uketsugi/server";
 import { readHostKey, readRecord, readToken, type Home, type ServerRecord } from "./home.ts";
 import { CliFailure, describe } from "./report.ts";
@@ -35,6 +36,10 @@ export interface Running extends ServerRecord {
   readonly token: string;
 }
 
+/** Whether a fetch ended because it was not answered in time, which says nothing of what is there. */
+const timedOut = (error: unknown): boolean =>
+  error instanceof Error && error.name === "TimeoutError";
+
 /** One request to the server. A refusal or silence becomes a `CliFailure`. */
 async function request(
   server: ServerRecord,
@@ -49,6 +54,12 @@ async function request(
       signal: AbortSignal.timeout(within),
     });
   } catch (error) {
+    if (timedOut(error))
+      throw new CliFailure({
+        what: `The server at ${server.url} is running but did not answer in ${within / 1000} seconds.`,
+        meaning: "It is busy or stuck. Nothing was changed.",
+        next: "Run this again in a minute. If it stays silent, stop it and start it again.",
+      });
     throw new CliFailure({
       what: `The server at ${server.url} did not answer (${describe(error)}).`,
       meaning: "A server left its record in the data directory, but nothing answers there now.",
@@ -89,35 +100,57 @@ export async function capabilities(
 }
 
 /**
- * The server that holds this data directory right now: its record, if something answers there.
- * A record left by a server that was killed is not one. The store's own lock is what keeps a
- * second process out; this only lets a verb say so before it starts.
+ * The server that holds this data directory right now: its record, if one is there. A server
+ * that answers is. One that takes the connection and says nothing in time is told by its
+ * process: the store's lock names the process that holds the store (a record written by any
+ * release has one), and a record names its own server for a store that has no lock (PostgreSQL).
+ * A busy server runs and is found, a gone one is not. Where neither can say which, this stops with
+ * that, and does not go on as if none ran. A record left by a server that was killed is not one.
+ * The store's own lock is what keeps a second process out; this only lets a verb say so before it
+ * starts.
  */
 export async function servingNow(home: Home): Promise<ServerRecord | null> {
   const record = await readRecord(home);
   if (record === null) return null;
-  return capabilities(record, PROBE_WITHIN_MS).then(
-    () => record,
-    () => null,
+  const answered = await fetch(new URL("/api/capabilities", record.url), {
+    signal: AbortSignal.timeout(PROBE_WITHIN_MS),
+  }).then(
+    (response) => response.ok,
+    (error: unknown) => (timedOut(error) ? "silent" : false),
   );
+  if (answered !== "silent") return answered ? record : null;
+  const runs = processRuns((await lockOwner(home.dataDir)) ?? record);
+  if (runs === null)
+    throw new CliFailure({
+      what: `Something at ${record.url}, where a server on ${home.dataDir} left its record, took the connection and did not answer in ${PROBE_WITHIN_MS / 1000} seconds.`,
+      meaning:
+        "It may be that server, busy, or another program, and this cannot tell which. Nothing was changed.",
+      next: "Wait a minute and run this again, or stop the server and run it again.",
+    });
+  return runs ? record : null;
 }
 
 /**
  * What listens at an address, as far as a data directory can tell: its own server, something
  * else, or nothing. Its own server proves itself with a keyed digest of bytes made up here, which
  * only a holder of the host's secret can give, and which shows the secret to no one. A server
- * that died leaves its record behind, and a port is anyone's to listen on.
+ * that died leaves its record behind, and a port is anyone's to listen on. Something that takes
+ * the connection and does not answer within `within` is "silent": busy, or not a server at all.
  */
-export async function whoAnswers(home: Home, url: string): Promise<"own" | "other" | "nobody"> {
+export async function whoAnswers(
+  home: Home,
+  url: string,
+  within: number = PROBE_WITHIN_MS,
+): Promise<"own" | "other" | "silent" | "nobody"> {
   const key = await readHostKey(home);
   const challenge = randomBytes(32).toString("hex");
   const path = `/api/host-proof?${new URLSearchParams({ challenge }).toString()}`;
   let response: Response;
   try {
-    response = await fetch(new URL(path, url), { signal: AbortSignal.timeout(PROBE_WITHIN_MS) });
+    response = await fetch(new URL(path, url), { signal: AbortSignal.timeout(within) });
   } catch (error) {
     // Something that takes the connection and says nothing is there all the same.
-    return error instanceof Error && error.name === "TimeoutError" ? "other" : "nobody";
+    return timedOut(error) ? "silent" : "nobody";
   }
   const given = await response.json().then(
     (body: unknown) => (body as Partial<HostProof> | null)?.proof,
@@ -145,7 +178,14 @@ export async function startingAt(home: Home, url: string): Promise<Starting | nu
 
 /** Makes whatever answers at a recorded address prove it is this host's own server, before anything secret is sent there. */
 async function requireOwnServer(home: Home, record: ServerRecord): Promise<void> {
-  if ((await whoAnswers(home, record.url)) === "own") return;
+  const who = await whoAnswers(home, record.url, ANSWER_WITHIN_MS);
+  if (who === "own") return;
+  if (who === "silent")
+    throw new CliFailure({
+      what: `The server at ${record.url} did not answer in ${ANSWER_WITHIN_MS / 1000} seconds.`,
+      meaning: "It may be busy. Nothing secret was sent to it and nothing was changed.",
+      next: "Wait a minute and run this again.",
+    });
   throw new CliFailure({
     what: `What answers at ${record.url} is not the server of the data directory ${home.dataDir}.`,
     meaning:
@@ -198,6 +238,18 @@ export async function connect(home: Home): Promise<Running> {
       next: "Stop `ukt serve`, run `ukt setup`, then start the server and run this again.",
     });
   return { ...record, token };
+}
+
+/**
+ * What a server whose harnesses sign in themselves says of why there is no token to give them;
+ * undefined for a server that gives them one. Such a server refuses `/mcp` to a caller who is
+ * not signed in as a harness is, which is its ordinary answer.
+ */
+export function signInWords(described: CapabilityDescriptor): string | undefined {
+  const words: unknown = described.dashboard;
+  return typeof words === "object" && words !== null && "no_token" in words
+    ? String(words.no_token)
+    : undefined;
 }
 
 /** What the Connect page shows this machine's shell: the address, whether a harness here sends a token, and each harness's lines. */

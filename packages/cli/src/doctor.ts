@@ -34,6 +34,7 @@ import {
   modelCheck,
   projects,
   servingNow,
+  signInWords,
   startingAt,
 } from "./server-client.ts";
 import { lingers, serves, serviceState, startCommand, startFix } from "./service.ts";
@@ -178,7 +179,9 @@ async function checkServer(
   degraded: string[];
 }> {
   const check = "server";
-  const record = await servingNow(home);
+  const record = await servingNow(home).catch((error: unknown) => failed(check, error));
+  if (record !== null && "check" in record)
+    return { findings: [record], vector: null, jobs: null, degraded: [] };
   if (record === null) {
     const starting = await startingAt(home, await listensAt(home));
     if (starting !== null)
@@ -313,9 +316,10 @@ async function checkModel(
 async function checkHarnesses(home: Home, dir: string): Promise<Finding[]> {
   const check = "harnesses";
   try {
-    const info = await connectInfo(await connect(home));
+    const server = await connect(home);
+    const info = await connectInfo(server);
     const token = `export ${TOKEN_ENV}="$(ukt token${dir})"`;
-    const [need, ...rest] = connectLines(info, token);
+    const [need, ...rest] = connectLines(info, token, signInWords(await capabilities(server)));
     return [{ check, state: "ok", detail: need ?? "", notes: rest }];
   } catch {
     // Why the server cannot be asked is the server's or the token's finding.

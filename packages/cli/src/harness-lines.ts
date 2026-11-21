@@ -26,13 +26,19 @@ function harnessLines(harness: ConnectHarness): string[] {
 /**
  * The lines that say what to do for each harness the server describes, and first whether any of
  * them sends a token. `tokenCommand` is the line that puts the token where the rest read it, as
- * this data directory is named.
+ * this data directory is named. A server whose harnesses sign in themselves says why there is
+ * no token (`signsInThemselves`), and that is said in its words.
  */
-export function connectLines(info: ConnectInfo, tokenCommand: string): string[] {
+export function connectLines(
+  info: ConnectInfo,
+  tokenCommand: string,
+  signsInThemselves?: string,
+): string[] {
   return [
-    info.needs_token
-      ? `Every harness sends a token to this server. In the shell you add them from: ${tokenCommand}`
-      : "No harness here needs a token: this server takes one on this machine by its address alone, while you are its only person.",
+    signsInThemselves ??
+      (info.needs_token
+        ? `Every harness sends a token to this server. In the shell you add them from: ${tokenCommand}`
+        : "No harness here needs a token: this server takes one on this machine by its address alone, while you are its only person."),
     ...info.harnesses.flatMap((harness) => harnessLines(harness)),
   ];
 }
