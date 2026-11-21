@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CATALOG } from "../packages/embed/src/catalog.ts";
 import { check, covering, inRange, pins, type Advisory, type Env } from "./advisories.ts";
 
 const advisory = (
@@ -10,11 +11,12 @@ const advisory = (
   range: string,
   patched: string | null = null,
   withdrawn: string | null = null,
+  name = "hono",
 ): Advisory => ({
   ghsa_id: id,
   withdrawn_at: withdrawn,
   vulnerabilities: [
-    { package: { name: "hono" }, vulnerable_version_range: range, patched_versions: patched },
+    { package: { name }, vulnerable_version_range: range, patched_versions: patched },
   ],
 });
 
@@ -82,7 +84,7 @@ function tree(deps: Record<string, string>) {
   writeFileSync(
     join(dir, "packages/a/package.json"),
     JSON.stringify({
-      dependencies: { ...deps, "@uketsugi/core": "workspace:*", loose: "^1.0.0" },
+      dependencies: { ...deps, "@uketsugi/core": "workspace:*" },
       optionalDependencies: { opt: "2.0.0" },
     }),
   );
@@ -123,11 +125,17 @@ const list = (range: string, patched: string) =>
 describe("the pins of a tree", () => {
   it("reads exact versions of dependencies and optional dependencies only", () => {
     const t = tree({ hono: "4.13.16" });
-    expect(pins(t.root)).toEqual(
-      new Map([
-        ["hono", new Set(["4.13.16"])],
-        ["opt", new Set(["2.0.0"])],
-      ]),
+    const got = pins(t.root);
+    for (const r of CATALOG.runtime) expect(got.found.get(r.name)).toEqual(new Set([r.version]));
+    expect(got.found.get("hono")).toEqual(new Set(["4.13.16"]));
+    expect(got.found.get("opt")).toEqual(new Set(["2.0.0"]));
+    expect(got.found.has("@uketsugi/core")).toBe(false);
+  });
+
+  it("lists a pin that is not x.y.z, and leaves out only a workspace link", () => {
+    const t = tree({ hono: "4.13.16", loose: "^1.0.0" });
+    expect(pins(t.root, [{ name: "rt", version: "1.0.0-rc.1", integrity: "" }]).unreadable).toEqual(
+      ["loose@^1.0.0", "rt@1.0.0-rc.1"],
     );
   });
 });
@@ -143,6 +151,34 @@ describe("the check", () => {
     const b = t();
     const good = await check(b.root, stub(b, () => list("<= 4.13.15", "4.13.16")).env, false);
     expect(good.ok).toBe(true);
+  });
+
+  it("checks the runtime the catalog pins, and names it", async () => {
+    const a = t();
+    const [first] = CATALOG.runtime;
+    if (!first) throw new Error("the catalog pins no runtime");
+    const bad = await check(
+      a.root,
+      stub(a, () =>
+        Response.json([advisory("GHSA-rt", `<= ${first.version}`, "99.0.0", null, first.name)]),
+      ).env,
+      false,
+    );
+    expect(bad.ok).toBe(false);
+    expect(bad.lines.join("\n")).toContain(`${first.name}@${first.version}: GHSA-rt`);
+    const b = t();
+    const good = await check(b.root, stub(b, () => list("< 1.0.0", "1.0.0")).env, false);
+    for (const r of CATALOG.runtime)
+      expect(good.lines.join("\n")).toContain(`${r.name}@${r.version}`);
+  });
+
+  it("fails on a pin it cannot read, naming it", async () => {
+    const a = tree({ hono: "4.13.16" });
+    const r = await check(a.root, stub(a, () => list("< 1.0.0", "1.0.0")).env, false, [
+      { name: "rt", version: "1.0.0-rc.1", integrity: "" },
+    ]);
+    expect(r.ok).toBe(false);
+    expect(r.lines.join("\n")).toContain("rt@1.0.0-rc.1");
   });
 
   it("names a pin with no GitHub repository, without failing", async () => {

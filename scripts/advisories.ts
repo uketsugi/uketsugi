@@ -10,6 +10,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CATALOG, type RuntimeArtifact } from "../packages/embed/src/catalog.ts";
 
 export interface Advisory {
   ghsa_id: string;
@@ -91,24 +92,42 @@ export function covering(name: string, version: string, list: Advisory[]): strin
 
 type Pins = Map<string, Set<string>>;
 
-/** Every exact pin of what each package.json ships (its dependencies, not its tooling): name to versions. */
-export function pins(root: URL): Pins {
+const EXACT = /^\d+\.\d+\.\d+$/;
+
+/**
+ * Every exact pin of what each package.json ships (its dependencies, not its tooling) and of the
+ * runtime `ukt setup` downloads (pinned in the catalog, in no manifest): name to versions. A pin
+ * that is not `x.y.z` cannot be matched against an advisory's range, so it is listed in
+ * `unreadable` as "name@pin" for the check to fail on; only a `workspace:` link, which downloads
+ * nothing, is left out.
+ */
+export function pins(
+  root: URL,
+  runtime: readonly RuntimeArtifact[] = CATALOG.runtime,
+): { found: Pins; runtime: string[]; unreadable: string[] } {
   const found: Pins = new Map();
-  const files = ["package.json", ...readdirPackages(root)];
-  for (const file of files) {
+  const unreadable: string[] = [];
+  const add = (name: string, version: string) => {
+    if (EXACT.test(version)) found.set(name, (found.get(name) ?? new Set()).add(version));
+    else unreadable.push(`${name}@${version}`);
+  };
+  for (const file of ["package.json", ...readdirPackages(root)]) {
     const json = JSON.parse(readFileSync(new URL(file, root), "utf8")) as Record<
       string,
       Record<string, string> | undefined
     >;
     for (const group of ["dependencies", "optionalDependencies"]) {
       for (const [name, version] of Object.entries(json[group] ?? {})) {
-        if (/^\d+\.\d+\.\d+$/.test(version)) {
-          found.set(name, (found.get(name) ?? new Set()).add(version));
-        }
+        if (!version.startsWith("workspace:")) add(name, version);
       }
     }
   }
-  return found;
+  for (const { name, version } of runtime) add(name, version);
+  return {
+    found,
+    runtime: runtime.map((r) => `${r.name}@${r.version}`),
+    unreadable: [...new Set(unreadable)].sort(),
+  };
 }
 
 const readdirPackages = (root: URL): string[] =>
@@ -235,6 +254,7 @@ export async function check(
   root: URL,
   env: Env,
   offline: boolean,
+  runtimePins: readonly RuntimeArtifact[] = CATALOG.runtime,
 ): Promise<{ ok: boolean; lines: string[] }> {
   if (offline) {
     return {
@@ -242,25 +262,27 @@ export async function check(
       lines: ["advisories: SKIPPED, UKT_ADVISORIES_OFFLINE is set; nothing was checked"],
     };
   }
-  const found = pins(root);
+  const { found, runtime, unreadable } = pins(root, runtimePins);
   const cache = loadCache(env.cachePath, env.now());
   try {
     const { covered, unchecked } = await problems(getter(env, cache), found);
-    const lines = unchecked.map((p) => `advisories: not checked, no GitHub repository: ${p}`);
+    const lines = [
+      ...unchecked.map((p) => `advisories: not checked, no GitHub repository: ${p}`),
+      ...unreadable.map(
+        (p) => `advisories: FAILED, a pin that is not x.y.z cannot be checked: ${p}`,
+      ),
+    ];
     if (covered.length > 0) {
-      return {
-        ok: false,
-        lines: [
-          ...lines,
-          `advisories: pinned dependencies a GitHub advisory covers:`,
-          ...covered.map((c) => `  ${c}`),
-        ],
-      };
+      lines.push(`advisories: pinned dependencies a GitHub advisory covers:`);
+      lines.push(...covered.map((c) => `  ${c}`));
     }
-    return {
-      ok: true,
-      lines: [...lines, `advisories: none cover the ${found.size} pinned dependencies`],
-    };
+    const ok = covered.length === 0 && unreadable.length === 0;
+    if (ok) {
+      lines.push(
+        `advisories: none cover the ${found.size} pinned dependencies, the runtime among them: ${runtime.join(", ")}`,
+      );
+    }
+    return { ok, lines };
   } catch (error) {
     if (!(error instanceof Refused)) throw error;
     return {
