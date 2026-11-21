@@ -88,6 +88,19 @@ export function loadReplayData(dir: string): ReplayData {
   return { labels, shapes };
 }
 
+/**
+ * A citation as it is published. The export keeps a citation's text and not its kind, and the
+ * product's brief tells the person's word by the kind, so a short text that names the person (the
+ * user, the requester, the maintainer) is published as a person citation, as the agents who wrote
+ * these facts sent it. Against the kinds recorded in the runs the export came from, it names all 422
+ * person citations in the two stores and 3 of their 21,467 others.
+ */
+export function citationOf(text: string): string | Record<string, string> {
+  const names = /\b(user|requester|maintainer|owner|person)\b/i.test(text);
+  const prose = !text.startsWith("{") && !text.includes("/") && text.length <= 80;
+  return names && prose ? { kind: "person", who: text } : text;
+}
+
 /** The cases that hold a fact stating their item: the only ones a probe can be scored on. */
 export function scorable(cases: readonly ReplayCase[]): ReplayCase[] {
   return cases.filter((entry) => entry.targets.size > 0);

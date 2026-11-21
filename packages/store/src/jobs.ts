@@ -82,6 +82,11 @@ export class SqlJobs extends Repo implements JobsRepo {
     return { ...jobs, ...readings };
   }
 
+  async embeddingModel(): Promise<string | null> {
+    const row = await this.db.selectFrom("embeddingModel").select("model").executeTakeFirst();
+    return row?.model ?? null;
+  }
+
   /**
    * Makes the store's vectors the embedder's: when the model that made them is not `model`, every
    * vector is set to null and `model` recorded, in one statement. Then brings back the dead
@@ -91,11 +96,6 @@ export class SqlJobs extends Repo implements JobsRepo {
    * id of its own, so a dead one is found by its subject; the one this leaves takes its fact's id.
    * Returns how many jobs it brought back or left.
    */
-  async embeddingModel(): Promise<string | null> {
-    const row = await this.db.selectFrom("embeddingModel").select("model").executeTakeFirst();
-    return row?.model ?? null;
-  }
-
   async embedMissing(model: string, now: Date): Promise<number> {
     await sql`
       with cleared as (

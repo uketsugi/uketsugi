@@ -7,10 +7,7 @@ import type { Miss } from "./causes.ts";
 import { GENERIC_SHARE, specificAt } from "./naming.ts";
 import { VARIANTS } from "./profile.ts";
 import type { CellRow } from "./replay.ts";
-import { count, inTop, TOP } from "./figures.ts";
-
-/** Items a person told the agent (a rule, a decision, something for later); D8 and D12 are asides the agent found. */
-const TOLD = new Set(["D1", "D2", "D3", "D5", "P1"]);
+import { count, inTop, TOLD, TOP } from "./figures.ts";
 
 const named = (miss: Miss): boolean => miss.naming.specific.length > 0;
 const causeOf = (miss: Miss): string => miss.cause;

@@ -8,7 +8,14 @@ import type { SearchFactsResult } from "@uketsugi/contracts";
 import type { ToolCaller } from "@uketsugi/testkit";
 import { briefHolds, type BriefHold } from "./brief.ts";
 import { explainMiss, type Miss } from "./causes.ts";
-import { scorable, type Label, type ReplayCase, type ReplayFact, type Shape } from "./data.ts";
+import {
+  citationOf,
+  scorable,
+  type Label,
+  type ReplayCase,
+  type ReplayFact,
+  type Shape,
+} from "./data.ts";
 import { SEARCH_LIMIT, searchExplained, type ReplayEnv } from "./env.ts";
 import { VARIANTS, withRelaxed } from "./profile.ts";
 
@@ -54,7 +61,7 @@ async function publishCase(
   for (const fact of facts) {
     const args: Record<string, unknown> = {
       claim: fact.claim,
-      citations: fact.citations.length > 0 ? fact.citations : ["replay"],
+      citations: fact.citations.length > 0 ? fact.citations.map(citationOf) : ["replay"],
       ...(fact.detail === null ? {} : { detail: fact.detail }),
       ...(fact.question === null ? {} : { question: fact.question }),
     };
@@ -143,7 +150,7 @@ export async function replayCase(
     if (first === undefined) continue;
     const found = await searchExplained(reader, first.query);
     requireArm(env, found, first.query);
-    brief ??= briefHolds(found.brief, targets, labels);
+    brief ??= briefHolds(found, targets, labels);
     const index = found.facts.findIndex((fact) => targets.has(fact.id));
     const place = index === -1 ? null : index + 1;
     const missed = place === null || place > TOP;
@@ -173,6 +180,39 @@ export async function replayCase(
     });
   }
   return await withRelaxedPlaces(env, reader, targets, rows);
+}
+
+/** What a brief-only run keeps of a cell: the brief its session was handed. */
+export type BriefRow = Pick<CellRow, "shape" | "case" | "item" | "task" | "brief">;
+
+/**
+ * The briefs alone: each case is published and its reader's first search carries the brief, which
+ * every cell of the case shares. No cell is searched for its place, explained or relaxed, which is
+ * where a full run spends its time; the brief does not depend on the arm.
+ */
+export async function replayBriefs(
+  env: ReplayEnv,
+  shape: Shape,
+  cases: readonly ReplayCase[],
+  labels: ReadonlyMap<string, Label>,
+  order: Order = "written",
+): Promise<BriefRow[]> {
+  const rows: BriefRow[] = [];
+  for (const entry of scorable(cases)) {
+    const project = `github.com/replay/${entry.case.toLowerCase()}`;
+    const { targets } = await publishCase(env, project, entry, order);
+    const first = entry.cells.find((cell) => cell.queries[0] !== undefined);
+    if (first?.queries[0] === undefined) continue;
+    const found = await searchExplained(
+      env.caller(project, "replay-reader"),
+      first.queries[0].query,
+    );
+    const brief = briefHolds(found, targets, labels);
+    for (const cell of entry.cells.filter((c) => c.queries[0] !== undefined)) {
+      rows.push({ shape, case: entry.case, item: entry.item, task: cell.task, brief });
+    }
+  }
+  return rows;
 }
 
 /** Replays every scorable case of a shape in one server. */

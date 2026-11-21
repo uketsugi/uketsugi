@@ -5,8 +5,8 @@
 import { CUTS } from "./brief.ts";
 import type { Miss } from "./causes.ts";
 import type { Shape } from "./data.ts";
-import type { Arm, CellRow } from "./replay.ts";
-import { count, inTop, tally, TOP } from "./figures.ts";
+import type { Arm, BriefRow, CellRow } from "./replay.ts";
+import { briefCounts, briefLength, count, inTop, TOLD, tally, TOP } from "./figures.ts";
 import { namingLines, relaxedLines } from "./tables.ts";
 
 /** The figures of memory research's round 3 the replay is judged against (top 10 in a cell's first query). */
@@ -60,6 +60,19 @@ function missLine(row: CellRow, miss: Miss): string {
   return `  ${row.case} ${row.task} ${where} · ${causeName(miss)}: ${why} · ${shared} · control ${control} · brief ${held} · listed ${row.brief.listed ? "yes" : "no"}`;
 }
 
+/** The brief's figures of one shape, whole and split by told items and asides, and its length. */
+export function briefLines(shape: Shape, rows: readonly BriefRow[]): string[] {
+  const told = rows.filter((row) => TOLD.has(row.item));
+  const asides = rows.filter((row) => !TOLD.has(row.item));
+  return [
+    `\n== brief · ${shape} store · ${rows.length} cells`,
+    `all cells: ${briefCounts(rows, CUTS)}`,
+    `  told items (${[...TOLD].join(", ")}): ${briefCounts(told, CUTS)}`,
+    `  asides: ${briefCounts(asides, CUTS)}`,
+    `brief length: ${briefLength(rows)}`,
+  ];
+}
+
 /** The section of one shape and arm. */
 export function sectionOf(shape: Shape, arm: Arm, rows: readonly CellRow[]): string[] {
   const cells = rows.length;
@@ -81,6 +94,7 @@ export function sectionOf(shape: Shape, arm: Arm, rows: readonly CellRow[]): str
     ...relaxedLines(rows),
     `control (the fact's own claim as the query): top 10 in ${count(withMiss, (m) => m.control !== null && m.control <= TOP)} of ${withMiss.length}`,
     `brief holds a needed fact: listed ${count(rows, (r) => r.brief.listed)} of ${cells}; saying the item within ${CUTS.map((cut) => `${cut}: ${heldIn(rows, cut)}`).join(", ")} · among the misses: listed ${count(misses, (r) => r.brief.listed)} of ${misses.length}; ${CUTS.map((cut) => `${cut}: ${heldIn(misses, cut)}`).join(", ")}`,
+    ...briefLines(shape, rows).slice(1),
     ...rows.flatMap((row) => (row.miss === null ? [] : [missLine(row, row.miss)])),
   ];
 }

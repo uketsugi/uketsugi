@@ -18,6 +18,8 @@ export interface BriefHold {
   readonly listed: boolean;
   /** For each cut, a listed needed fact whose claim says the item within it. */
   readonly within: Readonly<Record<number, boolean>>;
+  /** The characters of the brief's text. */
+  readonly chars: number;
 }
 
 const collapsed = (text: string): string => text.replace(/\s+/g, " ").trim();
@@ -40,12 +42,18 @@ function listedIds(brief: Brief | undefined): Set<string> {
   return new Set(lines.map((fact) => fact.id));
 }
 
+/** The brief's text, which a result's text ends with. */
+function briefText(resultText: string): string {
+  const at = resultText.indexOf("\n\nSession brief for ");
+  return at === -1 ? "" : resultText.slice(at + 2);
+}
+
 export function briefHolds(
-  brief: Brief | undefined,
+  found: { readonly brief?: Brief | undefined; readonly text: string },
   targets: ReadonlyMap<string, ReplayFact>,
   labels: ReadonlyMap<string, Label>,
 ): BriefHold {
-  const ids = listedIds(brief);
+  const ids = listedIds(found.brief);
   const listed = [...targets].filter(([id]) => ids.has(id));
   const within = Object.fromEntries(
     CUTS.map((cut) => [
@@ -53,5 +61,5 @@ export function briefHolds(
       listed.some(([, fact]) => saysWithin(fact, labelOf(labels, fact.id), cut)),
     ]),
   );
-  return { listed: listed.length > 0, within };
+  return { listed: listed.length > 0, within, chars: briefText(found.text).length };
 }

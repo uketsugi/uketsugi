@@ -13,7 +13,7 @@ import {
   type UnitFacts,
   type VectorChange,
 } from "@uketsugi/core";
-import { sql, type InferResult } from "kysely";
+import { sql, type InferResult, type RawBuilder } from "kysely";
 import { behindOf, headsIn } from "./chain.ts";
 import { live, Repo, scoped, toBytes, UnitRepo, uuidsOf, vectorUnder, type Db } from "./codec.ts";
 import { writeDerived } from "./derived.ts";
@@ -261,6 +261,15 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
   }
 }
 
+/**
+ * The rule for a live fact whose every citation is a person's word. A fact always has one: a
+ * publish with none is refused, and a redacted fact is not live.
+ */
+function livePersonCited(): RawBuilder<boolean> {
+  return sql<boolean>`(${live()} and not exists (
+    select 1 from jsonb_array_elements(citations) as cited where cited->'citation'->>'kind' <> 'person'))`;
+}
+
 /** Facts outside a unit: every read is scoped by organization and visible audiences. */
 export class SqlFacts extends Repo implements FactsRepo {
   get(scope: ReadScope, id: string): Promise<Fact | null> {
@@ -282,6 +291,7 @@ export class SqlFacts extends Repo implements FactsRepo {
   async list(scope: ReadScope, query: FactListQuery): Promise<Fact[]> {
     let rows = factsIn(this.db, scope);
     if (query.project !== undefined) rows = rows.where("project", "=", query.project);
+    if (query.citedOnlyToPerson === true) rows = rows.where(livePersonCited());
     if (query.before !== undefined) {
       const { updatedAt, id } = query.before;
       rows = rows.where((eb) => eb(eb.refTuple("updatedAt", "id"), "<", eb.tuple(updatedAt, id)));

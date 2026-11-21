@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeEmbedder } from "@uketsugi/testkit";
 import { afterEach, describe, expect, test } from "vitest";
+import { citationOf } from "../src/benchmark/replay/data.ts";
 import { briefHolds, saysWithin } from "../src/benchmark/replay/brief.ts";
 import { floorFails } from "../src/benchmark/replay/causes.ts";
 import { loadReplayData, missingFiles } from "../src/benchmark/replay/data.ts";
@@ -151,8 +152,24 @@ describe("the brief and the floor", () => {
   });
 
   test("a fact the brief does not list is not held", () => {
-    const hold = briefHolds(undefined, new Map([["t", target]]), new Map());
+    const hold = briefHolds({ text: "a result" }, new Map([["t", target]]), new Map());
     expect(hold.listed).toBe(false);
+    expect(hold.chars).toBe(0);
+  });
+
+  test("a brief's length is that of its text, which ends the result's", () => {
+    const hold = briefHolds({ text: "found\n\nSession brief for x.\nmore" }, new Map(), new Map());
+    expect(hold.chars).toBe("Session brief for x.\nmore".length);
+  });
+
+  test("a short text naming the person is published as a person's word, a file or a sentence is not", () => {
+    expect(citationOf("project maintainer (session user)")).toEqual({
+      kind: "person",
+      who: "project maintainer (session user)",
+    });
+    expect(citationOf("irc/user.go:12-20@47b63c9b")).toBe("irc/user.go:12-20@47b63c9b");
+    expect(citationOf('{"kind":"observation","who":"the person requesting"}')).toMatch(/^\{/);
+    expect(citationOf(`Rule from the maintainer: ${"x".repeat(80)}`)).toMatch(/^Rule/);
   });
 
   test("the keyword floor drops only a thin, far fact that wording alone found", () => {

@@ -5,7 +5,9 @@
  *
  * Which facts come first is a rule's choice: how each stands, then how lately it changed. Where a
  * model read the person's last session here and chose, its choice leads and the rule orders the
- * rest.
+ * rest. What the person told an agent leads the brief's facts whatever its age: a fact cited only
+ * to the person (every citation a person's word) is read apart from the newest, and the brief
+ * composes it first within its share.
  */
 import type { BriefFact, Fact as FactView } from "@uketsugi/contracts";
 import { composeBrief, type BriefSources, type ComposedBrief } from "./brief.ts";
@@ -19,6 +21,9 @@ import { viewerOf } from "./usecases/tasks/shared.ts";
 
 /** How many of a project's facts are read to choose from, newest first. */
 const FACT_POOL = 60;
+
+/** How many facts cited only to the person are read, newest first: more than their share holds. */
+const TOLD_POOL = 20;
 
 /** A fact as a brief lists it. */
 function briefFact(view: FactView): BriefFact {
@@ -79,6 +84,22 @@ async function standingFacts(
   return [...newest, ...chosen.filter(isLive).filter((fact) => fact.project === project)];
 }
 
+/** The standing facts and, after them, the told ones among them not already there. */
+function withTold(standing: readonly LiveFact[], told: readonly LiveFact[]): LiveFact[] {
+  return [...standing, ...told.filter((fact) => !standing.some((other) => other.id === fact.id))];
+}
+
+/** The newest live facts of the project that only the person has vouched for. */
+function toldFacts(
+  ports: Pick<CorePorts, "store">,
+  scope: ReadScope,
+  project: string,
+): Promise<LiveFact[]> {
+  return ports.store.facts
+    .list(scope, { project, citedOnlyToPerson: true, limit: TOLD_POOL })
+    .then((found) => found.filter(isLive));
+}
+
 /**
  * Reads what a brief is composed from, for the session of a call. `notice` is what the person has
  * yet to decide about the project, if anything.
@@ -99,15 +120,20 @@ export async function briefSources(
     store.sessions.previous(caller.orgId, caller.principalId, project, session.id),
     store.sessions.picks(caller.orgId, caller.principalId, project),
   ]);
-  const standing = await standingFacts(ports, scope, project, picks);
+  const [standing, told] = await Promise.all([
+    standingFacts(ports, scope, project, picks),
+    toldFacts(ports, scope, project),
+  ]);
   const taskIds = tasks.map((task) => task.id);
   const [views, notes, during] = await Promise.all([
-    factViews(ports, caller, standing),
+    factViews(ports, caller, withTold(standing, told)),
     store.tasks.latestNotes(scope, taskIds),
     previous === null ? ([] as string[]) : store.review.publishedIn(scope, previous.id),
   ]);
   const viewer = await viewerOf(ports, ctx, now, { tasks, notes });
   const left = views.filter((view) => during.includes(view.id));
+  const isStanding = (view: FactView): boolean => standing.some((fact) => fact.id === view.id);
+  const viewOf = (fact: LiveFact): FactView[] => views.filter((view) => view.id === fact.id);
   const byModel = (view: FactView): boolean => view.from_session !== undefined;
   return {
     ...viewer,
@@ -124,7 +150,11 @@ export async function briefSources(
             published: left.filter((view) => !byModel(view)).map(briefFact),
             digested: left.filter(byModel).map(briefFact),
           },
-    facts: chosenFirst(byStanding(standing, views, caller.principalId, now), picks).map(briefFact),
+    facts: chosenFirst(
+      byStanding(standing, views.filter(isStanding), caller.principalId, now),
+      picks,
+    ).map(briefFact),
+    told: told.flatMap(viewOf).map(briefFact),
     factCount,
   };
 }

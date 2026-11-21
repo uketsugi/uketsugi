@@ -4,7 +4,7 @@
  * instructions. In order: a notice while the person has not chosen how to treat the project, the
  * tasks the person holds, the open and handed-off tasks with their
  * latest note, the tasks whose lease lapsed, how the person's previous session here ended, the
- * project's standing facts one line each, and how many facts the project holds against how many
+ * project's standing facts one line each (those the person told first), and how many facts the project holds against how many
  * are shown. The whole text stays under `BRIEF_MAX_CHARS`; the structured brief carries exactly
  * what the text shows.
  *
@@ -21,8 +21,11 @@ import { taskLines, taskView, type Viewer } from "./tasks/views.ts";
 /** The most characters a brief's text takes. */
 export const BRIEF_MAX_CHARS = 4000;
 
-/** The most characters the tasks and the previous session take: what they leave is the facts'. */
-const SHARES = { tasks: 1500, previous: 1100 } as const;
+/**
+ * The most characters the tasks and the previous session take: what they leave is the facts'. Of
+ * that, the facts the person told lead with at most `told`, and never more than half of it.
+ */
+const SHARES = { tasks: 1500, previous: 1100, told: 1000 } as const;
 
 const LIMITS = {
   /** Tasks listed per group. */
@@ -63,6 +66,8 @@ export interface BriefSources extends Viewer {
   } | null;
   /** The project's standing facts, most relevant first. */
   readonly facts: readonly BriefFact[];
+  /** The facts cited only to the person, in the order they lead the facts, whether or not `facts` holds them. */
+  readonly told: readonly BriefFact[];
   /** How many live facts the project holds. */
   readonly factCount: number;
 }
@@ -267,7 +272,8 @@ function previousSection(
 }
 
 /**
- * The facts that fit, under a heading that says how many of the project's facts are shown. A fact
+ * The facts that fit, under a heading that says how many of the project's facts are shown. The
+ * facts the person told lead, within their share of the room; the standing facts follow. A fact
  * the previous session's section already lists (`listed`) is not listed again, and the room goes
  * to the facts after it; the heading counts it as shown and says it is above.
  */
@@ -282,9 +288,19 @@ function factSection(
       listed.length === 0 ? "" : `, ${listed.length} of them in the previous session above`;
     return `Facts (${shown + listed.length} of ${sources.factCount} shown${above}; search_facts finds the rest):`;
   };
-  const rest = sources.facts.filter((fact) => !listed.some((entry) => entry.id === fact.id));
-  const kept = fitting(rest.map(factLine), budget - heading(sources.factCount).length - 1);
-  return { lines: [heading(kept.length), ...kept], shown: rest.slice(0, kept.length) };
+  const unlisted = (fact: BriefFact) => !listed.some((entry) => entry.id === fact.id);
+  const room = budget - heading(sources.factCount).length - 1;
+  const told = sources.told.filter(unlisted);
+  const lead = fitting(told.map(factLine), Math.min(SHARES.told, Math.floor(room / 2)));
+  const led = told.slice(0, lead.length);
+  const rest = sources.facts.filter(
+    (fact) => unlisted(fact) && !led.some((entry) => entry.id === fact.id),
+  );
+  const kept = fitting(rest.map(factLine), room - sizeOf(lead));
+  return {
+    lines: [heading(lead.length + kept.length), ...lead, ...kept],
+    shown: [...led, ...rest.slice(0, kept.length)],
+  };
 }
 
 /** The sources with every fact's claim cut to one line of the brief's size. */
@@ -297,6 +313,7 @@ function withShortClaims(sources: BriefSources): BriefSources {
   return {
     ...sources,
     facts: sources.facts.map(short),
+    told: sources.told.map(short),
     previous:
       previous === null
         ? null

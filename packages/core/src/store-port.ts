@@ -256,6 +256,8 @@ export interface FactListQuery {
   readonly project?: string;
   /** Returns facts strictly older than this position: the last fact of the page before. */
   readonly before?: { readonly updatedAt: Date; readonly id: string };
+  /** Only live facts whose every citation is a person's word (`kind` person): what the person told an agent. */
+  readonly citedOnlyToPerson?: boolean;
   readonly limit: number;
 }
 

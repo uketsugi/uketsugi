@@ -1,101 +1,20 @@
 import { readFileSync } from "node:fs";
 import type { BriefFact } from "@uketsugi/contracts";
 import { describe, expect, test } from "vitest";
+import { BRIEF_CLAIM_CHARS, BRIEF_MAX_CHARS, composeBrief } from "../src/brief.ts";
 import {
-  BRIEF_CLAIM_CHARS,
-  BRIEF_MAX_CHARS,
-  composeBrief,
-  type BriefSources,
-} from "../src/brief.ts";
-import type { Session, SessionNote, Task, TaskNote } from "../src/domain.ts";
-
-const NOW = new Date("2026-11-13T12:00:00Z");
-const ME = "person-me";
-const PROJECT = "github.com/acme/api";
-const minutes = (count: number): Date => new Date(NOW.getTime() + count * 60_000);
-const id = (n: number): string => `00000000-0000-7000-8000-${String(n).padStart(12, "0")}`;
-
-function task(n: number, title: string, change: Partial<Task> = {}): Task {
-  return {
-    orgId: "org",
-    id: id(n),
-    audienceId: "audience",
-    project: PROJECT,
-    title,
-    description: null,
-    state: "open",
-    version: 1,
-    tracked: false,
-    publisher: ME,
-    lease: null,
-    createdAt: minutes(-600),
-    updatedAt: minutes(-60),
-    ...change,
-  };
-}
-
-function lease(holder: string, expiresAt: Date): Task["lease"] {
-  return { tokenHash: "aa", holder, session: id(900), expiresAt };
-}
-
-function note(taskNumber: number, text: string, kind: TaskNote["kind"] = "note"): TaskNote {
-  const about = { orgId: "org", taskId: id(taskNumber), id: id(500 + taskNumber) };
-  return { ...about, kind, author: ME, session: id(901), text, at: minutes(-90) };
-}
-
-function previous(change: Partial<Session> = {}): Session {
-  return {
-    orgId: "org",
-    principalId: ME,
-    clientName: "claude-code",
-    conversationId: null,
-    project: PROJECT,
-    id: id(800),
-    displayId: "s-0800",
-    clientVersion: "2.1.323",
-    firstCallAt: minutes(-300),
-    lastCallAt: minutes(-240),
-    lastSearchAt: minutes(-290),
-    lastPublishAt: minutes(-240),
-    refusedCalls: 0,
-    calls: 9,
-    briefedAt: null,
-    note: null,
-    digestedAt: null,
-    modelTokens: { input: 0, output: 0 },
-    digestFailure: null,
-    ...change,
-  };
-}
-
-/** A session's note: its last word unless `final` is false, which makes it a note at a checkpoint. */
-function noted(text: string, at: Date, final = true): SessionNote {
-  return { text, final, at };
-}
-
-const fact = (n: number, claim: string, trust: BriefFact["trust"] = "unreviewed"): BriefFact => ({
-  id: id(n),
-  claim,
-  trust,
-});
-
-function sources(change: Partial<BriefSources> = {}): BriefSources {
-  return {
-    project: PROJECT,
-    notice: null,
-    now: NOW,
-    person: ME,
-    sessionId: id(801),
-    tasks: [],
-    notes: [],
-    names: new Map([[ME, "you"]]),
-    sessions: new Map([[id(900), previous({ id: id(900) })]]),
-    previous: null,
-    facts: [],
-    factCount: 0,
-    ...change,
-  };
-}
+  fact,
+  id,
+  ME,
+  minutes,
+  note,
+  noted,
+  previous,
+  PROJECT,
+  sources,
+  task,
+  lease,
+} from "./brief-fixtures.ts";
 
 describe("the session brief", () => {
   test("lists held, open and lapsed tasks, the previous session, then facts, in that order", () => {
