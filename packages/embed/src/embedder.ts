@@ -59,6 +59,12 @@ function workerEntry(): URL {
 /** Starts a worker and resolves once its model has loaded. `onExit` is told when a loaded worker ends. */
 function startSession(data: WorkerData, onExit: () => void): Promise<Session> {
   return new Promise<Session>((resolve, reject) => {
+    // The runtime ships Microsoft's telemetry: it reads this from the process's real environment
+    // when it loads, and sends events to mobile.events.data.microsoft.com and keeps files under
+    // $HOME/.cache (or `:memory:.ses` in the working directory) unless it is "1". Set here, in
+    // the main thread, because a worker's `process.env` is a copy the native code never sees:
+    // transformers.js sets it too, but inside the worker, where it has no effect.
+    process.env["ORT_DISABLE_TELEMETRY"] = "1";
     const worker = new Worker(workerEntry(), { workerData: data });
     let pending: { resolve: (reply: WorkerReply) => void; reject: (error: Error) => void } | null =
       null;

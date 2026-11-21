@@ -14,7 +14,9 @@ type Catalog = typeof CATALOG;
 
 /**
  * The stand-in runtime: it needs the sharp stub to import, reads the model's config, notes each
- * load in `models/loads`, and runs one text. The text "crash" ends its worker thread.
+ * load in `models/loads` along with the telemetry switch as the process's real environment holds it
+ * (what the native runtime reads, which a worker's `process.env` is not) in `models/switch`, and
+ * runs one text. The text "crash" ends its worker thread.
  */
 const FAKE_TRANSFORMERS = `
 import "sharp";
@@ -24,6 +26,7 @@ export async function pipeline(task, model) {
   const config = JSON.parse(readFileSync(env.localModelPath + model + "/config.json", "utf8"));
   if (config.refuse === true) throw new Error("the fixture model refuses to load");
   appendFileSync(env.localModelPath + "loads", "x");
+  appendFileSync(env.localModelPath + "switch", String(process.report.getReport().environmentVariables.ORT_DISABLE_TELEMETRY));
   return async ([text]) => {
     if (text === "explode") throw new Error("the fixture model refuses this text");
     if (text === "crash") return new Promise(() => setTimeout(() => { throw new Error("the fixture worker crashes"); }));

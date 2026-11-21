@@ -190,6 +190,24 @@ describe("the local embedder", () => {
     });
   });
 
+  test("loads the runtime with its telemetry off, whatever the environment says", async () => {
+    const before = process.env["ORT_DISABLE_TELEMETRY"];
+    try {
+      for (const asked of [undefined, "0"]) {
+        if (asked === undefined) delete process.env["ORT_DISABLE_TELEMETRY"];
+        else process.env["ORT_DISABLE_TELEMETRY"] = asked;
+        await rm(root, { recursive: true, force: true });
+        const embedder = await installed();
+        await embedder.load();
+        expect(await readFile(join(root, "models/switch"), "utf8")).toBe("1");
+        await embedder.close();
+      }
+    } finally {
+      if (before === undefined) delete process.env["ORT_DISABLE_TELEMETRY"];
+      else process.env["ORT_DISABLE_TELEMETRY"] = before;
+    }
+  });
+
   test("reports a model the runtime cannot load", async () => {
     const embedder = await installed({ dims: 8, refuse: true });
 
