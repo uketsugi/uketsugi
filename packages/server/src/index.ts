@@ -3,6 +3,7 @@ export { composeServer, listenStarting, localUrl } from "./compose.ts";
 export type {
   ComposeOptions,
   Edition,
+  EditionHost,
   Listening,
   StartingListener,
   StartingOptions,
@@ -10,6 +11,7 @@ export type {
 } from "./compose.ts";
 export { startingFailure, type Starting } from "./starting.ts";
 export type { HarnessRefusals, TokenNeed } from "./errors.ts";
+export type { Pending, PendingOptions } from "./pending.ts";
 export { hostProof } from "./auth.ts";
 export { DEFAULT_HOST, loopbackOfEvery } from "./guard.ts";
 export { connectInfo, word } from "./connect.ts";

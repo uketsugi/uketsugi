@@ -21,8 +21,10 @@ import {
   createWorker,
   ModelError,
   type AppPorts,
+  type Caller,
   type ClaimedJob,
   type DigestReport,
+  type ToolFailure,
 } from "@uketsugi/core";
 import { Hono, type Context } from "hono";
 import { getPath } from "hono/utils/url";
@@ -39,15 +41,35 @@ import {
   responseHeaders,
 } from "./guard.ts";
 import { createMcpEndpoint } from "./mcp.ts";
+import { createPending, type Pending, type PendingOptions } from "./pending.ts";
 import { pluginRoutes, PLUGINS_PATH, pluginsFolder } from "./plugins.ts";
 import { startingApp, type Starting } from "./starting.ts";
 import { createToolUses } from "./tool-uses.ts";
 
-/** What differs between editions of the server: what it is called, and what it tells a harness it refuses. */
+/** What the server gives an edition's routes: what it cannot do without the server's own state. */
+export interface EditionHost {
+  /**
+   * Signs the browser that sent this request in to the dashboard as a person the edition has
+   * verified, and sets the session's cookie on the response the route then answers with.
+   */
+  openSession(c: Context, caller: Caller): void;
+  /** A store for what the edition holds while a login is in progress, with the bound the server keeps it to. */
+  pending<V>(options: PendingOptions): Pending<V>;
+}
+
+/** What differs between editions of the server: its name, its words for what it refuses, and its own routes. */
 export interface Edition {
   /** The edition's name in the capability descriptor. */
   readonly name: string;
   readonly refusals: HarnessRefusals;
+  /** What a dashboard key no person owns is told. Left out, the open edition's words. */
+  readonly unknownKey?: () => ToolFailure;
+  /**
+   * The edition's own routes, built once the server's sign-in exists. They are served on the
+   * server's listener behind its request guard, with its response headers, and ahead of its own
+   * routes. A route that does not answer lets the request fall through to them.
+   */
+  readonly routes?: (host: EditionHost) => Hono;
 }
 
 /** The open edition. */
@@ -103,6 +125,8 @@ export interface UketsugiServer {
   listen(options: { host?: string; port: number }): Promise<Listening>;
   /** Serves from a listener that has answered until now (`listenStarting`) and is the server's from here on. */
   takeOver(listener: StartingListener): Listening;
+  /** Starts the job worker, which a listener handed over starts too. Calling it again changes nothing. */
+  start(): void;
   /** Stops every listener, the worker and the MCP handler. It does not close the ports. */
   close(): Promise<void>;
 }
@@ -262,7 +286,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   const toolUses = createToolUses(ports);
   const mcp = createMcpEndpoint(app, ports, toolUses, onError);
   const plugins = pluginsFolder(options.pluginsDir);
-  const signIn = createSignIn(ports, app);
+  const signIn = createSignIn(ports, app, edition.unknownKey);
   // An address given with a slash at its end makes `//mcp` of `/mcp`: a path is read with its
   // repeated slashes as one, so a person who types the address that way is still served.
   const http = new Hono<AuthEnv>({
@@ -282,6 +306,17 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
     if (!sentByHost(c, operator)) return c.json(up);
     return c.json({ ...up, jobs: await ports.store.jobs.counts() });
   });
+
+  if (edition.routes !== undefined) {
+    const nowMs = (): number => ports.clock.now().getTime();
+    http.route(
+      "/",
+      edition.routes({
+        openSession: (c, caller) => signIn.open(c, caller),
+        pending: (pendingOptions) => createPending(nowMs, pendingOptions),
+      }),
+    );
+  }
 
   // A request with no token is its identity's to answer only where nothing but this machine can
   // have sent it: every listener is on a loopback address, the server answers to no name but the
@@ -303,8 +338,9 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   if (plugins !== null) http.route(PLUGINS_PATH, pluginRoutes(plugins));
   if (webDir !== undefined && existsSync(webDir)) serveDashboard(http, webDir);
 
+  const start = (): void => worker.start();
   const takeOver = (bound: StartingListener): Listening => {
-    worker.start();
+    start();
     nameAddress(hostnames, bound.host);
     if (!LOOPBACK_ADDRESSES.includes(bound.address)) reachable = true;
     bound.serveWith(http.fetch);
@@ -317,6 +353,7 @@ export function composeServer(options: ComposeOptions): UketsugiServer {
   return {
     fetch: (request) => http.fetch(request),
     takeOver,
+    start,
     async listen({ host = DEFAULT_HOST, port }) {
       return takeOver(await listen(http.fetch, bareAddress(host), port));
     },

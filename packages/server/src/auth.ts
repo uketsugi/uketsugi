@@ -138,6 +138,8 @@ export interface SignIn {
   loginOf(c: Context): DashboardLogin | null;
   /** Ends the login behind a request's cookie and clears the cookie. */
   end(c: Context): void;
+  /** Signs the browser of this request in as a person the caller has verified, and gives it the cookie. */
+  open(c: Context, caller: Caller): void;
   /**
    * Lets a request through as its cookie's person as they stand now, and sets `caller`. A request
    * that changes something must come from this server's own page and carry the session's CSRF value.
@@ -255,6 +257,8 @@ function cookieSessions({ secret, nowMs }: Sources): CookieSessions {
 export function createSignIn(
   ports: { clock: Clock; ids: IdGen },
   app: Pick<App, "signIn" | "current">,
+  /** What a key no person owns is told; the open edition's words where left out. */
+  refusal: () => ToolFailure = unknownKey,
 ): SignIn {
   const codes = new Map<string, { caller: Caller; expiresAt: Date }>();
   const fromOwnPage = csrf();
@@ -289,13 +293,14 @@ export function createSignIn(
       try {
         open(c, await app.signIn(key.trim()));
       } catch (error) {
-        if (error instanceof AuthError) return failed(c, unknownKey());
+        if (error instanceof AuthError) return failed(c, refusal());
         throw error;
       }
       return c.body(null, 204);
     },
     loginOf,
     end,
+    open,
     async cookieAuth(c, next) {
       const login = loginOf(c);
       const caller = login === null ? null : await app.current(login.caller);
