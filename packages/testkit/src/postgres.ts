@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { eventually } from "./eventually.ts";
 
 /** The test server's address; empty when none was given. */
 export const TEST_POSTGRES_URL = process.env.UKT_TEST_POSTGRES_URL ?? "";
@@ -42,7 +43,18 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   const url = new URL(TEST_POSTGRES_URL);
   url.pathname = `/${name}`;
   const drop = async (): Promise<void> => {
-    await onTestServer(`DROP DATABASE ${name} WITH (FORCE)`);
+    // A drop waits five seconds for the sessions on the database to end and is then refused ("is
+    // being accessed by other users"), so on a busy machine, where a closed connection can take
+    // longer than that to be ended, it fails or not by timing. Wait for the state a drop needs,
+    // no session left, and drop only then. A session that never ends is a store that was not
+    // closed: the wait names it, where a forced drop would hide it.
+    await eventually(async () => {
+      const rows = (await onTestServer(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = '${name}'`,
+      )) as { n: number }[];
+      if ((rows[0]?.n ?? 0) > 0) throw new Error(`${rows[0]?.n} sessions are still on ${name}`);
+    });
+    await onTestServer(`DROP DATABASE ${name}`);
   };
   return { name, url: url.href, drop };
 }

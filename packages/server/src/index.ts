@@ -1,5 +1,5 @@
 /** The server package: the one composition function, and the wiring of the server `ukt` runs. */
-export { composeServer, listenStarting, localUrl } from "./compose.ts";
+export { composeServer, listenStarting, localUrl, navigates } from "./compose.ts";
 export type {
   ComposeOptions,
   Edition,

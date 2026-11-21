@@ -86,15 +86,26 @@ export function digestLine(report: DigestReport): string {
 }
 
 /**
+ * What a server says while it runs, before and after its report: a line of words, or with `--json`
+ * a line `{"event": <what it is about>, "message": <the words>}`. The report is the one JSON line
+ * that has `ok`, so a reader of `--json` output tells the two apart.
+ */
+type Say = (line: string) => void;
+const sayTo =
+  (io: Io, json: boolean | undefined, event: "recovery" | "digest"): Say =>
+  (line) =>
+    io.out(json === true ? JSON.stringify({ event, message: line }) : line);
+
+/**
  * Prints what each reading did. A session that waits for the budget is told once until a reading
  * goes through again: every waiting session looks again twice an hour, and the line would repeat.
  */
-function tellDigests(io: Io): (report: DigestReport) => void {
+function tellDigests(say: Say): (report: DigestReport) => void {
   let waiting = false;
   return (report) => {
     if (report.waited && waiting) return;
     waiting = report.waited;
-    io.out(digestLine(report));
+    say(digestLine(report));
   };
 }
 
@@ -106,7 +117,7 @@ const RECOVERY_TELLS_EVERY_MS = 10_000;
  * and before the first sync, then where it has got to every ten seconds, then that it is done.
  * `stop` ends the telling, whatever came of the recovery.
  */
-function tellRecovery(io: Io): { tell: (progress: RecoveryProgress) => void; stop: () => void } {
+function tellRecovery(say: Say): { tell: (progress: RecoveryProgress) => void; stop: () => void } {
   let latest: RecoveryProgress | null = null;
   let timer: NodeJS.Timeout | undefined;
   const stop = (): void => clearInterval(timer);
@@ -114,17 +125,17 @@ function tellRecovery(io: Io): { tell: (progress: RecoveryProgress) => void; sto
     const first = latest === null;
     latest = progress;
     if (first) {
-      io.out(
+      say(
         "uketsugi is recovering its store after an unclean stop (a power cut, or a stop that was cut short). It answers meanwhile: `ukt doctor` shows how far it has got, and stopping it is safe.",
       );
       timer = setInterval(
-        () => io.out(`recovering: ${describeRecovery(latest ?? progress)}`),
+        () => say(`recovering: ${describeRecovery(latest ?? progress)}`),
         RECOVERY_TELLS_EVERY_MS,
       );
     }
     if (progress.phase !== "done") return;
     stop();
-    io.out(`recovered: ${describeRecovery(progress)}`);
+    say(`recovered: ${describeRecovery(progress)}`);
   };
   return { tell, stop };
 }
@@ -322,7 +333,7 @@ async function startServing(
   const held = home.givenToken ?? onFile;
   const model = await openModel(io, home);
   const { embedder } = model;
-  const recovery = tellRecovery(io);
+  const recovery = tellRecovery(sayTo(io, options.json, "recovery"));
   const server = await startLocalServer({
     ...storeOptions(home, store),
     onRecovery: recovery.tell,
@@ -336,7 +347,9 @@ async function startServing(
     hostKey: await ensureHostKey(home),
     taskLeaseMs,
     requireToken: told.requireToken,
-    ...(llm === null ? {} : { model: llm, onDigest: tellDigests(io) }),
+    ...(llm === null
+      ? {}
+      : { model: llm, onDigest: tellDigests(sayTo(io, options.json, "digest")) }),
   }).catch(async (error: unknown) => {
     recovery.stop();
     await embedder?.close();

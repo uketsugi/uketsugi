@@ -226,6 +226,11 @@ export async function listenStarting(options: StartingOptions): Promise<Starting
   return bound;
 }
 
+/** Whether a request is a browser's navigation to a page, as the dashboard is opened. */
+export function navigates(accept: string | undefined): boolean {
+  return accept?.includes("text/html") === true;
+}
+
 /**
  * Serves the dashboard's built files. A browser's navigation to a path that is no file gets
  * `index.html`, so a deep link opens the dashboard at that page; a missing script or image stays
@@ -248,7 +253,6 @@ function serveDashboard(http: Hono<AuthEnv>, webDir: string): void {
     path: "index.html",
     onFound: (_path, c) => c.header("Cache-Control", "no-cache"),
   });
-  const navigates = (accept: string | undefined) => accept?.includes("text/html") === true;
   http.get("*", (c, next) => (navigates(c.req.header("accept")) ? page(c, next) : next()));
 }
 

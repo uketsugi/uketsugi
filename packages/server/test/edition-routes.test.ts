@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   composeServer,
+  navigates,
   openLocalPorts,
   type Edition,
   type Pending,
@@ -177,5 +178,13 @@ describe("a dashboard key the server refuses", () => {
     expect(response.status).toBe(401);
     const said = (await response.json()) as { error: { what: string } };
     expect(said.error.what).toBe("hosted: no such key");
+  });
+});
+
+describe("navigates", () => {
+  test("is true for a browser's request for a page and false for anything else", () => {
+    expect(navigates("text/html,application/xhtml+xml,*/*;q=0.8")).toBe(true);
+    expect(navigates("application/json")).toBe(false);
+    expect(navigates(undefined)).toBe(false);
   });
 });

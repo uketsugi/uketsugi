@@ -45,13 +45,13 @@ interface Server {
 }
 
 /** `ukt serve` on a copy of the killed store, its port kept in the data directory's settings as `ukt setup` keeps it. */
-async function serving(dataDir: string, holdAll = true): Promise<Server> {
+async function serving(dataDir: string, holdAll = true, flags: string[] = []): Promise<Server> {
   const port = await unusedPort();
   await writeFile(
     join(dataDir, "settings.json"),
     JSON.stringify({ host: "127.0.0.1", port: String(port) }),
   );
-  const run = await held([CLI, "serve", "--data-dir", dataDir], holdAll);
+  const run = await held([CLI, "serve", "--data-dir", dataDir, ...flags], holdAll);
   return { run, url: `http://127.0.0.1:${port}`, dataDir };
 }
 
@@ -146,6 +146,37 @@ describe("ukt serve on a killed store", () => {
     const at = (start: string): number => lines.findIndex((line) => line.startsWith(start));
     expect(at("uketsugi is recovering")).toBeLessThan(at("recovered:"));
     expect(at("recovered:")).toBeLessThan(at("uketsugi is serving"));
+  });
+
+  test("with --json every line is JSON: the recovery is told as an event and the report is the one envelope; a stop with SIGTERM leaves the store clean", async () => {
+    const dataDir = await copyOf(killed);
+    const { run } = await serving(dataDir, false, ["--json"]);
+    run.release(everything);
+    await eventually(() => {
+      if (!run.lines.some((line) => line.includes('"mcp_url"'))) throw new Error("no report");
+    });
+    run.child.kill("SIGTERM");
+    await run.ended;
+
+    const parsed = run.lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const events = parsed.filter((line) => line["event"] !== undefined);
+    const reports = parsed.filter((line) => line["ok"] !== undefined);
+    expect(events.map((event) => event["event"])).toContain("recovery");
+    expect(String(events[0]?.["message"])).toContain("recovering its store after an unclean stop");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ ok: true, command: "serve" });
+    // The stop was SIGTERM and not a kill: the store was closed, so the next start has no recovery to tell.
+    const control = await readFile(join(dataDir, "pg", "global", "pg_control"));
+    expect(control.readUInt32LE(16)).toBe(1);
+
+    const next = await serving(dataDir, false, ["--json"]);
+    next.run.release(everything);
+    await eventually(() => {
+      if (!next.run.lines.some((line) => line.includes('"mcp_url"'))) throw new Error("no report");
+    });
+    next.run.child.kill("SIGTERM");
+    await next.run.ended;
+    expect(next.run.lines.filter((line) => line.includes('"event"'))).toEqual([]);
   });
 
   describe.each(["SIGTERM", "SIGINT"] as const)(
