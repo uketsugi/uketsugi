@@ -127,6 +127,9 @@ importers:
       '@uketsugi/core':
         specifier: workspace:*
         version: link:../core
+      '@uketsugi/embed':
+        specifier: workspace:*
+        version: link:../embed
       '@uketsugi/server':
         specifier: workspace:*
         version: link:../server
