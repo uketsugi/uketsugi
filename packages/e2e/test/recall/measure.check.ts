@@ -36,7 +36,16 @@ beforeAll(async () => {
 });
 
 function delivery(text: string, line: number, step = 1, via: "hook" | "tool" = "tool"): Delivered {
-  return { line, turn: 1, via, name: "mcp__uketsugi__search_facts", input: {}, text, step };
+  return {
+    line,
+    turn: 1,
+    via,
+    name: "mcp__uketsugi__search_facts",
+    input: {},
+    text,
+    step,
+    degraded: [],
+  };
 }
 
 const d12 = (ds: Delivered[], write: { step: number; line: number } | null) =>

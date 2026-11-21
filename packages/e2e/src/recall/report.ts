@@ -41,9 +41,15 @@ export interface CaseRecord {
   stored?: Stored | null;
   minutes?: number;
   tokens?: number;
+  /** Dollars at list price, from the same request log as `tokens`. */
+  usd?: number;
   model_step_usd?: number;
   error?: string;
   note?: string;
+  /** Search results of the case that were marked `no_model`; absent where the case was not scored from its transcripts. */
+  no_model?: number;
+  /** The needed cells of the item, which a treatment case that errors leaves unmeasured: they count as misses. */
+  expected?: number;
 }
 
 export interface Summary {
@@ -59,10 +65,17 @@ export interface Summary {
   delivered_chars: number | null;
   unneeded_records: number | null;
   errored: number;
+  /** Items of errored treatment cases whose needed cells the record does not say, so they could not be counted as misses. */
+  unmeasured: string[];
+  /** Search results marked `no_model` over the run: any makes it void, since the server matched words only. */
+  no_model: number;
+  /** Cases that were scored but never recorded whether their results were marked. */
+  unchecked: number;
 }
 
 export interface Totals {
   tokens: number;
+  usd: number;
   minutes: number;
   model_step_usd: number;
   sessions: number;
@@ -120,45 +133,85 @@ const mean = (values: readonly number[]): number | null =>
   values.length > 0 ? sum(values) / values.length : null;
 const pct = (x: number): number => Math.round(100 * x);
 
-/** Fills `recall`: per product and configuration, over the items whose control was clean (none of its draws recalled). */
-export function summarize(result: Result): Result {
-  const keys = [...new Set(result.cells.map(key))];
-  result.recall = {};
-  for (const k of keys) {
-    const control = controls(result, k);
-    const leftOut = Object.keys(control)
-      .filter((i) => (control[i]?.[0] ?? 0) > 0)
-      .sort();
-    const own = treatment(result, k);
-    const noControl = [...new Set(own.map((c) => c.item))].filter((i) => !(i in control)).sort();
-    const items = perItem(own, leftOut);
-    const hits = sum(Object.values(items).map((v) => v[0]));
-    const n = sum(Object.values(items).map((v) => v[1]));
-    const bounds = interval(items);
-    const mine = own.map((c) => c.recalled);
-    result.recall[k] = {
-      hits,
-      cells: n,
-      percent: n > 0 ? pct(hits / n) : null,
-      low: bounds ? pct(bounds[0]) : null,
-      high: bounds ? pct(bounds[1]) : null,
-      left_out: leftOut,
-      no_control: noControl,
-      per_item: items,
-      control,
-      delivered_chars:
-        mean(mine.map((m) => m.delivered_chars)) === null
-          ? null
-          : Math.round(mean(mine.map((m) => m.delivered_chars)) as number),
-      unneeded_records:
-        mean(mine.map((m) => m.unneeded_records)) === null
-          ? null
-          : Math.round((mean(mine.map((m) => m.unneeded_records)) as number) * 10) / 10,
-      errored: result.cases.filter((c) => key(c) === k && c.error !== undefined).length,
-    };
+/** The needed cells of the treatment cases that errored, as misses against their items; and the items of those whose cells were never counted. */
+function errorsAsMisses(
+  cases: readonly CaseRecord[],
+  skip: readonly string[],
+): { misses: Record<string, [number, number]>; unmeasured: string[] } {
+  const misses: Record<string, [number, number]> = {};
+  const unmeasured: string[] = [];
+  for (const c of cases.filter((x) => x.kind === "treatment" && x.error !== undefined)) {
+    if (skip.includes(c.item)) continue;
+    if (c.expected === undefined) unmeasured.push(c.item);
+    else misses[c.item] = [0, (misses[c.item]?.[1] ?? 0) + c.expected];
   }
+  return { misses, unmeasured: [...new Set(unmeasured)].sort() };
+}
+
+/** Item by item, the hits and cells of `a` and of `b` added. */
+function added(
+  a: Record<string, [number, number]>,
+  b: Record<string, [number, number]>,
+): Record<string, [number, number]> {
+  const out = { ...a };
+  for (const [item, [hits, n]] of Object.entries(b)) {
+    const [h0, n0] = out[item] ?? [0, 0];
+    out[item] = [h0 + hits, n0 + n];
+  }
+  return out;
+}
+
+/** One product and configuration's recall, over the items whose control was clean (none of its draws recalled). A treatment case that errored counts as misses against its item: the item set never depends on what errored. */
+function summaryOf(result: Result, k: string): Summary {
+  const control = controls(result, k);
+  const leftOut = Object.keys(control)
+    .filter((i) => (control[i]?.[0] ?? 0) > 0)
+    .sort();
+  const own = treatment(result, k);
+  const ownCases = result.cases.filter((c) => key(c) === k);
+  const ran = ownCases.filter((c) => c.kind === "treatment").map((c) => c.item);
+  const noControl = [...new Set(ran)].filter((i) => !(i in control)).sort();
+  const { misses, unmeasured } = errorsAsMisses(ownCases, leftOut);
+  const items = added(perItem(own, leftOut), misses);
+  const hits = sum(Object.values(items).map((v) => v[0]));
+  const n = sum(Object.values(items).map((v) => v[1]));
+  const bounds = interval(items);
+  const mine = own.map((c) => c.recalled);
+  const chars = mean(mine.map((m) => m.delivered_chars));
+  const unneeded = mean(mine.map((m) => m.unneeded_records));
+  return {
+    hits,
+    cells: n,
+    percent: n > 0 ? pct(hits / n) : null,
+    low: bounds ? pct(bounds[0]) : null,
+    high: bounds ? pct(bounds[1]) : null,
+    left_out: leftOut,
+    no_control: noControl,
+    per_item: items,
+    control,
+    delivered_chars: chars === null ? null : Math.round(chars),
+    unneeded_records: unneeded === null ? null : Math.round(unneeded * 10) / 10,
+    errored: ownCases.filter((c) => c.error !== undefined).length,
+    unmeasured,
+    no_model: sum(ownCases.map((c) => c.no_model ?? 0)),
+    unchecked: ownCases.filter((c) => c.error === undefined && c.no_model === undefined).length,
+  };
+}
+
+/** Fills `recall`: per product and configuration. */
+export function summarize(result: Result): Result {
+  const keys = [...new Set(result.cases.map(key))];
+  result.recall = Object.fromEntries(keys.map((k) => [k, summaryOf(result, k)]));
   return result;
 }
+
+/** Whether a run is to end with a failing exit: a case errored, or the run is void. */
+export const failed = (result: Result): boolean =>
+  result.cases.some((c) => c.error !== undefined) ||
+  Object.values(result.recall).some((v) => v.no_model > 0);
+
+const voidWords = (v: Summary): string =>
+  `${v.no_model} search results of this run were marked no_model: its server matched words only, so it is not a run of the product as shipped`;
 
 /** The first line of the output: recall, per product and configuration, then what to read it with. */
 export function headline(result: Result): string {
@@ -171,8 +224,12 @@ export function headline(result: Result): string {
         : "no cell measured");
     if (v.left_out.length > 0) line += `; left out, control above zero: ${v.left_out.join(", ")}`;
     if (v.no_control.length > 0) line += `; no control run: ${v.no_control.join(", ")}`;
-    if (v.errored > 0) line += `; ${v.errored} cases errored, not counted`;
-    lines.push(line);
+    if (v.errored > 0)
+      line += `; ${v.errored} cases errored (a treatment's cells count as misses; an item whose control errored has none)`;
+    if (v.unmeasured.length > 0)
+      line += `; errored cases of ${v.unmeasured.join(", ")} could not be counted (their record has no needed cells)`;
+    if (v.unchecked > 0) line += `; ${v.unchecked} cases never recorded whether the model was used`;
+    lines.push(v.no_model > 0 ? `VOID: ${voidWords(v)}\n${line}` : line);
   }
   const chars = Object.entries(result.recall).filter(([, v]) => v.delivered_chars);
   for (const [a, va] of chars) {
@@ -233,6 +290,7 @@ export function totals(result: Result): Record<string, Totals> {
   for (const r of [...result.cases, ...(result.superseded ?? [])]) {
     const t = (out[key(r)] ??= {
       tokens: 0,
+      usd: 0,
       minutes: 0,
       model_step_usd: 0,
       sessions: 0,
@@ -240,6 +298,7 @@ export function totals(result: Result): Record<string, Totals> {
       errored_attempts: 0,
     });
     t.tokens += r.tokens ?? 0;
+    t.usd += r.usd ?? 0;
     t.minutes += r.minutes ?? 0;
     t.model_step_usd += r.model_step_usd ?? 0;
     t.sessions += r.sessions ?? 0;
@@ -264,12 +323,40 @@ export function evidence(result: Result): string {
     .join("\n");
 }
 
+/** The items a run covers, whether or not its control was clean. */
+const itemsOf = (v: Summary): string[] => [...Object.keys(v.per_item), ...v.left_out].sort();
+
+/** Why two runs of a configuration cannot be set side by side, or undefined: one is void or never recorded whether it was, an errored case's cells are not recorded, or they cover different items. */
+function unsound(k: string, o: Summary, n: Summary): string | undefined {
+  const sides = [
+    ["earlier", o],
+    ["later", n],
+  ] as const;
+  for (const [side, v] of sides)
+    if (v.no_model > 0) return `${k}: refused, the ${side} run is void (${voidWords(v)})`;
+  for (const [side, v] of sides)
+    if (v.unmeasured.length > 0)
+      return `${k}: refused, the ${side} run has errored cases whose needed cells are not recorded, so its item set is not fixed: rescore it from its evidence first`;
+  const [mine, theirs] = [itemsOf(o), itemsOf(n)];
+  if (mine.join() !== theirs.join())
+    return `${k}: refused, the runs cover different items (earlier: ${mine.join(", ")}; later: ${theirs.join(", ")}): a headline over one set is not set beside one over another`;
+  for (const [side, v] of sides)
+    if (v.unchecked > 0)
+      return `${k}: refused, the ${side} run never recorded whether its results were marked no_model: rescore it from its evidence first`;
+  return undefined;
+}
+
 /** `now` against `old`, paired by item over the items that were clean in both, with the interval; "not shown" where it spans zero. The recall change leads. */
 export function compare(old: Result, now: Result): string {
   const lines: string[] = [];
   for (const [k, n] of Object.entries(now.recall)) {
     const o = old.recall[k];
     if (o === undefined) continue;
+    const refusal = unsound(k, o, n);
+    if (refusal !== undefined) {
+      lines.push(refusal);
+      continue;
+    }
     const skip = new Set([...o.left_out, ...n.left_out]);
     const keep = (v: Record<string, [number, number]>): PerItem =>
       Object.fromEntries(Object.entries(v).filter(([i]) => !skip.has(i)));
@@ -300,7 +387,7 @@ export function compare(old: Result, now: Result): string {
     const o = t0[k];
     if (o)
       lines.push(
-        `${k} tokens: ${o.tokens.toLocaleString("en-US")} -> ${t.tokens.toLocaleString("en-US")}; minutes: ${o.minutes.toFixed(0)} -> ${t.minutes.toFixed(0)}`,
+        `${k} tokens: ${o.tokens.toLocaleString("en-US")} -> ${t.tokens.toLocaleString("en-US")}; dollars: ${o.usd.toFixed(2)} -> ${t.usd.toFixed(2)}; minutes: ${o.minutes.toFixed(0)} -> ${t.minutes.toFixed(0)}`,
       );
   }
   return lines.join("\n") || "nothing in both";

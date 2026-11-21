@@ -16,7 +16,7 @@ export interface Task {
   readonly tests: readonly string[];
   readonly testCmd: readonly string[];
   /** Words said to the agent after this task passes. */
-  readonly sayAfterPass?: string;
+  readonly sayAfterTask?: string;
 }
 
 export interface ChainData {

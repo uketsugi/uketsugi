@@ -5,7 +5,7 @@
  * through this suite's environment or its files; the server's model calls go through a forwarder
  * that records their usage.
  */
-import { openSync } from "node:fs";
+import { appendFileSync, existsSync, openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -33,11 +33,60 @@ export interface RunningServer {
   stop(): Promise<void>;
 }
 
+/**
+ * Why a folder is not what `ukt setup` makes, or undefined when it is: the folder that directly holds
+ * `node_modules/` (the runtime) and `models/` (the model), which is where the server looks
+ * (`packages/embed/src/catalog.ts`, `layout`). The folder above it is not a model directory, and a
+ * server given that one starts, serves, and matches words only.
+ */
+export function modelDirProblem(dir: string): string | undefined {
+  const missing = ["node_modules", "models"].filter((name) => !existsSync(join(dir, name)));
+  return missing.length === 0
+    ? undefined
+    : `${dir} does not hold ${missing.join(" and ")}: the model directory is the folder \`ukt setup\` makes, which holds node_modules/ and models/ itself`;
+}
+
+/** What the server's JSON report says, found among the lines it prints: it may say something else first (it recovers a store after an unclean stop, in a sentence). */
+function reportOf(line: string): { mcpUrl: string; model: string | null } | undefined {
+  try {
+    const data = (JSON.parse(line) as { data?: { mcp_url?: unknown; model?: unknown } }).data;
+    if (typeof data?.mcp_url !== "string") return undefined;
+    return { mcpUrl: data.mcp_url, model: typeof data.model === "string" ? data.model : null };
+  } catch {
+    return undefined;
+  }
+}
+
+/** How long a server may say its model is still loading. */
+const LOADING_SECONDS = 120;
+
+/**
+ * What the server says is left out of its answers, once its model has settled: the `degraded` list of
+ * `GET /api/capabilities` (`no_model`, `embedder_unavailable`, or `embedder_loading` while the check
+ * runs), empty when the model loaded. Undefined when it is empty. Each answer is written to the server's log, which a case keeps.
+ */
+async function degradedBy(origin: string, log: string): Promise<string[] | undefined> {
+  const until = Date.now() + LOADING_SECONDS * 1000;
+  for (;;) {
+    const said = (await (await fetch(`${origin}/api/capabilities`)).json()) as {
+      degraded?: string[];
+    };
+    const degraded = said.degraded ?? [];
+    appendFileSync(log, `suite: /api/capabilities degraded=${JSON.stringify(degraded)}\n`);
+    const loading = degraded.length === 1 && degraded[0] === "embedder_loading";
+    if (degraded.length === 0) return undefined;
+    if (!loading || Date.now() > until) return degraded;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 /** The key file is sourced, its GEMINI_API_KEY exported as UKT_LLM_KEY, and the server exec'd. */
 const WITH_KEY =
   '. "$1"; export UKT_LLM_KEY="${GEMINI_API_KEY:?no GEMINI_API_KEY in the key file}"; shift; exec "$@"';
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
+  const problem = modelDirProblem(options.modelDir);
+  if (problem !== undefined) throw new Error(problem);
   await mkdir(options.dataDir, { recursive: true });
   const ukt = join(options.releaseHome, ".local", "bin", "ukt");
   const serve = [ukt, "serve", "--port", String(options.port), "--json"];
@@ -62,14 +111,35 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const exited = once(child, "close").then(() => {
     throw new Error(`the server exited before it listened (see ${options.log})`);
   });
-  const [first] = (await Promise.race([once(lines, "line"), exited])) as [string];
-  lines.on("line", () => undefined);
-  const started = JSON.parse(first) as { data?: { mcp_url?: string } };
-  const mcpUrl = started.data?.mcp_url;
-  if (mcpUrl === undefined) throw new Error(`the server's first line has no mcp_url: ${first}`);
+  // Every line is read, so that the pipe never fills; the first that is the report is the start.
+  const reported = new Promise<NonNullable<ReturnType<typeof reportOf>>>((resolve) => {
+    lines.on("line", (line) => {
+      const report = reportOf(line);
+      if (report !== undefined) resolve(report);
+    });
+  });
+  const started = await Promise.race([reported, exited]);
+  if (started.model === null) {
+    await stop(child);
+    throw new Error(
+      `the server loaded no embedding model from ${options.modelDir}, so its search would match words only: this is not the product as shipped (see ${options.log})`,
+    );
+  }
+  const degraded = await degradedBy(new URL(started.mcpUrl).origin, options.log).catch(
+    async (error: unknown) => {
+      await stop(child);
+      throw error;
+    },
+  );
+  if (degraded !== undefined) {
+    await stop(child);
+    throw new Error(
+      `the server says its answers are degraded (${degraded.join(", ")}), so its search is not the product as shipped (see ${options.log})`,
+    );
+  }
   return {
-    port: Number(new URL(mcpUrl).port),
-    mcpUrl,
+    port: Number(new URL(started.mcpUrl).port),
+    mcpUrl: started.mcpUrl,
     stop: () => stop(child),
   };
 }

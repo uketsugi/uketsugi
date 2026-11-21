@@ -27,6 +27,8 @@ export interface Delivery {
   readonly input: Record<string, unknown>;
   /** The decoded records, one a line. */
   readonly text: string;
+  /** What the product said was left out of a tool result (`degraded` in a search's answer, such as `no_model`); none for a hook. */
+  readonly degraded: readonly string[];
 }
 
 export interface ToolCall {
@@ -122,6 +124,22 @@ export function decode(raw: unknown): string[] {
   return [...strings(raw)];
 }
 
+/** What a tool result's JSON says is `degraded`: the answer was made without something, such as the model. */
+function degradedOf(raw: unknown): string[] {
+  const texts = typeof raw === "string" ? [raw] : blocksOf(raw).map((b) => str(b["text"]));
+  for (const text of texts) {
+    try {
+      const answer = JSON.parse(text) as unknown;
+      const degraded = isObject(answer) ? answer["degraded"] : undefined;
+      if (Array.isArray(degraded))
+        return degraded.filter((x): x is string => typeof x === "string");
+    } catch {
+      // not JSON: it says nothing was left out
+    }
+  }
+  return [];
+}
+
 function initOf(event: Json): Init {
   return {
     model: str(event["model"]) || null,
@@ -165,7 +183,8 @@ class Reader {
     records: string[],
   ): void {
     const text = records.join("\n");
-    if (text.trim() !== "") this.deliveries.push({ line, turn: this.turn, via, name, input, text });
+    if (text.trim() !== "")
+      this.deliveries.push({ line, turn: this.turn, via, name, input, text, degraded: [] });
   }
 
   private system(line: number, event: Json): void {
@@ -209,6 +228,7 @@ class Reader {
         name: call.name,
         input: call.input,
         text: decode(block["content"]).join("\n"),
+        degraded: degradedOf(block["content"]),
       });
     }
   }

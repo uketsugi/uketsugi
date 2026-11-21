@@ -121,7 +121,7 @@ export async function scoreCase(
   out: string,
   key: CaseKey,
   scoring: Scoring,
-): Promise<{ cells: Cell[]; stored: Stored | null }> {
+): Promise<{ cells: Cell[]; stored: Stored | null; no_model: number }> {
   const chain = await load<CaseChain>(out, "chain.json");
   const arm = await load<{ memory: { call: string[]; tool_search?: string; touch: string[] } }>(
     out,
@@ -139,6 +139,16 @@ export async function scoreCase(
   const item = scoring.items[key.item];
   if (item === undefined) throw new Error(`no item ${key.item}`);
   const cells: Cell[] = [];
+  const delivered = new Map<string, Delivered[]>();
+  for (const id of new Set(rows.map((r) => r.session)))
+    delivered.set(
+      id,
+      await deliveriesOf(
+        out,
+        rows.filter((r) => r.session === id),
+        spec,
+      ),
+    );
   for (const s of chain.sessions.filter((x) => x.role === "probe")) {
     const task = s.steps[0]?.task as string;
     const mine = rows.filter((r) => r.session === s.id);
@@ -146,14 +156,7 @@ export async function scoreCase(
       const p = scoring.items[i] ? patternOf(scoring.items[i]) : undefined;
       return p === undefined ? [] : [p];
     });
-    const result = recalled(
-      await deliveriesOf(out, mine, spec),
-      writeOf(mine),
-      item,
-      seed,
-      needed,
-      boiler,
-    );
+    const result = recalled(delivered.get(s.id) ?? [], writeOf(mine), item, seed, needed, boiler);
     const full = scoring.mode === "full" && key.kind === "treatment";
     cells.push({
       ...key,
@@ -171,30 +174,6 @@ export async function scoreCase(
   return {
     cells,
     stored: key.kind === "treatment" ? stored(plant, scoring.seedClaims, item) : null,
+    no_model: [...delivered.values()].flat().filter((d) => d.degraded.includes("no_model")).length,
   };
-}
-
-/** Tokens of a case's transcripts (input, cache writes and reads, output), from each step's result event. */
-export async function tokensOf(out: string): Promise<number> {
-  let total = 0;
-  for (const name of await readdir(join(out, "transcripts"))) {
-    if (!name.endsWith(".jsonl")) continue;
-    for (const line of (await readFile(join(out, "transcripts", name), "utf8")).split("\n")) {
-      try {
-        const d = JSON.parse(line) as { type?: string; usage?: Record<string, number> };
-        if (d.type === "result") {
-          for (const k of [
-            "input_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-            "output_tokens",
-          ])
-            total += d.usage?.[k] ?? 0;
-        }
-      } catch {
-        // not an event
-      }
-    }
-  }
-  return total;
 }

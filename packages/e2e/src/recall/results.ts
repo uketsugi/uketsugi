@@ -9,7 +9,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { scoreCase, type CaseKey, type Scoring } from "./evidence.ts";
 import { FORMAT, summarize, totals, type CaseRecord, type Cell, type Result } from "./report.ts";
+import { probeTasks } from "./items.ts";
 import { caseName } from "./runner.ts";
+import { spendOf } from "./spend.ts";
 
 const keyOf = (r: {
   product: string;
@@ -58,6 +60,9 @@ async function rescoreCase(
   const record: CaseRecord & { cells?: Cell[] } = { ...r };
   delete record.cells;
   delete record.stored;
+  const item = scoring.items[r.item];
+  if (item !== undefined && r.kind === "treatment") record.expected = probeTasks(item).length;
+  if (existsSync(join(out, "requests.jsonl"))) Object.assign(record, await spendOf(out));
   if (record.setup === undefined && existsSync(join(out, "results.json"))) {
     const kept = JSON.parse(await readFile(join(out, "results.json"), "utf8")) as {
       sessions: Record<string, { setup?: unknown }>;
@@ -79,8 +84,12 @@ async function rescoreCase(
   return record;
 }
 
-/** The result of an earlier run measured again from the evidence it kept. Writes `result.rescored.json` in its folder. */
-export async function rescore(folder: string, scoring: Scoring): Promise<Result> {
+/** The result of an earlier run measured again from the evidence it kept. Writes `result.rescored.json` in its folder, or in `into`. */
+export async function rescore(
+  folder: string,
+  scoring: Scoring,
+  into: string = folder,
+): Promise<Result> {
   const old = await readResult(folder);
   const records = [];
   for (const r of old.cases) records.push(await rescoreCase(folder, old, scoring, r));
@@ -88,7 +97,7 @@ export async function rescore(folder: string, scoring: Scoring): Promise<Result>
     Object.entries(old).filter(([k]) => !["cells", "cases", "recall", "totals"].includes(k)),
   );
   const result = assemble(settings, records);
-  await writeFile(join(folder, "result.rescored.json"), JSON.stringify(result, null, 1));
+  await writeFile(join(into, "result.rescored.json"), JSON.stringify(result, null, 1));
   return result;
 }
 

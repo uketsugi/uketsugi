@@ -22,20 +22,31 @@ export interface RunOptions {
   readonly mode: "quick" | "full";
   readonly gap: number;
   readonly repeat: number;
+  /** The number of the first repeat: a later round of the same arm is numbered on from the earlier. */
+  readonly repeatFrom: number;
+  /** Whether each item's control is run (it is run once, in the arm's first round). */
+  readonly control: boolean;
   readonly jobs: number;
   readonly out: string;
   readonly compare?: string;
 }
 
 export function jobsOf(options: RunOptions): Job[] {
-  const treatments = Array.from({ length: options.repeat }, (_, repeat) =>
+  const treatments = Array.from({ length: options.repeat }, (_, n) =>
     options.configs.flatMap((config) =>
-      options.items.map((item) => ({ config, item, kind: "treatment" as const, repeat })),
+      options.items.map((item) => ({
+        config,
+        item,
+        kind: "treatment" as const,
+        repeat: options.repeatFrom + n,
+      })),
     ),
   ).flat();
-  const controls = options.configs.flatMap((config) =>
-    options.items.map((item) => ({ config, item, kind: "control" as const, repeat: 0 })),
-  );
+  const controls = options.control
+    ? options.configs.flatMap((config) =>
+        options.items.map((item) => ({ config, item, kind: "control" as const, repeat: 0 })),
+      )
+    : [];
   return [...treatments, ...controls];
 }
 
@@ -77,8 +88,14 @@ export async function runSuite(
   await mkdir(join(options.out, "cases"), { recursive: true });
   const jobs = jobsOf(options);
   const planned =
-    sessionCount(items, prepared.chain, options.items, options.gap, options.repeat) *
-    options.configs.length;
+    sessionCount(
+      items,
+      prepared.chain,
+      options.items,
+      options.gap,
+      options.repeat,
+      options.control,
+    ) * options.configs.length;
   console.log(`planned: ${jobs.length} cases, about ${planned} sessions (a report, not a cap)`);
   const started = Date.now();
   const records = await pool(jobs, options.jobs, (job) => runCase(suite, job));

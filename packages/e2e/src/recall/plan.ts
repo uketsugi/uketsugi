@@ -13,7 +13,7 @@ import { needs, probeTasks, type Item, type Items } from "./items.ts";
 export const CONTROL_DRAWS = 3;
 export const DEFAULT_GAP = 2;
 
-export type PlanStep = { task: string } | { reset: string } | { say_after_pass: string };
+export type PlanStep = { task: string } | { reset: string } | { say_after_task: string };
 
 export interface SessionPlan {
   id: string;
@@ -26,14 +26,14 @@ export interface SessionPlan {
   kill_after?: "write";
 }
 
-/** The plant session's steps: the tasks where the item is met, a reset to each later one's parent, and the words said after a task passes. */
+/** The plant session's steps: the tasks where the item is met, a reset to each later one's parent, and the words said after a task, whether or not it passed: a plant has to be said, or the item is not in the store and no product could recall it. */
 export function plantSteps(item: Item, chain: ChainData): PlanStep[] {
   return item.plant.flatMap((task, n): PlanStep[] => {
-    const say = chain.tasks[task]?.sayAfterPass;
+    const say = chain.tasks[task]?.sayAfterTask;
     return [
       ...(n > 0 ? [{ reset: task }] : []),
       { task },
-      ...(say === undefined ? [] : [{ say_after_pass: say }]),
+      ...(say === undefined ? [] : [{ say_after_task: say }]),
     ];
   });
 }
@@ -109,20 +109,21 @@ export function caseChain(
   };
 }
 
-/** How many sessions a run will start: each treatment `repeat` times and each item's control once. */
+/** How many sessions a run will start: each treatment `repeat` times and, unless `control` is off, each item's control once. */
 export function sessionCount(
   items: Items,
   chain: ChainData,
   names: readonly string[],
   gap: number,
   repeat: number,
+  control: boolean,
 ): number {
   return names.reduce((total, n) => {
     const item = items[n] as Item;
     return (
       total +
       repeat * caseSessions(item, chain, "quick", gap, false).length +
-      caseSessions(item, chain, "quick", gap, true).length
+      (control ? caseSessions(item, chain, "quick", gap, true).length : 0)
     );
   }, 0);
 }

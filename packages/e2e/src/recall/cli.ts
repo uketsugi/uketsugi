@@ -1,6 +1,6 @@
 /**
  * `pnpm --filter @uketsugi/e2e recall -- [--product uketsugi] [--config activate] [--model haiku]
- *   [--items D1,D5] [--quick|--full] [--gap 2] [--repeat 1] [--jobs 6] [--compare <result.json>]
+ *   [--items D1,D5] [--quick|--full] [--gap 2] [--repeat 1] [--repeat-from 0] [--no-control] [--jobs 6] [--compare <result.json>]
  *   [--ergo <url|path>] [--out <dir>]`
  * `recall --rescore <results folder>` measures an earlier run again from the evidence it kept, with no session.
  * `recall --merge <first folder> <second folder> ...` completes a run with later ones.
@@ -44,14 +44,15 @@ import { validatePatterns } from "./measure.ts";
 import { DEFAULT_GAP } from "./plan.ts";
 import { prepare } from "./prepare.ts";
 import { preflight } from "./preflight.ts";
-import { headline, table } from "./report.ts";
+import { failed, headline, table } from "./report.ts";
 import { merge, rescore } from "./results.ts";
+import { modelDirProblem } from "./server.ts";
 import { report, runSuite, type RunOptions } from "./suite.ts";
 import { Workspace } from "./workspace.ts";
 
 const USAGE = [
   "usage: recall [--product uketsugi] [--config activate] [--model haiku] [--items D1,D5] [--quick|--full]",
-  "              [--gap 2] [--repeat 1] [--jobs 6] [--compare <result.json>] [--ergo <url|path>] [--out <dir>]",
+  "              [--gap 2] [--repeat 1] [--repeat-from 0] [--no-control] [--jobs 6] [--compare <result.json>] [--ergo <url|path>] [--out <dir>]",
   "              [--model-dir <dir>] [--llm-key-file <file>]",
   "       recall --rescore <results folder>",
   "       recall --merge <first folder> <second folder> ...",
@@ -70,6 +71,8 @@ const OPTIONS = {
   full: { type: "boolean" },
   gap: { type: "string" },
   repeat: { type: "string" },
+  "repeat-from": { type: "string" },
+  "no-control": { type: "boolean" },
   jobs: { type: "string" },
   compare: { type: "string" },
   ergo: { type: "string" },
@@ -185,6 +188,8 @@ async function run(values: Values): Promise<void> {
     throw new Error(
       "the embedding model: pass --model-dir or set UKT_MODEL_DIR (a directory `ukt setup` made)",
     );
+  const problem = modelDirProblem(modelDir);
+  if (problem !== undefined) throw new Error(`the embedding model: ${problem}`);
   const chain = await loadChain();
   const tools = await preflight({ sessions: true });
   const jobs = integer(values.jobs, 6, "jobs");
@@ -195,6 +200,8 @@ async function run(values: Values): Promise<void> {
     mode: scoring.mode as "quick" | "full",
     gap: integer(values.gap, DEFAULT_GAP, "gap"),
     repeat: Math.max(1, integer(values.repeat, 1, "repeat")),
+    repeatFrom: integer(values["repeat-from"], 0, "repeat-from"),
+    control: values["no-control"] !== true,
     jobs: Math.min(6, Math.max(1, jobs)),
     out:
       values.out ??
@@ -224,7 +231,7 @@ async function run(values: Values): Promise<void> {
     };
     const result = await runSuite(options, prepared, context, tools, items, scoring);
     await report(result, items, options.out, options.compare);
-    if (result.cases.some((c) => c.error !== undefined)) process.exitCode = 1;
+    if (failed(result)) process.exitCode = 1;
   });
 }
 

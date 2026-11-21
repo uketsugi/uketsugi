@@ -9,14 +9,15 @@ import { join } from "node:path";
 import type { Adapter, AdapterContext } from "./adapter.ts";
 import { Case, PROJECT } from "./case.ts";
 import { excludeBuildOutputs, makeTree, resetTree, type ChainData, type Rebuilt } from "./chain.ts";
-import { scoreCase, tokensOf, type Scoring } from "./evidence.ts";
+import { scoreCase, type Scoring } from "./evidence.ts";
 import { judge, type JudgeContext } from "./judge.ts";
-import type { Items } from "./items.ts";
+import { probeTasks, type Item, type Items } from "./items.ts";
 import type { Tools } from "./preflight.ts";
 import { caseChain, type SessionPlan } from "./plan.ts";
 import type { CaseRecord, Cell } from "./report.ts";
 import { treeStatus } from "./firstwrite.ts";
 import type { SessionResult } from "./session.ts";
+import { spendOf } from "./spend.ts";
 import { modelStepUsd } from "./uketsugi.ts";
 
 export interface Suite {
@@ -62,7 +63,7 @@ const writeJson = (path: string, value: unknown): Promise<void> =>
   writeFile(path, JSON.stringify(value, null, 1));
 
 /** One session's running state: where its tree is, what it has said so far, and which step it is on. */
-interface Running {
+export interface Running {
   readonly c: Case;
   readonly suite: Suite;
   readonly plan: SessionPlan;
@@ -109,32 +110,31 @@ async function step(
   return result;
 }
 
-/** A task's steps: the task, then follow-ups while its hidden tests fail. Returns whether the task passed, or undefined if the session was ended at its first write. */
-async function task(run: Running, name: string): Promise<boolean | undefined> {
+/** A task's steps: the task, then follow-ups while its hidden tests fail, or until the session is ended at its first write. */
+async function task(run: Running, name: string): Promise<void> {
   const { c, suite, plan } = run;
   let prompt = (suite.chain.tasks[name] as { prompt: string }).prompt;
   for (let attempt = 0; attempt <= suite.chain.maxFollowups; attempt++) {
     const result = await step(run, attempt === 0 ? "task" : "followup", prompt, name);
-    if (result.killed) return undefined;
+    if (result.killed) return;
     const judged = await judge(suite.judge, name, run.tree);
     await mkdir(join(c.dir, "judge"), { recursive: true });
     await writeJson(join(c.dir, "judge", `${plan.id}.${name}.${attempt}.json`), judged);
-    if (judged.passed) return true;
+    if (judged.passed) return;
     prompt = suite.chain.followup;
   }
-  return false;
 }
 
-async function steps(run: Running): Promise<void> {
+/** The steps of a session in order. What the person says after a task is said whether or not the task passed. */
+export async function steps(run: Running): Promise<void> {
   const { suite, plan } = run;
   const row = suite.adapter.session(run.config);
   if (row.firstMessage !== undefined) await step(run, "activate", row.firstMessage, null);
-  let last: boolean | undefined;
   for (const x of plan.steps) {
     if ("reset" in x)
       await resetTree(suite.rebuilt, suite.rebuilt.parent[x.reset] as string, run.tree);
-    else if ("task" in x) last = await task(run, x.task);
-    else if (last === true) await step(run, "say", x.say_after_pass, null);
+    else if ("task" in x) await task(run, x.task);
+    else await step(run, "say", x.say_after_task, null);
   }
 }
 
@@ -186,7 +186,14 @@ export async function runCase(suite: Suite, job: Job): Promise<CaseOutcome> {
     kind: job.kind,
     repeat: job.repeat,
   } as const;
-  const record: CaseOutcome = { ...key, model: suite.adapterContext.model, cells: [] };
+  const record: CaseOutcome = {
+    ...key,
+    model: suite.adapterContext.model,
+    cells: [],
+    ...(job.kind === "treatment"
+      ? { expected: probeTasks(suite.items[job.item] as Item).length }
+      : {}),
+  };
   const started = Date.now();
   let c: Case | undefined;
   try {
@@ -233,7 +240,7 @@ async function keep(c: Case, name: string, suite: Suite, record: CaseOutcome): P
   try {
     for (const file of KEPT)
       await cp(join(c.dir, file), join(dest, file), { recursive: true }).catch(() => undefined);
-    record.tokens = await tokensOf(c.dir).catch(() => 0);
+    Object.assign(record, await spendOf(c.dir).catch(() => ({})));
     if (c.serving.modelStep !== undefined)
       record.model_step_usd = Math.round(modelStepUsd(c.serving.modelStep) * 1e4) / 1e4;
   } finally {

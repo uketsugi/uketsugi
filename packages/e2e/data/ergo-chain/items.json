@@ -40,7 +40,7 @@
         "benchtests/test_t12_clean_slate.py::test_the_founder_is_told_network_staff_and_the_reason_not_who"
       ]
     },
-    "pattern": "network staff"
+    "pattern": "\\bfounders?\\b[^.\\n]{0,60}\\b(?:says?|told|tells?|sees?|shown?|describes?|calls?|names?)\\b[^.\\n]{0,40}[\\\"“`']?network staff|\\b(?:tell|show|say|name|call|refer|describe|present|display)\\w*\\b[^.\\n]{0,40}\\bfounders?\\b[^.\\n]{0,40}[\\\"“`']network staff|^(?=[^.\\n]*\\bfounders?\\b)[^.\\n]*[\\\"“`']network staff[\\\"“`'][^.\\n]{0,40}\\b(?:not|never|instead of|rather than)\\b[^.\\n]{0,30}\\b(?:account|operator|staff member|who)\\b"
   },
   "D4": {
     "kind": "person",
@@ -63,7 +63,7 @@
   },
   "D5": {
     "kind": "reversal",
-    "statement": "Expiry defaults: 60 days and a 7-day warning (T6 prompt), then 90 and 14 (said after T8 passes: 'whoever next works on expiry should make those the defaults').",
+    "statement": "Expiry defaults: 60 days and a 7-day warning (T6 prompt), then 90 and 14 (said after T8, whether or not it passed: 'whoever next works on expiry should make those the defaults').",
     "plant": ["T6", "T8"],
     "gap": ["T5", "T10"],
     "tests": {
@@ -100,11 +100,11 @@
         "benchtests/test_t12_clean_slate.py::test_the_founders_notice_is_in_the_house_style"
       ]
     },
-    "pattern": "(start|begin)\\w*[^.\\n]{0,40}\\[#[A-Za-z]+\\]|(?-i:\\[#Channel\\])"
+    "pattern": "\\b(?:unsolicited|own[- ]initiative|on its own (?:initiative|accord)|unprompted|unrequested|without being (?:asked|prompted)|uninvited|house style|not (?:in|as) (?:an? )?(?:answer|reply|response) to a command)\\b[^.\\n]{0,240}(?:square brackets|bracketed|\\[#\\w+\\]|\\[<[^>\\]]*channel[^>\\]]*>\\])|(?:square brackets|bracketed|\\[#\\w+\\]|\\[<[^>\\]]*channel[^>\\]]*>\\])[^.\\n]{0,240}\\b(?:unsolicited|own[- ]initiative|on its own (?:initiative|accord)|unprompted|unrequested|without being (?:asked|prompted)|uninvited|house style|not (?:in|as) (?:an? )?(?:answer|reply|response) to a command)\\b"
   },
   "D8": {
     "kind": "probe",
-    "statement": "The server cuts every line it sends at 512 bytes, with no error: long text a user typed (greeting, reason, note, history entry) must go out as several NOTICEs.",
+    "statement": "The server cuts every line it sends at 512 bytes, with no error: long text a user typed (greeting, reason, note, history entry) must go out as several NOTICEs. A record counts when it says the cutting (of lines the server sends), or that long text must be split into several NOTICEs because of it; a record that only says a greeting is split to fit the limit does not.",
     "plant": ["T1"],
     "gap": ["T5", "T10"],
     "tests": {
@@ -113,7 +113,7 @@
       "T7": ["benchtests/test_t7_info.py::test_a_long_greeting_is_shown_whole"],
       "T11": ["benchtests/test_t11_report.py::test_a_long_note_is_shown_whole_in_the_report"]
     },
-    "pattern": "(512|line limit|too long|MaxLineLen).{0,80}(several|multiple|separate|split).{0,30}NOTICE|(several|multiple|separate|split).{0,30}NOTICEs?.{0,80}(512|line limit|too long|MaxLineLen)|(cut|truncat\\w*).{0,40}512|512.{0,60}(cut|truncat|silently)|(outgoing|sent|we send|a service sends).{0,60}512"
+    "pattern": "\\b(?:outgoing|server[- ](?:generated|sent|originated)|server lines|lines (?:are )?sent|(?:we|the server|ergo|a service)\\s+(?:sends?|writes?|emits?))\\b[^.\\n]{0,120}\\b(?<!rather than )(?:truncat\\w*|cut|clipped)\\b|\\blines? (?:we|the server|a service|ergo) (?:sends?|writes?)\\b[^.\\n]{0,60}\\b(?<!rather than )(?:truncat\\w*|cut|clipped)\\b|^(?!.*\\b(?:incoming|inbound|client input|client lines?|from (?:an? |the )?clients?)\\b)(?=.*(?:512|510|MaxLineLen|line limit|byte limit|line length)).*?\\b(?<!rather than )(?:truncat\\w*|cuts?)\\b[^.\\n]{0,80}\\bwhen (?:sending|sent|serializing|writing)\\b|\\b(?<!rather than )(?:truncat\\w*|cut|clipped)\\b[^.\\n]{0,70}\\bon (?:the )?(?:wire|send)\\b|\\b(?<!rather than )truncat\\w*\\b[^.\\n]{0,40}\\boutgoing\\b|^(?!.*\\b(?:incoming|inbound|client input|client lines?|from (?:an? |the )?clients?)\\b).*?\\b(?:library|serializer)\\b[^.\\n]{0,30}\\b(?:truncat\\w*|cuts?)\\b[^.\\n]{0,60}(?:512|510|MaxLineLen|line limit|byte limit|line length)|\\b(?:the server|ergo|a service|we)\\s+(?:truncat\\w*|cuts?|clips?)\\b[^.\\n]{0,60}\\b(?:sends?|sent|writes?|emits?)\\b|^(?!.*\\b(?:incoming|inbound|client input|client lines?|from (?:an? |the )?clients?)\\b).*?\\blines?\\b[^.\\n]{0,40}\\b(?:is|are|gets?)\\s+(?:silently\\s+)?(?:cut|truncat\\w*|clipped)\\b[^.\\n]{0,30}\\b(?:at|to|past|over|beyond)\\b[^.\\n]{0,20}(?:512|510|MaxLineLen|line limit|byte limit|line length)|^(?=.*\\b(?:truncat\\w*|cut|clipped|silently)\\b).*?\\bsplits?\\b[^.\\n]{0,60}\\b(?:several|multiple|separate)\\s+NOTICEs?\\b[^.\\n]{0,100}(?:512|510|MaxLineLen|line limit|byte limit|line length)"
   },
   "D12": {
     "kind": "probe",
@@ -140,6 +140,6 @@
         "benchtests/test_t12_clean_slate.py::test_the_operators_notice_names_the_founder_as_registered"
       ]
     },
-    "pattern": "AccountName\\(\\)|as (it was )?registered|\\.Name\\b.{0,30}LoadAccount|LoadAccount.{0,30}\\.Name|name (as|exactly as) (it was )?registered|registered (spelling|case)"
+    "pattern": "\\bAccountName\\(\\)|\\bLoadAccount\\([^)]*\\)\\.Name\\b|\\b(?:account|founder)s?(?:'s)? names?\\b[^.\\n]{0,60}\\b(?:as|exactly as) (?:it was )?registered\\b|\\b(?:as|exactly as) (?:it was )?registered\\b[^.\\n]{0,40}\\b(?:account|founder)\\b|\\bregistered (?:spelling|capitali[sz]ation)\\b"
   }
 }
