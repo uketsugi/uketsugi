@@ -44,6 +44,9 @@ export interface CaseRecord {
   /** Dollars at list price, from the same request log as `tokens`. */
   usd?: number;
   model_step_usd?: number;
+  /** Stops that killed the server (it had not gone in the product's time), and starts that recovered a store; absent where the case did not count them. */
+  killed_stops?: number;
+  recovered_starts?: number;
   error?: string;
   note?: string;
   /** Search results of the case that were marked `no_model`; absent where the case was not scored from its transcripts. */
@@ -81,6 +84,8 @@ export interface Totals {
   sessions: number;
   errors: number;
   errored_attempts: number;
+  killed_stops: number;
+  recovered_starts: number;
 }
 
 export interface Result {
@@ -213,6 +218,12 @@ export const failed = (result: Result): boolean =>
 const voidWords = (v: Summary): string =>
   `${v.no_model} search results of this run were marked no_model: its server matched words only, so it is not a run of the product as shipped`;
 
+/** What a run says of the stops that killed its server and the starts that recovered a store: nothing when there were none. */
+const uncleanWords = (t: Totals | undefined): string =>
+  t === undefined || t.killed_stops + t.recovered_starts === 0
+    ? ""
+    : `; ${t.killed_stops} stops killed the server and ${t.recovered_starts} starts recovered a store (it was cut off between sessions)`;
+
 /** The first line of the output: recall, per product and configuration, then what to read it with. */
 export function headline(result: Result): string {
   const lines: string[] = [];
@@ -229,6 +240,7 @@ export function headline(result: Result): string {
     if (v.unmeasured.length > 0)
       line += `; errored cases of ${v.unmeasured.join(", ")} could not be counted (their record has no needed cells)`;
     if (v.unchecked > 0) line += `; ${v.unchecked} cases never recorded whether the model was used`;
+    line += uncleanWords(result.totals?.[k]);
     lines.push(v.no_model > 0 ? `VOID: ${voidWords(v)}\n${line}` : line);
   }
   const chars = Object.entries(result.recall).filter(([, v]) => v.delivered_chars);
@@ -296,6 +308,8 @@ export function totals(result: Result): Record<string, Totals> {
       sessions: 0,
       errors: 0,
       errored_attempts: 0,
+      killed_stops: 0,
+      recovered_starts: 0,
     });
     t.tokens += r.tokens ?? 0;
     t.usd += r.usd ?? 0;
@@ -304,6 +318,8 @@ export function totals(result: Result): Record<string, Totals> {
     t.sessions += r.sessions ?? 0;
     t.errors += Number(r.error !== undefined && result.cases.includes(r));
     t.errored_attempts += Number(r.error !== undefined);
+    t.killed_stops += r.killed_stops ?? 0;
+    t.recovered_starts += r.recovered_starts ?? 0;
   }
   return out;
 }

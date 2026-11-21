@@ -69,3 +69,16 @@ describe("a run with such results", () => {
     expect(failed(sound)).toBe(false);
   });
 });
+
+describe("a run whose server was cut off between sessions", () => {
+  test("says in its headline how many stops killed it and how many starts recovered a store, and says nothing of a clean run", () => {
+    const cut = resultOf([
+      measured("W1", 1, 2, { killed_stops: 2, recovered_starts: 1 }),
+      measured("W2", 1, 2, { killed_stops: 1, recovered_starts: 0 }),
+    ]);
+    const clean = resultOf([measured("W1", 1), measured("W2", 1)]);
+
+    expect(headline(cut)).toMatch(/3 stops killed the server and 1 starts recovered a store/);
+    expect(headline(clean)).not.toMatch(/killed the server/);
+  });
+});

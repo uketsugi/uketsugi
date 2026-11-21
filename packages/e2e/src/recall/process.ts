@@ -82,14 +82,30 @@ export async function run(
   return finished;
 }
 
-/** Ends a child's whole group, and waits until the child has gone. */
-export async function stop(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+/** How long `stop` waits for a child to go before it kills it: what a person's `ukt` is given (`STOP_SECONDS`). */
+const STOP_WITHIN_MS = 10_000;
+
+/**
+ * Ends a child's whole group, and waits until the child has gone: for `withinMs`, and then kills it.
+ * Says whether it had to kill it.
+ */
+export async function stop(
+  child: ChildProcess,
+  signal: NodeJS.Signals = "SIGTERM",
+  withinMs = STOP_WITHIN_MS,
+): Promise<{ killed: boolean }> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null)
+    return { killed: false };
   const gone = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  let killed = false;
   killGroup(child, signal);
-  const timer = setTimeout(() => killGroup(child, "SIGKILL"), 10_000);
+  const timer = setTimeout(() => {
+    killed = true;
+    killGroup(child, "SIGKILL");
+  }, withinMs);
   await gone;
   clearTimeout(timer);
+  return { killed };
 }
 
 function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {

@@ -4,7 +4,7 @@
  * back before each later one, then the case scored from the evidence it left (`evidence.ts`). A case
  * never throws: an error is its record, with the evidence it got as far as keeping.
  */
-import { appendFile, cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Adapter, AdapterContext } from "./adapter.ts";
 import { Case, PROJECT } from "./case.ts";
@@ -17,6 +17,7 @@ import { caseChain, type SessionPlan } from "./plan.ts";
 import type { CaseRecord, Cell } from "./report.ts";
 import { treeStatus } from "./firstwrite.ts";
 import type { SessionResult } from "./session.ts";
+import { uncleanOf } from "./server.ts";
 import { spendOf } from "./spend.ts";
 import { modelStepUsd } from "./uketsugi.ts";
 
@@ -234,7 +235,12 @@ export async function runCase(suite: Suite, job: Job): Promise<CaseOutcome> {
 }
 
 /** Copies the evidence to the results, then stops the case and removes what is big. */
-async function keep(c: Case, name: string, suite: Suite, record: CaseOutcome): Promise<void> {
+export async function keep(
+  c: Case,
+  name: string,
+  suite: Suite,
+  record: CaseOutcome,
+): Promise<void> {
   const dest = join(suite.resultsDir, "cases", name);
   await mkdir(dest, { recursive: true });
   try {
@@ -245,6 +251,9 @@ async function keep(c: Case, name: string, suite: Suite, record: CaseOutcome): P
       record.model_step_usd = Math.round(modelStepUsd(c.serving.modelStep) * 1e4) / 1e4;
   } finally {
     await c.close().catch(() => undefined);
+    const unclean = uncleanOf(await readFile(join(c.dir, "server.log"), "utf8").catch(() => ""));
+    record.killed_stops = unclean.killed;
+    record.recovered_starts = unclean.recovered;
     for (const big of ["trees", "session-homes", "snapshots", "data"]) {
       await rm(join(c.dir, big), { recursive: true, force: true });
     }
