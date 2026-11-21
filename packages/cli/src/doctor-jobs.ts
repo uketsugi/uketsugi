@@ -1,6 +1,7 @@
 /** What `ukt doctor` says of the jobs the server holds and of its embedding model, as the server tells them. */
 import type { JobCounts } from "@uketsugi/core";
 import type { Finding } from "./doctor.ts";
+import { restartOf } from "./service.ts";
 
 export const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -53,8 +54,7 @@ export function serverModelFindings(
   start: string,
   server: { degraded: string[]; jobs: JobCounts | null },
 ): Finding[] {
-  const restart =
-    start === "ukt serve" ? "restart `ukt serve`" : start.replace(" start ", " restart ");
+  const restart = restartOf(start);
   const found: Finding[] = [];
   if (server.degraded.includes("embedder_unavailable"))
     found.push({

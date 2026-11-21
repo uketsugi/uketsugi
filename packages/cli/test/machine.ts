@@ -149,9 +149,11 @@ async function standIn(dataDir: string, port: number): Promise<{ close(): Promis
       const answer =
         asked.pathname === "/api/host-proof"
           ? { proof: hostProof(key.trim(), challenge) }
-          : asked.pathname === "/api/connect"
-            ? connectInfo(url, null, false)
-            : { jsonrpc: "2.0", id: 1, result: { tools: [{ name: "search_facts" }] } };
+          : asked.pathname === "/api/capabilities"
+            ? { degraded: [] }
+            : asked.pathname === "/api/connect"
+              ? connectInfo(url, null, false)
+              : { jsonrpc: "2.0", id: 1, result: { tools: [{ name: "search_facts" }] } };
       response.setHeader("content-type", "application/json").end(JSON.stringify(answer));
     });
   });

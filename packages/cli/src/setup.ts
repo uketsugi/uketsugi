@@ -30,7 +30,14 @@ import { CliFailure, type Io, type Report } from "./report.ts";
 import { llmOptions } from "./llm.ts";
 import { leaseMs, numberOf } from "./serve.ts";
 import { connectLines } from "./harness-lines.ts";
-import { connect, connectInfo, projects, toolsListed, whoAnswers } from "./server-client.ts";
+import {
+  capabilities,
+  connect,
+  connectInfo,
+  projects,
+  toolsListed,
+  whoAnswers,
+} from "./server-client.ts";
 import {
   LEFT_OUT,
   llmPart,
@@ -42,6 +49,7 @@ import {
   type Part,
   type SetupOptions,
 } from "./setup-parts.ts";
+import { restartOf, serviceState, startCommand } from "./service.ts";
 import { uninstallVerb } from "./uninstall.ts";
 
 /** Label and lines as two columns: the label once, the lines under each other. A label too long for its column has a line of its own. */
@@ -178,25 +186,27 @@ async function carryOut(
 async function lastCheck(
   home: Home,
   origin: string,
-): Promise<{ done: Done; info: ConnectInfo | null }> {
+): Promise<{ done: Done; info: ConnectInfo | null; degraded: readonly string[] }> {
   if ((await whoAnswers(home, origin)) !== "own")
-    return { done: { lines: ["not running"], state: SKIPPED }, info: null };
+    return { done: { lines: ["not running"], state: SKIPPED }, info: null, degraded: [] };
   try {
     const server = await connect(home);
     const info = await connectInfo(server);
     await toolsListed(server, info);
     await projects(server);
+    const { degraded } = await capabilities(server);
     return {
       done: {
         lines: ["answers, lists its tools as a harness sees them, and reads its store"],
         state: RUNNING,
       },
       info,
+      degraded,
     };
   } catch (error) {
     if (!(error instanceof CliFailure)) throw error;
     const done = { lines: [`answers, but: ${error.failure.what}`], state: "failed" };
-    return { done: { ...done, failure: error.failure }, info: null };
+    return { done: { ...done, failure: error.failure }, info: null, degraded: [] };
   }
 }
 
@@ -210,11 +220,12 @@ async function survey(
 ): Promise<Part[]> {
   const { changed } = await settingsWith(home, toldOf(options));
   const llm = await llmPart(io, env, home, options);
+  const model = await modelPart(io, home, options.model);
   return [
-    await modelPart(io, home, options.model),
+    model,
     llm,
-    // A service in place runs the settings and the language model it started with.
-    await servicePart(io, env, home, options, origin, changed || llm.pending),
+    // A service in place runs the settings, the language model and the embedding model it started with.
+    await servicePart(io, env, home, options, origin, changed || llm.pending || model.pending),
   ];
 }
 
@@ -259,7 +270,14 @@ export async function setup(
   await ensureHostKey(home);
   const done = await carryOut(io, options, parts, chosen);
   const ended = (id: string): Done => done.get(id) ?? { lines: [], state: SKIPPED };
-  const { done: checked, info } = await lastCheck(home, origin);
+  const { done: checked, info, degraded } = await lastCheck(home, origin);
+  // A server that started before the model was installed has none until it starts again.
+  const modelUnused =
+    ["installed", "present"].includes(ended("model").state) && degraded.includes("no_model")
+      ? [
+          `is running without the model it now has, so search matches words only: ${restartOf(startCommand(await serviceState(io, env), home))}`,
+        ]
+      : [];
   const onFile = (await readTokenFile(home)) !== null;
   const tokenText = onFile
     ? `${home.tokenFile}${madeToken ? " (created)" : ""}`
@@ -287,7 +305,7 @@ export async function setup(
       ...column("language model", ended("llm").lines),
       `server URL      ${origin}/mcp`,
       ...outside.flatMap((part) => column(part.label, ended(part.id).lines)),
-      ...column("server", checked.lines),
+      ...column("server", [...checked.lines, ...modelUnused]),
       ...nextLines(options, serviceStanding(ended("service")), info),
     ],
     failure: [...parts.map((part) => ended(part.id).failure), checked.failure].find(

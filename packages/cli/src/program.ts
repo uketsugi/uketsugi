@@ -1,8 +1,9 @@
 /** What a file of verbs is handed to add its verbs to `ukt`, and the options several verbs share. */
-import { DEFAULT_HOST, DEFAULT_PORT, word } from "@uketsugi/server";
+import { word } from "@uketsugi/server";
 import { Option, type Command } from "commander";
-import { readSettings, type Home, type Settings } from "./home.ts";
+import { readSettings, type Home } from "./home.ts";
 import type { Io, Report } from "./report.ts";
+import { SERVING, SERVING_KEYS, type Serving } from "./settings.ts";
 
 export interface Program {
   readonly io: Io;
@@ -18,43 +19,30 @@ export interface Program {
 }
 
 /**
- * How a server is told to run, by the verb that starts one and the verb that sets one up: the
- * settings but for where the store is, which is named once. None has a default here. `ukt setup`
- * keeps the ones it is given, and `ukt serve` starts with what it is told, else what was kept,
- * else what is built in (`servingOf`).
+ * How a server is told to run, by the verb that starts one and the verb that sets one up
+ * (`settings.ts` has the table). None has a default here. `ukt setup` keeps the ones it is given,
+ * and `ukt serve` starts with what it is told, else what was kept, else what is built in
+ * (`servingOf`).
  */
-export type Serving = Omit<Settings, "databaseUrl">;
+export type { Serving };
+
+const names = (value: string, earlier: string[] = []): string[] => [
+  ...earlier,
+  ...value.split(",").filter((name) => name.trim() !== ""),
+];
 
 export function serving(command: Command): Command {
-  const names = (value: string, earlier: string[] = []): string[] => [
-    ...earlier,
-    ...value.split(",").filter((name) => name.trim() !== ""),
-  ];
-  return command
-    .addOption(new Option("--host <host>", "the address to listen on").env("UKT_HOST"))
-    .addOption(new Option("--port <port>", "the port to listen on").env("UKT_PORT"))
-    .addOption(
-      new Option("--allowed-host <name...>", "a name the server is reached by, besides localhost")
-        .env("UKT_ALLOWED_HOSTS")
-        .argParser(names),
-    )
-    .addOption(
-      new Option("--task-lease-minutes <minutes>", "how long a claimed task is held").env(
-        "UKT_TASK_LEASE_MINUTES",
-      ),
-    )
-    .addOption(
-      new Option(
-        "--require-token",
-        "take no harness without a token, this machine's own included",
-      ).env("UKT_REQUIRE_TOKEN"),
-    );
+  for (const key of SERVING_KEYS) {
+    const { option, about, env, kind } = SERVING[key];
+    const added = new Option(option, about).env(env);
+    command.addOption(kind === "names" ? added.argParser(names) : added);
+  }
+  return command;
 }
 
 /** What a verb was told of how the server runs, and nothing else of its options. */
 export function toldOf(options: Serving): Serving {
-  const { host, port, allowedHost, taskLeaseMinutes, requireToken } = options;
-  return { host, port, allowedHost, taskLeaseMinutes, requireToken };
+  return Object.fromEntries(SERVING_KEYS.map((key) => [key, options[key]]));
 }
 
 /** How the server on a data directory runs: what the verb is told, else what set-up kept, else what is built in. */
@@ -63,13 +51,13 @@ export async function servingOf(
   told: Serving,
 ): Promise<Serving & { readonly host: string; readonly port: string }> {
   const kept = await readSettings(home);
-  return {
-    host: told.host ?? kept.host ?? DEFAULT_HOST,
-    port: told.port ?? kept.port ?? String(DEFAULT_PORT),
-    allowedHost: told.allowedHost ?? kept.allowedHost,
-    taskLeaseMinutes: told.taskLeaseMinutes ?? kept.taskLeaseMinutes,
-    requireToken: told.requireToken ?? kept.requireToken,
-  };
+  const chosen = Object.fromEntries(
+    SERVING_KEYS.map((key) => {
+      const { fallback } = SERVING[key] as { readonly fallback?: string };
+      return [key, told[key] ?? kept[key] ?? fallback];
+    }),
+  );
+  return chosen as Serving & { readonly host: string; readonly port: string };
 }
 
 /** Where the host's store is, for the verbs that open it: needed once, when a host is first set up on a PostgreSQL server. */

@@ -165,6 +165,11 @@ export function serves(state: ServiceState, home: Home): boolean {
   return state.text !== null && state.text.includes(`${servedBy(home)}\n`);
 }
 
+/** What starts the server again, given what starts it: the same words, as a restart. */
+export function restartOf(start: string): string {
+  return start === "ukt serve" ? "restart `ukt serve`" : start.replace(" start ", " restart ");
+}
+
 /** What starts the server of this data directory: its service where it has one, else the verb. */
 export function startCommand(state: ServiceState, home: Home): string {
   if (!serves(state, home)) return "ukt serve";

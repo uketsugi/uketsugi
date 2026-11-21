@@ -1,11 +1,13 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { SERVER_NAME } from "@uketsugi/server";
 import { doctor, type Finding } from "../src/doctor.ts";
+import { resolveHome } from "../src/home.ts";
 import { token } from "../src/host-verbs.ts";
 import type { Report } from "../src/report.ts";
 import { serve, type Serving } from "../src/serve.ts";
+import { servingNow } from "../src/server-client.ts";
 import { setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { account, Machine } from "./machine.ts";
@@ -227,6 +229,14 @@ describe("a server that runs as the service", () => {
     const { dataDir, machine, env, io } = await served();
     const snapshot = String((await backup({ dataDir }, env)).data["file"]);
     const notOne = join(dataDir, "token");
+    // `ukt` takes a server that does not answer within a few seconds for none, and a server of this
+    // test's own process answers late while it is busy: restore is asked only once it answers.
+    await vi.waitFor(
+      async () => expect(await servingNow(resolveHome(dataDir, env))).not.toBeNull(),
+      {
+        timeout: 60_000,
+      },
+    );
 
     const restored = await restore(io(), snapshot, { dataDir, yes: true }, env);
     const failed = await restore(io(), notOne, { dataDir, yes: true }, env).catch(

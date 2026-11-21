@@ -14,6 +14,7 @@ import { BACKUPS_DIR } from "@uketsugi/store";
 import writeFileAtomic from "write-file-atomic";
 import { xdgData } from "xdg-basedir";
 import { CliFailure } from "./report.ts";
+import { SERVING, SERVING_KEYS, type ServingKey, type Serving } from "./settings.ts";
 
 export interface Home {
   readonly dataDir: string;
@@ -53,24 +54,14 @@ export interface ServerRecord {
  * no flags and no shell, so nothing a person chose may live only in a command they typed. A key
  * is here once it was given; one that is not falls back to what is built in.
  */
-export interface Settings {
+export type Settings = Serving & {
   /**
    * Where the store is when it is not in the data directory itself:
    * `postgres://user:password@host:port/database`. It holds a password, so the file is the
    * person's alone. A host's store is named once, for good (`host-store.ts`).
    */
   readonly databaseUrl?: string;
-  /** The address to listen on: `--host`. */
-  readonly host?: string;
-  /** The port to listen on, as it was typed: `--port`. */
-  readonly port?: string;
-  /** The names the server is reached by besides the loopback ones: `--allowed-host`. */
-  readonly allowedHost?: readonly string[];
-  /** How long a claimed task is held, in minutes, as it was typed: `--task-lease-minutes`. */
-  readonly taskLeaseMinutes?: string;
-  /** Every caller sends a token, this machine's own harnesses included: `--require-token`. */
-  readonly requireToken?: boolean;
-}
+};
 
 /** Where 0.1.0 recorded the address of a store on a PostgreSQL server: read still, never written. */
 const STORE_FILE_OF_0_1_0 = "store.json";
@@ -154,17 +145,22 @@ async function settingsIn(path: string): Promise<Settings> {
       meaning: "It says how this host's server runs and where its store is, so nothing was done.",
       next: "Put the file back from a copy, or move it away and run `ukt setup` again with the options this host was set up with.",
     });
-  const typed = (key: keyof Settings): string | undefined =>
-    typeof kept[key] === "string" ? kept[key] : undefined;
-  const listed = (key: keyof Settings): unknown[] | undefined =>
-    Array.isArray(kept[key]) ? (kept[key] as unknown[]) : undefined;
+  const read = (key: ServingKey): [ServingKey, unknown][] => {
+    const value = kept[key];
+    switch (SERVING[key].kind) {
+      case "text":
+        return typeof value === "string" ? [[key, value]] : [];
+      case "names":
+        return Array.isArray(value)
+          ? [[key, value.filter((name): name is string => typeof name === "string")]]
+          : [];
+      case "flag":
+        return value === true ? [[key, true]] : [];
+    }
+  };
   return {
-    databaseUrl: typed("databaseUrl"),
-    host: typed("host"),
-    port: typed("port"),
-    allowedHost: listed("allowedHost")?.filter((name): name is string => typeof name === "string"),
-    taskLeaseMinutes: typed("taskLeaseMinutes"),
-    requireToken: kept.requireToken === true ? true : undefined,
+    ...(typeof kept.databaseUrl === "string" ? { databaseUrl: kept.databaseUrl } : {}),
+    ...Object.fromEntries(SERVING_KEYS.flatMap(read)),
   };
 }
 
@@ -178,8 +174,11 @@ export async function readSettings(home: Home): Promise<Settings> {
 
 /** Settings as one line of JSON, their keys in one order: how they are written and compared. */
 function written(settings: Settings): string {
-  const { databaseUrl, host, port, allowedHost, taskLeaseMinutes, requireToken } = settings;
-  return JSON.stringify({ databaseUrl, host, port, allowedHost, taskLeaseMinutes, requireToken });
+  return JSON.stringify(
+    Object.fromEntries(
+      ["databaseUrl", ...SERVING_KEYS].map((key) => [key, settings[key as keyof Settings]]),
+    ),
+  );
 }
 
 /** What would be kept with `given` added, a key left out staying as it was, and whether that changes how the server is set to run. */
