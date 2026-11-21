@@ -31,7 +31,10 @@ describe("golden ranking: what a search must and must not return", () => {
 
   beforeAll(async () => {
     plain = await openLocalPorts({});
-    modelled = await openLocalPorts({ embedder: new FakeEmbedder() });
+    const embedder = new FakeEmbedder();
+    modelled = await openLocalPorts({ embedder });
+    // What a server's first pass of the worker does: the store takes the model whose vectors it will hold.
+    await modelled.ports.store.jobs.embedMissing(embedder.model, clock.now());
   });
   afterAll(() => Promise.all([plain.close(), modelled.close()]));
 

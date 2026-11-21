@@ -79,6 +79,8 @@ async function publishAll(
     answerOf.set(id, answer);
   }
   await runJobs(ports);
+  // A store keeps a vector only under its recorded model, which a server with a model records at its start.
+  if (vectors === "recorded") await ports.store.jobs.embedMissing(set.embedder.model, new Date());
   for (const [id, answer] of answerOf) {
     const fact = await ports.store.facts.get(scope, id);
     if (fact === null || fact.status === "superseded") {
@@ -88,7 +90,10 @@ async function publishAll(
     const stored =
       recorded === undefined
         ? fact.embedded
-        : await ports.store.facts.setVector(scope.orgId, id, fact.contentHash, recorded);
+        : await ports.store.facts.setVector(scope.orgId, id, fact.contentHash, {
+            model: set.embedder.model,
+            vector: recorded,
+          });
     if (!stored && vectors !== "none") {
       throw new Error(`answer ${answer.id} was left without a vector`);
     }

@@ -16,7 +16,7 @@ import {
   type SearchRepo,
 } from "@uketsugi/core";
 import { sql, type RawBuilder } from "kysely";
-import { live, Repo, scoped, toHalfvec, uuidsOf } from "./codec.ts";
+import { live, Repo, scoped, uuidsOf, vectorUnder } from "./codec.ts";
 
 /** The query's lexemes, as the same analyzer that built `facts.tsv` reads them. */
 function lexemesOf(query: SearchQuery): RawBuilder<string[]> {
@@ -35,10 +35,6 @@ function pool(query: SearchQuery): RawBuilder<boolean> {
   return sql<boolean>`${scoped(query.scope, "f")} and f.project = ${query.project} and ${live("f")}`;
 }
 
-function embeddingOf(query: SearchQuery): string | null {
-  return query.embedding === null ? null : toHalfvec(query.embedding);
-}
-
 export class SqlSearch extends Repo implements SearchRepo {
   /**
    * One scan of the pool for three passes. Each fact yields one (pass, score) pair per pass it
@@ -54,7 +50,7 @@ export class SqlSearch extends Repo implements SearchRepo {
         select l.lexemes as q_lexemes,
                (select string_agg(quote_literal(x), ' | ') from unnest(l.lexemes) x)::tsquery as q_any,
                (select string_agg(quote_literal(x) || ':AB', ' | ') from unnest(l.lexemes) x)::tsquery as q_own,
-               ${embeddingOf(query)}::halfvec as q_emb
+               ${vectorUnder(query.embedding)} as q_emb
         from l
       ),
       held as (
@@ -109,7 +105,7 @@ export class SqlSearch extends Repo implements SearchRepo {
     const ids = uuidsOf(factIds);
     if (ids.length === 0) return [];
     const found = await sql<CandidateRow>`
-      with t as (select ${lexemesOf(query)} as lexemes, ${embeddingOf(query)}::halfvec as embedding)
+      with t as (select ${lexemesOf(query)} as lexemes, ${vectorUnder(query.embedding)} as embedding)
       select f.id as fact_id, (1 - (f.vector <=> t.embedding))::float8 as cosine,
              ${coverage(sql`t.lexemes`)} as lexeme_coverage, f.status, f.author, f.updated_at,
              exists (select 1 from flags g

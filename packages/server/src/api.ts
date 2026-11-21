@@ -98,7 +98,7 @@ const onThisMachine = ipRestriction(getConnInfo, { allowList: [...LOOPBACK_ADDRE
 /** The routes that sign a request in by their own means: nobody, or the cookie alone. */
 function signInRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   const { app, ports, signIn, edition } = deps;
-  api.get("/capabilities", (c) => c.json(capabilityDescriptor(edition, app, ports)));
+  api.get("/capabilities", async (c) => c.json(await capabilityDescriptor(edition, app, ports)));
   api.get("/session", signIn.cookieAuth, (c) => {
     const login = signIn.loginOf(c);
     if (login === null) return failed(c, unauthorized());

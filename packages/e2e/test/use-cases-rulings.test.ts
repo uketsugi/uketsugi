@@ -94,7 +94,10 @@ describeUseCases("merges, reverts and redaction", (w) => {
         idents: [],
         ...tuning,
       };
-      const [row] = await w.store.search.candidates({ ...asked, embedding: vector }, [id]);
+      const [row] = await w.store.search.candidates(
+        { ...asked, embedding: vector === null ? null : { model: embedder.model, vector } },
+        [id],
+      );
       return row?.cosine;
     };
     expect((await factOf(third)).citations).toHaveLength(3);
@@ -182,7 +185,11 @@ describeUseCases("merges, reverts and redaction", (w) => {
       query: "zyzzyva signs exports",
       idents: ["zyzzyva"],
     };
-    const hits = await w.store.search.passes({ ...query, embedding: vector ?? null, ...tuning });
+    const hits = await w.store.search.passes({
+      ...query,
+      embedding: vector === undefined ? null : { model: embedder.model, vector },
+      ...tuning,
+    });
     expect(hits.map((row) => row.factId)).not.toContain(fact.id);
     expect(hits.map((row) => row.factId)).not.toContain(earlier.id);
     const listed = await w.store.facts.list(w.scope, { project: PROJECT, limit: 500 });

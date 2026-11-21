@@ -1,6 +1,6 @@
 /** The write use cases: a publish, a correction, the limits, a session's note and the follow-up jobs. */
 import { LIMITS } from "@uketsugi/contracts";
-import { createWorker } from "@uketsugi/core";
+import { createWorker, type Embedder } from "@uketsugi/core";
 import { targetOf } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { CLIENT, describeUseCases, PROJECT } from "./use-case-world.ts";
@@ -207,6 +207,65 @@ describeUseCases("the write use cases", (w) => {
     expect(await worker.drain()).toBeGreaterThan(0);
     expect(await factOf(id)).toMatchObject({ embedded: true });
     expect(await takeJobs(id)).toEqual([]);
+  });
+
+  test("a store whose vectors another model made is embedded again by a server with this one", async () => {
+    const { id } = await publish("Webhook signatures use the shared secret of the endpoint");
+    await createWorker(portsWith(embedder)).drain();
+    expect(await factOf(id)).toMatchObject({ embedded: true });
+
+    // The next start has another model: its first pass sets the old vectors aside, then embeds again.
+    const other: Embedder = {
+      model: "another-model",
+      dims: embedder.dims,
+      embed: (texts) => embedder.embed(texts),
+    };
+    const worker = createWorker(portsWith(other));
+    await w.store.jobs.embedMissing(other.model, clock.now());
+    expect(await factOf(id)).toMatchObject({ embedded: false });
+    expect(await worker.drain()).toBeGreaterThan(0);
+    expect(await factOf(id)).toMatchObject({ embedded: true });
+    // The suite's store goes back to the model the other tests use.
+    await w.store.jobs.embedMissing(embedder.model, clock.now());
+  });
+
+  test("a server whose model is not the store's gives up an embed job at once, naming both models", async () => {
+    await publish("Queues drain in the order the events were taken");
+    const failures: { message: string; dead: boolean }[] = [];
+    const worker = createWorker(portsWith(embedder), {
+      onFailure: (_job, error, dead) => failures.push({ message: String(error), dead }),
+    });
+    await worker.drain();
+    // Another server, of another model, starts later and takes the store: it owes every fact a vector.
+    await w.store.jobs.embedMissing("another-model", clock.now());
+    await worker.drain();
+    expect(failures.length).toBeGreaterThan(0);
+    for (const failure of failures) {
+      expect(failure.dead).toBe(true);
+      expect(failure.message).toContain(`"${embedder.model}"`);
+      expect(failure.message).toContain('"another-model"');
+    }
+    // The suite's store goes back to the model the other tests use.
+    await w.store.jobs.embedMissing(embedder.model, clock.now());
+  });
+
+  test("a citation sent back as the server showed it is stored as the citation it showed, whatever its repository", async () => {
+    const lib = "github.com/other/lib";
+    const first = await publish("Retries follow the library's policy", [
+      "src/hooks.ts:5-9",
+      { kind: "pull_request", repo: lib, number: 42 },
+      { kind: "file", repo: lib, path: "src/policy.ts", lines: "3" },
+      { kind: "web", url: "https://example.com/policy", quote: "five attempts" },
+      { kind: "person", who: "Priya", at: "last week" },
+    ]);
+    const shown = (await plain("search_facts", { id: first.id })).facts[0]?.citations ?? [];
+    expect(shown.map((entry) => entry.ref)).toContain(`${lib} pull request 42`);
+
+    const again = await publish("Hooks retry as the library does", shown);
+    const stored = (await factOf(again.id)).citations.map((entry) => entry.citation);
+    expect(stored).toEqual((await factOf(first.id)).citations.map((entry) => entry.citation));
+    expect(stored).toContainEqual({ kind: "pull_request", repo: lib, number: 42 });
+    expect(stored).toContainEqual({ kind: "file", repo: lib, path: "src/policy.ts", lines: "3" });
   });
 
   test("a job that keeps failing waits longer each time and then is dead, and a held claim expires", async () => {

@@ -9,6 +9,7 @@
  * admitted. It is part of what the fact's vector is made from, so it can admit it by meaning.
  */
 import type { ReadScope, Status } from "./domain.ts";
+import type { ModelVector } from "./ports.ts";
 
 /** One stream of candidates. */
 export type SearchPass = "keyword" | "identifier" | "trigram" | "vector";
@@ -23,8 +24,11 @@ export interface SearchQuery {
   readonly query: string;
   /** Normalized identifiers found in the query, for the identifier pass. */
   readonly idents: readonly string[];
-  /** The query's vector; null skips the vector pass, and the result says so. */
-  readonly embedding: Float32Array | null;
+  /**
+   * The query's vector and the id of the model that made it; null skips the vector pass, and the
+   * result says so. A store whose vectors were made by another model skips it too.
+   */
+  readonly embedding: ModelVector | null;
   /** The vector pass keeps facts at or above this cosine. */
   readonly vectorCutoff: number;
   /** A fact that has a vector enters the keyword pass only when its own text holds at least this share of the query's lexemes. */

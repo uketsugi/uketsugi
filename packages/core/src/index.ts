@@ -15,6 +15,7 @@ export type {
   IdGen,
   Identity,
   ModelAnswer,
+  ModelVector,
   ModelRunner,
 } from "./ports.ts";
 export { createApp, UnknownToolError } from "./app.ts";

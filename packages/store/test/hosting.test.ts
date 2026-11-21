@@ -79,7 +79,9 @@ describe("backup and restore", () => {
     scope = scopeOf(owner);
     kept = await publishSample(source, owner, 1);
     const hash = (await source.facts.get(scope, kept))?.contentHash ?? "";
-    await source.facts.setVector(owner.orgId, kept, hash, new Float32Array(384).fill(0.05));
+    await source.jobs.embedMissing("model-a", new Date());
+    const vector = new Float32Array(384).fill(0.05);
+    await source.facts.setVector(owner.orgId, kept, hash, { model: "model-a", vector });
     asWritten = await source.facts.get(scope, kept);
     // The snapshot is taken while the unit that publishes `later` is open, before it commits.
     later = await publishSample(source, owner, 2, async () => {
@@ -169,7 +171,7 @@ describe("a store that a newer version opens", () => {
   /** What a later version adds to today's migrations: one that makes a table. */
   const newer = {
     ...MIGRATIONS,
-    "0005_next": {
+    "0005_test_only_next": {
       async up(db: Parameters<typeof migrate>[0]) {
         await sql`create table next_thing (id int)`.execute(db);
       },
@@ -191,7 +193,7 @@ describe("a store that a newer version opens", () => {
     expect(await migrationState(engine.db, newer)).toMatchObject({ pending: [] });
     expect(await engine.db.selectFrom("facts").select("id").execute()).toEqual([{ id: kept }]);
     await engine.close();
-    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0005_next.tgz"]);
+    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0005_test_only_next.tgz"]);
   });
 
   test("keeps the snapshots of its three newest upgrades, and every file that is not one", async () => {

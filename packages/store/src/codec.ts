@@ -2,6 +2,7 @@
 import {
   isUuid,
   type Actor,
+  type ModelVector,
   type ReadScope,
   type RunnerKind,
   type UnitTarget,
@@ -79,6 +80,13 @@ export function uuidsOf(values: readonly string[]): string[] {
 
 export function toBytes(hex: string): Uint8Array {
   return Buffer.from(hex, "hex");
+}
+
+/** A vector as a column takes it: the halfvec, or null unless the store's recorded model is the vector's. */
+export function vectorUnder(vector: ModelVector | null): RawBuilder<string | null> {
+  if (vector === null) return sql`null::halfvec`;
+  return sql`(case when (select model from embedding_model) = ${vector.model}
+                   then ${toHalfvec(vector.vector)}::halfvec end)`;
 }
 
 /** A vector in the text form a halfvec column takes. */

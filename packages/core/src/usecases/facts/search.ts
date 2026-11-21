@@ -8,7 +8,7 @@ import { embedWithin, liveHeads, scopeOf, type CallContext, type Outcome } from 
 import type { Fact } from "../../domain.ts";
 import { factViews } from "../../facts/views.ts";
 import { invalidInput } from "../../failure.ts";
-import type { CorePorts } from "../../ports.ts";
+import type { CorePorts, ModelVector } from "../../ports.ts";
 import type { SearchQuery } from "../../search-port.ts";
 import { ranksByFact, SEARCH_PROFILE } from "../../search/fusion.ts";
 import { confidenceOf, rankCandidates, type RankedCandidate } from "../../search/standing.ts";
@@ -52,7 +52,7 @@ async function byId(ports: CorePorts, ctx: Asker, id: string): Promise<SearchOut
 async function embedQuery(
   ports: CorePorts,
   text: string,
-): Promise<{ vector: Float32Array | null; degraded: string[] }> {
+): Promise<{ vector: ModelVector | null; degraded: string[] }> {
   if (ports.embedder === null) return { vector: null, degraded: ["no_model"] };
   try {
     const vector = await embedWithin(ports, text, "query", QUERY_EMBED_BUDGET_MS);

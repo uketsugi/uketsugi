@@ -83,13 +83,27 @@ export class SqlJobs extends Repo implements JobsRepo {
   }
 
   /**
-   * Brings back the dead `embed` jobs of live facts that have no vector, so that a fact whose
-   * embedding failed once (the model did not load, say) is tried again by the next start, then
-   * leaves a job for every such fact that has none. A job made by a write has an id of its own, so
-   * a dead one is found by its subject; the one this leaves takes its fact's id. Returns how many
-   * jobs it brought back or left.
+   * Makes the store's vectors the embedder's: when the model that made them is not `model`, every
+   * vector is set to null and `model` recorded, in one statement. Then brings back the dead
+   * `embed` jobs of live facts that have no vector, so that a fact whose embedding failed once
+   * (the model did not load, say) is tried again by the next start, and leaves a job for every
+   * such fact that has none: all of them, after a change of model. A job made by a write has an
+   * id of its own, so a dead one is found by its subject; the one this leaves takes its fact's id.
+   * Returns how many jobs it brought back or left.
    */
-  async embedMissing(now: Date): Promise<number> {
+  async embeddingModel(): Promise<string | null> {
+    const row = await this.db.selectFrom("embeddingModel").select("model").executeTakeFirst();
+    return row?.model ?? null;
+  }
+
+  async embedMissing(model: string, now: Date): Promise<number> {
+    await sql`
+      with cleared as (
+        update facts set vector = null
+        where vector is not null
+          and (select model from embedding_model) is distinct from ${model})
+      insert into embedding_model (id, model) values (1, ${model})
+      on conflict (id) do update set model = excluded.model`.execute(this.db);
     const missing = sql`select f.org_id, f.id from facts f where f.vector is null and ${live("f")}`;
     const revived = await sql`
       update outbox set dead = false, attempts = 0, run_after = ${now}, locked_until = null

@@ -15,7 +15,7 @@ import type {
   ReadScope,
   Session,
 } from "./domain.ts";
-import { EmbedError, type CorePorts } from "./ports.ts";
+import { EmbedError, type CorePorts, type ModelVector } from "./ports.ts";
 import type { UnitWrites } from "./store-port.ts";
 
 /** What a tool call acts as and in: resolved by the request pipeline before a use case runs. */
@@ -113,7 +113,7 @@ export async function embedWithin(
   text: string,
   kind: "document" | "query",
   budgetMs: number,
-): Promise<Float32Array> {
+): Promise<ModelVector> {
   if (ports.embedder === null) throw new EmbedError("no embedding model is installed", false);
   const signal = ports.clock.timeout(budgetMs);
   const late = new Promise<never>((_, reject) => {
@@ -122,7 +122,7 @@ export async function embedWithin(
   });
   const [vector] = await Promise.race([ports.embedder.embed([text], kind, signal), late]);
   if (vector === undefined) throw new EmbedError("the model returned no vector", true);
-  return vector;
+  return { model: ports.embedder.model, vector };
 }
 
 /**

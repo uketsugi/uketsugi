@@ -1,13 +1,14 @@
 import { describe, expect, test } from "vitest";
 import {
   citationText,
+  citationView,
   citedFacts,
   classify,
   mapCitationText,
   parseCitation,
   parseCitations,
 } from "../src/facts/citations.ts";
-import type { ProjectRef } from "../src/domain.ts";
+import type { Citation, ProjectRef } from "../src/domain.ts";
 import { ToolFailure } from "../src/failure.ts";
 
 const repository = { kind: "repository" as const, key: "github.com/acme/api" };
@@ -150,5 +151,53 @@ describe("citations", () => {
     ]);
     const file = parseCitation("src/a.ts:3@a41d07c", repository, 0);
     expect(mapCitationText(file, () => "x")).toMatchObject({ lines: "3", commit: "a41d07c" });
+  });
+
+  const others = "github.com/other/lib";
+  const cited: Citation[] = [
+    { kind: "file", repo: repository.key, path: "src/retry.ts", lines: "41-88", commit: "a41d07c" },
+    { kind: "file", repo: others, path: "src/retry.ts", lines: "7" },
+    { kind: "commit", repo: repository.key, commit: "a41d07c9" },
+    { kind: "commit", repo: others, commit: "a41d07c9" },
+    { kind: "pull_request", repo: repository.key, number: 42 },
+    { kind: "pull_request", repo: others, number: 42 },
+    { kind: "issue", repo: others, number: 7 },
+    { kind: "web", url: "https://docs.example.com/retries" },
+    { kind: "web", url: "https://docs.example.com/retries", quote: "three attempts, then give up" },
+    { kind: "fact", fact: "0192b3a4-5c6d-7e8f-9a0b-1c2d3e4f5a6b" },
+    { kind: "document", title: "Design review notes", url: "https://example.com/doc" },
+    { kind: "document", title: "Design review notes" },
+    { kind: "person", who: "Priya" },
+    { kind: "person", who: "Priya", at: "2026-11-19" },
+    { kind: "person", who: "Priya", at: "last week" },
+    { kind: "observation", text: "the retry loop was read by hand" },
+    { kind: "observation", text: "the retry loop was read by hand", at: "Tuesday" },
+  ];
+
+  test.each(cited)("a result's own shape for %j is read back as the citation it showed", (one) => {
+    const shown = citationView({ citation: one, class: "checkable" }, repository.key);
+    expect(parseCitation(shown, repository, 0)).toEqual(one);
+  });
+
+  test("a ref with no kind is read as the string it is, and a field named beside it wins", () => {
+    expect(parseCitation({ ref: "src/retry.ts:3" }, repository, 0)).toMatchObject({
+      kind: "file",
+      path: "src/retry.ts",
+      lines: "3",
+    });
+    expect(
+      parseCitation({ ref: "src/retry.ts:3", kind: "file", lines: "9" }, repository, 0),
+    ).toMatchObject({ path: "src/retry.ts", lines: "9" });
+  });
+
+  test("a citation that truly lacks its part says what to send, as one try", () => {
+    const failure = (() => {
+      try {
+        return parseCitation({ kind: "pull_request", ref: "some pull request" }, repository, 0);
+      } catch (error) {
+        return error;
+      }
+    })();
+    expect((failure as ToolFailure).toText()).toContain('{"kind":"pull_request","number":42}');
   });
 });

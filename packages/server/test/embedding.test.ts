@@ -64,3 +64,22 @@ test("an embedder that throws instead of rejecting does not stop the server, and
   });
   expect(await degradedOf(throws)).toEqual(["embedder_unavailable"]);
 });
+
+test("a server whose model is not the one that made the store's vectors says so", async () => {
+  const loads = embeds((texts) => Promise.resolve(texts.map(() => new Float32Array(4))));
+  const local = await openLocalPorts({ embedder: loads });
+  const server = composeServer({ ports: local.ports });
+  const { url } = await server.listen({ port: 0 });
+  const degraded = async (): Promise<string[]> =>
+    ((await (await fetch(`${url}/api/capabilities`)).json()) as { degraded: string[] }).degraded;
+  try {
+    // Another server, of another model, takes the store after this one started.
+    await local.ports.store.jobs.embedMissing(loads.model, new Date());
+    await eventually(async () => expect(await degraded()).toEqual([]));
+    await local.ports.store.jobs.embedMissing("another-model", new Date());
+    expect(await degraded()).toEqual(["embedder_not_the_stores"]);
+  } finally {
+    await server.close();
+    await local.close();
+  }
+});

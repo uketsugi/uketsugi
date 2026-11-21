@@ -15,6 +15,7 @@ import { connectInfo, hostProof, openLocalPorts } from "@uketsugi/server";
 import { toolCaller } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { doctor, type Finding } from "../src/doctor.ts";
+import { serverModelFindings } from "../src/doctor-jobs.ts";
 import { serve, type Serving } from "../src/serve.ts";
 import { fakeIo } from "./support.ts";
 
@@ -244,5 +245,19 @@ describe("ukt doctor on a server that gave up a job long ago", () => {
       await serving.close();
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("ukt doctor on a server whose model is not the one that made the store's vectors", () => {
+  test("says what is wrong, what it costs and what to do", () => {
+    const [finding, ...others] = serverModelFindings("ukt serve", {
+      degraded: ["embedder_not_the_stores"],
+      jobs: null,
+    });
+    expect(others).toEqual([]);
+    expect(finding).toMatchObject({ check: "model", state: "warn" });
+    expect(finding?.detail).toContain("another server with a different embedding model");
+    expect(finding?.detail).toContain("search matches words only");
+    expect(finding?.fix).toContain("restart `ukt serve`");
   });
 });

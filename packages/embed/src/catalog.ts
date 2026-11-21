@@ -28,7 +28,7 @@ export interface Catalog {
   readonly runtime: readonly RuntimeArtifact[];
   /** The directory name of the model under `models/`. */
   readonly modelId: string;
-  /** The id stored beside every vector: the model, its precision and the start of its weights' hash. */
+  /** The id a store records as the model of its vectors (once for the store): the model, its precision and the start of its weights' hash. */
   readonly embedModel: string;
   readonly dims: number;
   /** How token vectors become one text vector: the first token's, or the mean of all. */

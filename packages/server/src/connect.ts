@@ -20,7 +20,7 @@ import {
   type PromptName,
 } from "@uketsugi/contracts";
 import { JOB_KINDS, type App, type AppPorts } from "@uketsugi/core";
-import { embeddingState, type EmbeddingState } from "./embedding.ts";
+import { embeddingState } from "./embedding.ts";
 
 /** Claude Code, as its MCP client names itself: the harness whose hooks the server answers. */
 export const CLAUDE_CODE = "claude-code";
@@ -306,18 +306,25 @@ export function instructionFileOf(clientName: string): string | null {
   return harness?.instructionFile ?? null;
 }
 
-/** What an embedding model's state leaves incomplete: `no_model`, `embedder_unavailable` (it did not load), `embedder_loading`. */
-function degradedBy(state: EmbeddingState): string[] {
+/**
+ * What an embedding model's state leaves incomplete: `no_model`, `embedder_unavailable` (it did not
+ * load), `embedder_loading`, and `embedder_not_the_stores`: the store's vectors were made by
+ * another model (a server of another model took it later), so this server's vector search is off.
+ */
+async function degradedBy(ports: Pick<AppPorts, "embedder" | "store">): Promise<string[]> {
+  const state = embeddingState(ports.embedder);
   const left = { none: "no_model", failed: "embedder_unavailable", loading: "embedder_loading" };
-  return state === "loaded" ? [] : [left[state]];
+  if (state !== "loaded") return [left[state]];
+  const recorded = await ports.store.jobs.embeddingModel();
+  return recorded !== null && recorded !== ports.embedder?.model ? ["embedder_not_the_stores"] : [];
 }
 
 /** The descriptor of this server as it is composed now, for the edition of that name. */
-export function capabilityDescriptor(
+export async function capabilityDescriptor(
   edition: string,
   app: App,
-  ports: Pick<AppPorts, "embedder" | "runner">,
-): CapabilityDescriptor {
+  ports: Pick<AppPorts, "embedder" | "runner" | "store">,
+): Promise<CapabilityDescriptor> {
   const tools = app.tools.map((tool) => tool.name);
   const runner = ports.runner?.kind ?? "rules";
   return {
@@ -335,7 +342,7 @@ export function capabilityDescriptor(
     model_runners: runner === "rules" ? [] : [runner],
     tools,
     prompts: Object.keys(PROMPT_DESCRIPTIONS),
-    degraded: degradedBy(embeddingState(ports.embedder)),
+    degraded: await degradedBy(ports),
   };
 }
 

@@ -139,14 +139,80 @@ export function describeStoreConformance(name: string, harness: StoreHarness): v
     test("a stored vector is found by cosine, and only while the content it was made for stands", async () => {
       const id = await publish(alice, "Vectors live in the row beside the claim");
       const vector = new Float32Array(384).fill(0.05);
-      expect(await store.facts.setVector(alice.orgId, id, hash("stale"), vector)).toBe(false);
+      await store.jobs.embedMissing("model-a", clock.now());
+      const made = { model: "model-a", vector };
+      expect(await store.facts.setVector(alice.orgId, id, hash("stale"), made)).toBe(false);
       const current = (await store.facts.get(scopeOf(alice), id))?.contentHash ?? "";
-      expect(await store.facts.setVector(alice.orgId, id, current, vector)).toBe(true);
+      expect(await store.facts.setVector(alice.orgId, id, current, made)).toBe(true);
       const hits = await store.search.passes({
         ...query(alice, "unrelated words"),
-        embedding: vector,
+        embedding: { model: "model-a", vector },
       });
       expect(hits).toContainEqual({ factId: id, pass: "vector", rank: 1 });
+    });
+
+    test("a store whose vectors another model made sets them aside, drops its vectors, and scores none meanwhile", async () => {
+      const id = await publish(alice, "Vectors are tied to the model that made them");
+      const vector = new Float32Array(384).fill(0.05);
+      const current = (await store.facts.get(scopeOf(alice), id))?.contentHash ?? "";
+      const asked = (model: string) => ({
+        ...query(alice, "unrelated words"),
+        embedding: { model, vector },
+      });
+      const found = async (model: string) =>
+        (await store.search.passes(asked(model))).some((row) => row.factId === id);
+      await store.jobs.embedMissing("model-a", clock.now());
+      await store.facts.setVector(alice.orgId, id, current, { model: "model-a", vector });
+      expect(await found("model-a")).toBe(true);
+
+      // A query of another model's vector meets none of the stored ones, even before the store is told.
+      expect(await found("model-b")).toBe(false);
+      expect((await store.facts.get(scopeOf(alice), id))?.embedded).toBe(true);
+
+      // The same model again changes nothing.
+      await store.jobs.embedMissing("model-a", clock.now());
+      expect(await found("model-a")).toBe(true);
+
+      // The new model opens the store: every vector goes.
+      await store.jobs.embedMissing("model-b", clock.now());
+      expect((await store.facts.get(scopeOf(alice), id))?.embedded).toBe(false);
+      expect(await found("model-a")).toBe(false);
+      expect(await found("model-b")).toBe(false);
+
+      await store.facts.setVector(alice.orgId, id, current, { model: "model-b", vector });
+      expect(await found("model-b")).toBe(true);
+    });
+
+    test("a vector is stored only under the store's recorded model, by whoever writes it", async () => {
+      const vector = new Float32Array(384).fill(0.05);
+      const [mine, theirs] = [
+        { model: "model-b", vector },
+        { model: "model-a", vector },
+      ];
+      await store.jobs.embedMissing("model-b", clock.now());
+      const embedded = async (id: string) =>
+        (await store.facts.get(scopeOf(alice), id))?.embedded ?? null;
+
+      // A server still running under the old model embeds a fact, and publishes one with its vector.
+      const waiting = await publish(alice, "A fact the old server embeds late");
+      const hash0 = (await store.facts.get(scopeOf(alice), waiting))?.contentHash ?? "";
+      expect(await store.facts.setVector(alice.orgId, waiting, hash0, theirs)).toBe(false);
+      expect(await embedded(waiting)).toBe(false);
+      const draft = {
+        ...fact(alice, "A fact the old server publishes with its vector"),
+        vector: theirs,
+      };
+      await store.unit(targetOf(alice, clock.now()), (unit) => unit.facts.insert(draft));
+      expect(await embedded(draft.id)).toBe(false);
+      const corrected = content("A fact the old server corrects", null);
+      await store.unit(targetOf(alice, clock.now()), (unit) =>
+        unit.facts.rewrite(draft.id, corrected, theirs),
+      );
+      expect(await embedded(draft.id)).toBe(false);
+
+      // The store's own model is stored as it always was.
+      expect(await store.facts.setVector(alice.orgId, waiting, hash0, mine)).toBe(true);
+      expect(await embedded(waiting)).toBe(true);
     });
 
     test("a superseded fact names the fact that replaced it and leaves search", async () => {

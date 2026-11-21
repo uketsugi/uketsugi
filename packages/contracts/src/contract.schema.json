@@ -1633,6 +1633,18 @@
         "reason": {
           "type": "string",
           "description": "Why a citation is testimony."
+        },
+        "repo": {
+          "type": "string",
+          "description": "The repository the citation names, when it is not the project's."
+        },
+        "quote": {
+          "type": "string",
+          "description": "The quoted words of a web citation."
+        },
+        "at": {
+          "type": "string",
+          "description": "When a person said it or an observation was made."
         }
       },
       "required": ["ref", "kind", "class"]

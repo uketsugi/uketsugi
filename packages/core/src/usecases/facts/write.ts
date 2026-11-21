@@ -23,7 +23,7 @@ import {
 import type { LiveFact } from "../../facts/duplicates.ts";
 import { invalidInput, type ToolFailure } from "../../failure.ts";
 import { claimHashOf, contentHashOf } from "../../hash.ts";
-import type { CorePorts } from "../../ports.ts";
+import type { CorePorts, ModelVector } from "../../ports.ts";
 import { scanText, type Replacement } from "../../scan/scanner.ts";
 import type { UnitWrites, VectorChange } from "../../store-port.ts";
 import { extractIdentifiers } from "../../text/analyze.ts";
@@ -128,7 +128,7 @@ export function embedFact(
   ports: Pick<CorePorts, "embedder" | "clock">,
   fact: Pick<FactText, "claim" | "question" | "citations">,
   budgetMs: number,
-): Promise<Float32Array> {
+): Promise<ModelVector> {
   return embedWithin(ports, embedTextOf(fact), "document", budgetMs);
 }
 
@@ -136,7 +136,7 @@ export function embedFact(
 export function embedInline(
   ports: Pick<CorePorts, "embedder" | "clock">,
   fact: Pick<FactText, "claim" | "question" | "citations">,
-): Promise<Float32Array | null> {
+): Promise<ModelVector | null> {
   return embedFact(ports, fact, EMBED_BUDGET_MS).catch(() => null);
 }
 

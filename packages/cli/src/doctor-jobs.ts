@@ -64,6 +64,14 @@ export function serverModelFindings(
         "the server's model did not load: it failed on the first text put through it, so search matches words only",
       fix: restart,
     });
+  if (server.degraded.includes("embedder_not_the_stores"))
+    found.push({
+      check: "model",
+      state: "warn",
+      detail:
+        "the store's search vectors were made by another server with a different embedding model (two servers are using this store, and the other one started later), so this server's search matches words only and the facts it writes get no vector until it is restarted",
+      fix: `${restart} to take the store back, or stop the other server`,
+    });
   const given = server.jobs?.deadEmbeds ?? 0;
   if (given > 0)
     found.push({

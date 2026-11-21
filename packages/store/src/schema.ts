@@ -164,6 +164,8 @@ export interface Database {
     revertedBy: string | null;
     at: Date;
   };
+  /** The one row naming the model that made every stored vector; none until a model has opened a store that has no vectors. */
+  embeddingModel: { id: 1; model: string };
   outbox: {
     orgId: string;
     id: string;

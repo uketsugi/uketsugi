@@ -123,6 +123,8 @@ function worldOn(open: () => Promise<Host>): World {
     host = await open();
     const { store } = host;
     const without = { store, clock, ids, embedder: null };
+    // What a server's first pass does when it has a model: the store takes it as its vectors' model.
+    await store.jobs.embedMissing(embedder.model, clock.now());
     const owner = await ensureOwner(without);
     const app = appOf(without);
     const calls = (on: App) => toolCaller(on, owner, CLIENT, PROJECT);

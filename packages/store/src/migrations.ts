@@ -9,6 +9,7 @@ import { INIT_0001 } from "./migrations/0001_init.ts";
 import { MODEL_STEP_0002 } from "./migrations/0002_model_step.ts";
 import { DIGEST_FAILURE_0003 } from "./migrations/0003_digest_failure.ts";
 import { UNREAD_0004 } from "./migrations/0004_unread.ts";
+import { EMBEDDING_MODEL_0005 } from "./migrations/0005_embedding_model.ts";
 
 /**
  * Every migration, by the name it is recorded under. `0001_init.3` is the schema 0.1.0 released:
@@ -19,6 +20,7 @@ export const MIGRATIONS: Record<string, Migration> = {
   "0002_model_step": MODEL_STEP_0002,
   "0003_digest_failure": DIGEST_FAILURE_0003,
   "0004_unread": UNREAD_0004,
+  "0005_embedding_model": EMBEDDING_MODEL_0005,
 };
 
 /** The migrator over a set of migrations: this package's, unless a test of an upgrade gives fewer. */

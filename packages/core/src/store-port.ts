@@ -54,6 +54,7 @@ import type {
   Treatment,
   Turn,
 } from "./domain.ts";
+import type { ModelVector } from "./ports.ts";
 import type { SearchRepo } from "./search-port.ts";
 
 /** The audience a unit writes in, and the instant it happens at. */
@@ -71,7 +72,7 @@ export interface NewFact {
   readonly author: string;
   readonly content: FactContent;
   /** The fact's vector when the call made one; null leaves it to the embed job. */
-  readonly vector: Float32Array | null;
+  readonly vector: ModelVector | null;
   /** The session a model wrote the fact from. Left out for a fact an agent published. */
   readonly digestSession?: string;
 }
@@ -80,7 +81,7 @@ export interface NewFact {
  * What a correction does to the fact's stored vector: a new vector replaces it; `kept` leaves it,
  * because what a vector is made from did not change; null clears it for the embed job.
  */
-export type VectorChange = Float32Array | "kept" | null;
+export type VectorChange = ModelVector | "kept" | null;
 
 /** A flag as a unit raises it. */
 export type NewFlag = Pick<Flag, "id" | "factId" | "kind" | "raisedBy">;
@@ -271,10 +272,12 @@ export interface FactsRepo {
   /** How many live facts a project holds in the reader's scope. */
   count(scope: ReadScope, project: string): Promise<number>;
   /**
-   * Stores the claim's vector, only while the fact's content hash is still `contentHash`. Takes no
-   * audience lock and writes no event. False when the fact changed or is gone.
+   * Stores the claim's vector, only while the fact's content hash is still `contentHash` and the
+   * store's recorded model is the vector's: a server of another model, still running beside this
+   * one, stores nothing. Takes no audience lock and writes no event. False when the fact changed or
+   * is gone, or the model is not the store's.
    */
-  setVector(orgId: string, id: string, contentHash: string, vector: Float32Array): Promise<boolean>;
+  setVector(orgId: string, id: string, contentHash: string, vector: ModelVector): Promise<boolean>;
 }
 
 /** Which tasks a listing returns. */
@@ -369,11 +372,17 @@ export interface JobsRepo {
   /** How many jobs wait and how many are dead, for the health route. */
   counts(): Promise<JobCounts>;
   /**
-   * Leaves an `embed` job, due at `now`, for every live fact that has no vector and no embed job
-   * that will still run: what a host owes the facts published while it had no model, and those
-   * whose job died. The job takes its fact's id. Returns how many it left or brought back.
+   * Makes the store's vectors those of the embedder whose id is `model`: when the store's vectors
+   * were made under another id (or under none that it records) they are all set to null and `model`
+   * is recorded, in one statement, and no search scores a vector of another model meanwhile. Then
+   * leaves an `embed` job, due at `now`, for every live fact that has no vector and no embed job
+   * that will still run: what a host owes the facts published while it had no model, those whose
+   * job died, and every fact after a change of model. The job takes its fact's id. Returns how
+   * many it left or brought back.
    */
-  embedMissing(now: Date): Promise<number>;
+  embedMissing(model: string, now: Date): Promise<number>;
+  /** The id of the model that made the store's vectors, or null while no model has taken the store. */
+  embeddingModel(): Promise<string | null>;
   /**
    * Leaves the one `digest` job of a session, due at `dueAt`, or moves it there when the session
    * has one already, sooner or later: a session's reading waits for the last thing the session

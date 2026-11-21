@@ -680,6 +680,18 @@ export interface Citation {
    * Why a citation is testimony.
    */
   reason?: string;
+  /**
+   * The repository the citation names, when it is not the project's.
+   */
+  repo?: string;
+  /**
+   * The quoted words of a web citation.
+   */
+  quote?: string;
+  /**
+   * When a person said it or an observation was made.
+   */
+  at?: string;
 }
 /**
  * A note on a task. Notes are only ever added.

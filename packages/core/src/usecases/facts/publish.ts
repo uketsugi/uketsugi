@@ -12,7 +12,7 @@ import { citationView, parseCitations } from "../../facts/citations.ts";
 import { isLive, nearFacts, takeCitations } from "../../facts/duplicates.ts";
 import { forbidden, invalidInput } from "../../failure.ts";
 import { armDigest } from "../../digest/arm.ts";
-import type { CorePorts } from "../../ports.ts";
+import type { CorePorts, ModelVector } from "../../ports.ts";
 import { scanFields } from "../../scan/scanner.ts";
 import { asPerson, seenBy, sharedIfSharing, type Place } from "../../sharing.ts";
 import { holdCited, landingOf, onFact } from "./place.ts";
@@ -85,7 +85,7 @@ async function correctOwn(
     id: old.id,
     status: changed ? "unconfirmed" : old.status,
     created: false,
-    citations: citations.map(citationView),
+    citations: citations.map((entry) => citationView(entry, ctx.project.key)),
     supersedes: old.id,
     ...(await resultTail(ports, ctx, draft, old.id)),
   };
@@ -108,7 +108,7 @@ async function resultTail(
 export interface Draft {
   readonly id: string;
   readonly content: FactContent;
-  readonly vector: Float32Array | null;
+  readonly vector: ModelVector | null;
 }
 
 /**
@@ -238,7 +238,7 @@ export async function publishFact(
     id: fact.id,
     status: held.status,
     created: stored.created,
-    citations: held.citations.map(citationView),
+    citations: held.citations.map((entry) => citationView(entry, ctx.project.key)),
     ...(similar.length === 0
       ? {}
       : { similar: similar.map((other) => ({ id: other.id, claim: other.claim })) }),

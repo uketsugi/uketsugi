@@ -69,7 +69,7 @@ export async function factViews(
         claim: fact.claim,
         ...(fact.detail === null ? {} : { detail: fact.detail }),
         ...(fact.question === null ? {} : { question: fact.question }),
-        citations: fact.citations.map(citationView),
+        citations: fact.citations.map((entry) => citationView(entry, fact.project)),
         status: fact.status,
         flags: [...new Set(kinds)],
         trust: fact.status === "confirmed" ? ("reviewed" as const) : ("unreviewed" as const),

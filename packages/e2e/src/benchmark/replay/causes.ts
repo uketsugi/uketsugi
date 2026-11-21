@@ -132,14 +132,17 @@ async function queryOf(context: MissContext): Promise<SearchQuery> {
   const { env, found, query } = context;
   const explain = found.explain as Explain;
   const { profile } = explain;
-  const embedded =
-    env.ports.embedder === null ? null : await env.ports.embedder.embed([query], "query");
+  const { embedder } = env.ports;
+  const embedded = embedder === null ? null : await embedder.embed([query], "query");
   return {
     scope: env.scope,
     project: found.project,
     query,
     idents: explain.query.identifiers,
-    embedding: embedded?.[0] ?? null,
+    embedding:
+      embedder === null || embedded?.[0] === undefined
+        ? null
+        : { model: embedder.model, vector: embedded[0] },
     vectorCutoff: profile["vectorCutoff"] ?? 0,
     admissionCoverage: profile["coverageAdmission"] ?? 0,
     trigramThreshold: profile["trigramThreshold"] ?? 0,

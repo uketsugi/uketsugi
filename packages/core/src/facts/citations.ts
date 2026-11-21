@@ -69,12 +69,69 @@ function kindOf(raw: Record<string, unknown>): unknown {
   return fields.find(([field]) => text(raw[field]) !== undefined)?.[1];
 }
 
+/** What to send for a kind: the field that is missing from it, as an agent can copy it. */
+const WHAT_TO_SEND: Record<string, string> = {
+  file: 'a string such as `src/app.ts:10-20@<commit>`, or `{"kind":"file","path":"src/app.ts","lines":"10-20"}`',
+  commit: 'a string such as `commit a41d07c`, or `{"kind":"commit","commit":"a41d07c"}`',
+  pull_request: '`{"kind":"pull_request","number":42}`',
+  issue: '`{"kind":"issue","number":42}`',
+  web: 'a URL, or `{"kind":"web","url":"https://example.com/page"}`',
+  fact: 'a fact id, or `{"kind":"fact","fact":"<fact id>"}`',
+  document: '`{"kind":"document","title":"Design review notes","url":"https://example.com/doc"}`',
+  person: '`{"kind":"person","who":"Priya, on call","at":"2026-11-19"}`',
+};
+
 /** The failure for an object citation that lacks a field its kind needs. */
 function missing(at: string, kind: unknown, field: string) {
+  const send = WHAT_TO_SEND[String(kind)];
   return invalidInput(
     `${at} is a ${String(kind)} citation without \`${field}\`.`,
-    `Add \`${field}\` to that citation, or send it as one string such as \`src/app.ts:10-20@<commit>\`.`,
+    send === undefined
+      ? `Add \`${field}\` to that citation.`
+      : `Send that citation as ${send}; the \`ref\` a result shows is accepted in its place.`,
   );
+}
+
+/** The fields each kind's `citationText` writes into the one text of a `ref`, taken back out of it. */
+const OF_REF: Record<
+  string,
+  (ref: string, repo: string, given: Record<string, unknown>) => Record<string, unknown>
+> = {
+  file: (ref, repo) => fileOf(ref, repo) ?? { path: ref },
+  commit: (ref) => ({ commit: COMMIT.exec(ref)?.[1] }),
+  pull_request: (ref) => itemOfRef(ref),
+  issue: (ref) => itemOfRef(ref),
+  web: (ref) => ({ url: ref }),
+  fact: (ref) => ({ fact: ref.replace(/^fact\s+/i, "") }),
+  document: (ref) => {
+    const [, title = ref, url] = /^(.*?)(?: \((https?:\/\/[^)]+)\))?$/.exec(ref) ?? [];
+    return { title, url };
+  },
+  person: (ref, _repo, given) => {
+    // The time is in the line after a comma; when the citation names it, it is cut off.
+    const at = text(given.at);
+    if (at !== undefined && ref.endsWith(`, ${at}`)) return { who: ref.slice(0, -at.length - 2) };
+    const [, who = ref, dated] = /^(.*?)(?:, (\d{4}-\d{2}-\d{2}.*))?$/.exec(ref) ?? [];
+    return { who, at: dated };
+  },
+};
+
+/** A pull request or an issue from its line, `<repository> pull request 42`: the repository is in it. */
+function itemOfRef(ref: string): Record<string, unknown> {
+  const [, repo, number] = /^(.+?) (?:pull request|issue) (\d+)$/.exec(ref) ?? [];
+  return { repo, number };
+}
+
+/**
+ * An object with a `ref`, the shape a result shows (`{"ref": …, "kind": …}`), as an object with
+ * the fields its kind needs: `ref` is what `citationText` wrote for that kind. Fields the object
+ * names itself are not taken from it.
+ */
+function withRef(given: Record<string, unknown>, repo: string): Record<string, unknown> {
+  const ref = text(given.ref);
+  if (ref === undefined) return given;
+  const fields = OF_REF[String(given.kind)]?.(ref, repo, given) ?? { text: ref };
+  return { ...fields, ...given };
 }
 
 /** A file citation from its object form: lines as `12`, `12-40` or `L12-L40`. */
@@ -90,7 +147,8 @@ function fileFrom(raw: Record<string, unknown>, repo: string, path: string): Cit
   };
 }
 
-function fromObject(raw: Record<string, unknown>, project: ProjectRef, at: string): Citation {
+function fromObject(given: Record<string, unknown>, project: ProjectRef, at: string): Citation {
+  const raw = withRef(given, project.key);
   const kind = kindOf(raw);
   const repo = text(raw.repo) ?? project.key;
   const need = (field: string): string => {
@@ -138,7 +196,12 @@ export function parseCitation(raw: unknown, project: ProjectRef, index: number):
   if (value !== undefined) {
     return referenceOf(value, project) ?? { kind: "observation", text: value };
   }
-  if (isRecord(raw)) return fromObject(raw, project, at);
+  if (isRecord(raw)) {
+    // A `ref` with no kind is a reference as a string is, and its kind is what the text names.
+    const ref = text(raw.ref);
+    if (ref !== undefined && raw.kind === undefined) return parseCitation(ref, project, index);
+    return fromObject(raw, project, at);
+  }
   throw invalidInput(
     `${at} is neither text nor an object.`,
     "Send each citation as a string: `path:lines`, `path:lines@commit`, a commit or a URL.",
@@ -287,11 +350,26 @@ export function citationText(citation: Citation): string {
   }
 }
 
-/** A classed citation as a result carries it. */
-export function citationView(entry: ClassedCitation): CitationView {
+/**
+ * What a citation holds that its one line (`ref`) does not say, so that a result sent back as it
+ * was shown names the same source: the repository when it is not the project's, a web quote, the
+ * time of a person's word or an observation.
+ */
+function beyondRef(citation: Citation, project: string): Record<string, string> {
+  const extra: Record<string, string> = {};
+  if ("repo" in citation && citation.repo !== project) extra.repo = citation.repo;
+  if (citation.kind === "web" && citation.quote !== undefined) extra.quote = citation.quote;
+  if ((citation.kind === "person" || citation.kind === "observation") && citation.at !== undefined)
+    extra.at = citation.at;
+  return extra;
+}
+
+/** A classed citation as a result carries it, in the project it is shown in. */
+export function citationView(entry: ClassedCitation, project: string): CitationView {
   return {
     ref: citationText(entry.citation),
     kind: entry.citation.kind,
+    ...beyondRef(entry.citation, project),
     class: entry.class,
     ...(entry.reason === undefined ? {} : { reason: entry.reason }),
   };

@@ -74,7 +74,8 @@ function passOver(
   halt: AbortSignal,
 ): () => Promise<number> {
   const { jobs } = ports.store;
-  let owesVectors = ports.embedder !== null;
+  const { embedder } = ports;
+  let owesVectors = embedder !== null;
   const run = { halt, onDigest: options.onDigest };
 
   async function settle(job: ClaimedJob): Promise<void> {
@@ -94,8 +95,8 @@ function passOver(
   }
 
   return async () => {
-    if (owesVectors) {
-      await jobs.embedMissing(ports.clock.now());
+    if (owesVectors && embedder !== null) {
+      await jobs.embedMissing(embedder.model, ports.clock.now());
       owesVectors = false;
     }
     let settled = 0;

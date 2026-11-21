@@ -21,9 +21,18 @@ export interface IdGen {
   bytes(length: number): Uint8Array;
 }
 
+/** A vector with the id of the model that made it: a store keeps a vector only under its recorded model. */
+export interface ModelVector {
+  readonly model: string;
+  readonly vector: Float32Array;
+}
+
 /** Turns texts into unit-length vectors of `dims` components. */
 export interface Embedder {
-  /** The pinned model's id. Vectors of different models are never compared. */
+  /**
+   * The pinned model's id. A store records the id of the model that made its vectors: it sets them
+   * aside when this one differs, and compares none that another model made.
+   */
   readonly model: string;
   readonly dims: number;
   /**

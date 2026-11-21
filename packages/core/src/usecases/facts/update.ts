@@ -167,7 +167,7 @@ export async function updateFact(
     status: fact.status,
     flags: [...new Set(flags.map((entry) => entry.kind))],
     ...(rewritten && input.citations !== undefined
-      ? { citations: fact.citations.map(citationView) }
+      ? { citations: fact.citations.map((entry) => citationView(entry, fact.project)) }
       : {}),
     ...(replaced.length === 0 ? {} : { redacted: replaced }),
     ...(await seenBy(ports, ctx.caller, fact.id)),

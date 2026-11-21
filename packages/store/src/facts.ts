@@ -6,6 +6,7 @@ import {
   type FactContent,
   type FactListQuery,
   type FactsRepo,
+  type ModelVector,
   type NewFact,
   type ReadScope,
   type StoredEvent,
@@ -14,7 +15,7 @@ import {
 } from "@uketsugi/core";
 import { sql, type InferResult } from "kysely";
 import { behindOf, headsIn } from "./chain.ts";
-import { live, Repo, scoped, toBytes, toHalfvec, UnitRepo, uuidsOf, type Db } from "./codec.ts";
+import { live, Repo, scoped, toBytes, UnitRepo, uuidsOf, vectorUnder, type Db } from "./codec.ts";
 import { writeDerived } from "./derived.ts";
 import { forgetTaken, redactFacts } from "./redaction.ts";
 import { toEvent } from "./review.ts";
@@ -163,7 +164,7 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
         audienceId,
         project: fact.project,
         ...textColumns(content),
-        vector: fact.vector === null ? null : toHalfvec(fact.vector),
+        vector: vectorUnder(fact.vector),
         status: "unconfirmed",
         author: fact.author,
         createdAt: at,
@@ -175,11 +176,10 @@ export class SqlUnitFacts extends UnitRepo implements UnitFacts {
   }
 
   async rewrite(id: string, content: FactContent, vector: VectorChange): Promise<void> {
-    const stored = vector === null || vector === "kept" ? null : toHalfvec(vector);
     const rewritten = await this.one(id)
       .set({
         ...textColumns(content),
-        ...(vector === "kept" ? {} : { vector: stored }),
+        ...(vector === "kept" ? {} : { vector: vectorUnder(vector) }),
         updatedAt: this.target.at,
         // Its author's own words now: no model wrote what it says.
         digestSession: null,
@@ -309,15 +309,16 @@ export class SqlFacts extends Repo implements FactsRepo {
     orgId: string,
     id: string,
     contentHash: string,
-    vector: Float32Array,
+    vector: ModelVector,
   ): Promise<boolean> {
     if (!isUuid(id)) return false;
     const result = await this.db
       .updateTable("facts")
-      .set({ vector: toHalfvec(vector) })
+      .set({ vector: vectorUnder(vector) })
       .where("orgId", "=", orgId)
       .where("id", "=", id)
       .where("contentHash", "=", toBytes(contentHash))
+      .where(sql<boolean>`(select model from embedding_model) = ${vector.model}`)
       .executeTakeFirst();
     return result.numUpdatedRows > 0n;
   }
