@@ -24,7 +24,7 @@ describe("a server started with a token that was revoked", () => {
     dataDir = await mkdtemp(join(tmpdir(), "uketsugi-local-"));
     const local = await openLocalPorts({ dataDir });
     await acceptToken(local.ports, local.owner, TOKEN, "given at start");
-    replacement = (await replaceTokens(local.ports, local.owner, "rotated")).token;
+    replacement = (await replaceTokens(local.ports, local.owner)).token;
     await local.close();
   });
 

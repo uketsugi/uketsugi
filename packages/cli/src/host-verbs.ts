@@ -1,11 +1,17 @@
 /** `ukt token`: prints the token a harness sends, or replaces it and ends the old ones. */
 import { TOKEN_ENV } from "@uketsugi/contracts";
 import { replaceTokens } from "@uketsugi/core";
-import { readToken, resolveHome, writeToken } from "./home.ts";
+import { readToken, resolveHome, writeToken, type Home } from "./home.ts";
 import { hostOf, requireStore, withStore, type Host } from "./host-store.ts";
 import { dirFlag, onStore, type OnStore, type Program } from "./program.ts";
 import { CliFailure, confirmPlan, type Io, type Report } from "./report.ts";
-import { pauseFor } from "./service.ts";
+import {
+  connectAsHost,
+  projects,
+  replaceToken,
+  servingNow,
+  type Running,
+} from "./server-client.ts";
 
 export interface TokenOptions extends OnStore {
   readonly dataDir?: string;
@@ -14,40 +20,15 @@ export interface TokenOptions extends OnStore {
   readonly json?: boolean;
 }
 
-/**
- * `ukt token --rotate`: ends every token of the host's own person and stores the one new token.
- * The store must be the verb's alone: a server that runs as the service is stopped for it and
- * started again, one started by hand is its person's to stop. Other people's tokens are not
- * touched: `ukt revoke` ends one of those.
- */
-async function rotate(
-  io: Io,
-  { home, store }: Host,
-  options: TokenOptions,
-  env: NodeJS.ProcessEnv,
-): Promise<Report> {
-  requireStore(home, store, "token --rotate");
-  const pause = await pauseFor(io, env, home, "token --rotate");
-  await confirmPlan(
-    io,
-    [
-      `This replaces the token in ${home.tokenFile}.`,
-      "Every token of yours issued so far stops working at once.",
-      ...(pause === null ? [] : [pause.line]),
-      "Each harness that sends a token is refused until it is given the new token.",
-    ],
-    options,
-  );
-  const replace = (): Promise<{ token: string; revoked: number }> =>
-    withStore(home, store, async (local) => {
-      const made = await replaceTokens(local.ports, local.owner, "made by ukt token --rotate");
-      await writeToken(home, made.token);
-      return made;
-    });
-  const fresh = await (pause === null ? replace() : pause.around(replace));
-  const dir = dirFlag(options);
+/** What `token --rotate` tells the person to do next, whichever way the token was replaced. */
+function rotated(
+  home: Home,
+  dir: string,
+  fresh: { token: string; revoked: number },
+  serving: boolean,
+): Report {
   const steps = [
-    ...(pause === null ? [[`Start the server again:  ukt serve${dir}`]] : []),
+    ...(serving ? [] : [[`Start the server again:  ukt serve${dir}`]]),
     [
       "Give each harness that sends a token the new token. A harness keeps the token it was given, so setting",
       `${TOKEN_ENV} is not enough. \`ukt ui${dir}\` opens the Connect page, which shows what to run`,
@@ -59,7 +40,7 @@ async function rotate(
     lines: [
       fresh.token,
       "Every earlier token of yours has stopped working.",
-      ...(pause === null ? [] : ["The service is running again, with the new token."]),
+      ...(serving ? ["The server is running, with the new token."] : []),
       "Next:",
       ...steps.flatMap((step, at) =>
         step.map((line, index) => `  ${index === 0 ? `${at + 1}. ` : "   "}${line}`),
@@ -73,13 +54,58 @@ async function rotate(
   };
 }
 
+/**
+ * Rotations at once each get a token of their own and the server ends all but the last. A token
+ * that is already refused when it has been written to the file was ended by another rotation: say
+ * so, since the file may hold it.
+ */
+async function stillLive(server: Running, token: string): Promise<void> {
+  const refused = await projects({ ...server, token }).then(
+    () => false,
+    () => true,
+  );
+  if (refused)
+    throw new CliFailure({
+      what: "Another `ukt token --rotate` replaced this token while this one ran.",
+      meaning: "The token this command made is no longer valid, and the token file may hold it.",
+      next: "Run `ukt token --rotate` again, once, and use the token it prints.",
+    });
+}
+
+/**
+ * `ukt token --rotate`: ends every token of the host's own person and stores the one new token.
+ * A running server does it, as the host, and goes on serving. With none running the verb opens
+ * the store itself. Other people's tokens are not touched: `ukt revoke` ends one of those.
+ */
+async function rotate(io: Io, host: Host, options: TokenOptions): Promise<Report> {
+  const { home, store } = host;
+  const server = (await servingNow(home)) === null ? null : await connectAsHost(home);
+  if (server === null) requireStore(home, store, "token --rotate");
+  await confirmPlan(
+    io,
+    [
+      `This replaces the token in ${home.tokenFile}.`,
+      "Every token of yours issued so far stops working at once.",
+      "Each harness that sends a token is refused until it is given the new token.",
+    ],
+    options,
+  );
+  const fresh =
+    server === null
+      ? await withStore(home, store, async (local) => replaceTokens(local.ports, local.owner))
+      : await replaceToken(server);
+  await writeToken(home, fresh.token);
+  if (server !== null) await stillLive(server, fresh.token);
+  return rotated(home, dirFlag(options), fresh, server !== null);
+}
+
 /** `ukt token`: prints the token a harness sends. With `--rotate`, replaces it and ends the old ones. */
 export async function token(
   io: Io,
   options: TokenOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<Report> {
-  if (options.rotate === true) return rotate(io, await hostOf(options, env), options, env);
+  if (options.rotate === true) return rotate(io, await hostOf(options, env), options);
   const home = resolveHome(options.dataDir, env);
   const held = await readToken(home);
   if (held === null)

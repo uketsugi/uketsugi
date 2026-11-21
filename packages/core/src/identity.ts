@@ -132,22 +132,23 @@ export async function issueToken(
   return (await issue(ports, caller, "agent", label)).secret;
 }
 
+/** What a token made by `ukt token --rotate` is called. */
+const ROTATED_LABEL = "made by ukt token --rotate";
+
 /**
  * Ends every live agent token of the caller and issues one new one: what `ukt token --rotate`
  * does. Nobody else's token is touched, and neither is a key the caller signs in to the dashboard
- * with. Returns the new token, once, with how many were ended.
+ * with. Replacements of one person's tokens run one after another, so after any number of them
+ * at once exactly one token is live and each reports what it ended. Returns the new token, once,
+ * with how many were ended.
  */
 export async function replaceTokens(
   ports: DirectoryPorts,
   caller: Caller,
-  label: string,
 ): Promise<{ token: string; revoked: number }> {
-  const held = await ports.store.directory.credentials(caller.orgId, caller.principalId);
-  const live = held.filter(({ kind, revokedAt }) => kind === "agent" && revokedAt === null);
-  for (const credential of live) {
-    await ports.store.directory.revokeCredential(caller.orgId, credential.id, ports.clock.now());
-  }
-  return { token: await issueToken(ports, caller, label), revoked: live.length };
+  const { record, issued } = await mint(ports, caller, "agent", ROTATED_LABEL);
+  const revoked = await ports.store.directory.replaceAgentCredentials(record, ports.clock.now());
+  return { token: issued.secret, revoked };
 }
 
 export interface TokenIdentityOptions {

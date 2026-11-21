@@ -17,6 +17,7 @@ import {
   type DashboardSession,
   type HostProof,
   type SignInCode,
+  type TokenReplaced,
 } from "@uketsugi/contracts";
 import {
   activityReport,
@@ -32,6 +33,7 @@ import {
   listRulings,
   listTasks,
   redactFact,
+  replaceTokens,
   revertRuling,
   revokeToken,
   taskDetail,
@@ -168,6 +170,10 @@ function operatorRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
     link.searchParams.set("code", code);
     const minted: SignInCode = { code, url: link.href, expires_at: expiresAt.toISOString() };
     return c.json(minted);
+  });
+  api.post("/token/rotate", fromOperator, async (c) => {
+    const replaced: TokenReplaced = await replaceTokens(ports, c.get("caller"));
+    return c.json(replaced);
   });
   api.get("/backup", fromOperator, async (c) => {
     if (snapshot === undefined) return failed(c, noSnapshot());

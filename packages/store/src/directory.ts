@@ -228,6 +228,30 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
       .execute();
   }
 
+  async replaceAgentCredentials(credential: NewCredential, at: Date): Promise<number> {
+    const { orgId, principalId } = credential;
+    return this.db.transaction().execute(async (trx) => {
+      // Replacements of one person queue on their row, so that each ends what the one before made.
+      await trx
+        .selectFrom("principals")
+        .select("id")
+        .where("orgId", "=", orgId)
+        .where("id", "=", principalId)
+        .forUpdate()
+        .execute();
+      const ended = await trx
+        .updateTable("credentials")
+        .set({ revokedAt: at })
+        .where("orgId", "=", orgId)
+        .where("principalId", "=", principalId)
+        .where("kind", "=", "agent")
+        .where("revokedAt", "is", null)
+        .executeTakeFirst();
+      await insertCredential(trx, credential);
+      return Number(ended.numUpdatedRows);
+    });
+  }
+
   async revokeCredential(orgId: string, id: string, at: Date): Promise<boolean> {
     const [known] = uuidsOf([id]);
     if (known === undefined) return false;

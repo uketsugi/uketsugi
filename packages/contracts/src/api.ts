@@ -32,6 +32,7 @@
  * | GET    | `/api/people`             | host, loopback     | none                   | `PeopleList`           |
  * | POST   | `/api/people`             | host, loopback     | `InviteRequest`        | `Invitation`           |
  * | POST   | `/api/tokens/:id/revoke`  | host, loopback     | none                   | `TokenRevoked`         |
+ * | POST   | `/api/token/rotate`       | host, loopback     | none                   | `TokenReplaced`        |
  *
  * Three credentials sign a request in, and none does another's work.
  * - **token**: the agent token a harness sends as a bearer. It calls the tools on `/mcp`, reads

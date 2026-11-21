@@ -250,6 +250,7 @@ export interface ContractTypes {
   PeopleList?: PeopleList;
   Invitation?: Invitation;
   TokenRevoked?: TokenRevoked;
+  TokenReplaced?: TokenReplaced;
   ModelCheck?: ModelCheck;
 }
 export interface ToolError {
@@ -1570,6 +1571,19 @@ export interface TokenRevoked {
    * False when it was revoked already.
    */
   revoked: boolean;
+}
+/**
+ * `POST /api/token/rotate`: the host's own harness token, replaced.
+ */
+export interface TokenReplaced {
+  /**
+   * The new token, shown once and never stored.
+   */
+  token: string;
+  /**
+   * How many of the host's tokens it ended.
+   */
+  revoked: number;
 }
 /**
  * `POST /api/model-check`: whether the language model this server was given answers, asked now with one small question.

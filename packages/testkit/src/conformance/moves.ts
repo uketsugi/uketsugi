@@ -1,4 +1,4 @@
-import { scopeOf, type Caller, type Store, type UnitTarget } from "@uketsugi/core";
+import { replaceTokens, scopeOf, type Caller, type Store, type UnitTarget } from "@uketsugi/core";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { FakeClock, FakeIdGen } from "../fakes.ts";
 import { content, event, person, PROJECT, targetOf, type StoreHarness } from "./support.ts";
@@ -263,6 +263,22 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       });
       expect(moved).toEqual({ facts: [], tasks: [] });
       expect((await store.facts.get(scopeOf(carol), id))?.audienceId).toBe(carol.privateAudienceId);
+    });
+
+    test("rotations at once leave exactly one live agent token, and each says how many it ended", async () => {
+      const ports = { store, clock, ids };
+      const before = await replaceTokens(ports, alice);
+      const rotated = await Promise.all(
+        Array.from({ length: 5 }, () => replaceTokens(ports, alice)),
+      );
+      const held = await store.directory.credentials(alice.orgId, alice.principalId);
+      const live = held.filter(({ kind, revokedAt }) => kind === "agent" && revokedAt === null);
+
+      expect(before.revoked).toBe(0);
+      expect(live).toHaveLength(1);
+      // Each token but the last was ended by a later rotation, and the ones it ended add up.
+      expect(rotated.reduce((sum, { revoked }) => sum + revoked, 0)).toBe(5);
+      expect(new Set(rotated.map(({ token }) => token)).size).toBe(5);
     });
   });
 }

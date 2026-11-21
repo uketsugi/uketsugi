@@ -1321,6 +1321,21 @@
         },
         "required": ["id", "revoked"]
       },
+      "TokenReplaced": {
+        "type": "object",
+        "description": "`POST /api/token/rotate`: the host's own harness token, replaced.",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The new token, shown once and never stored."
+          },
+          "revoked": {
+            "type": "integer",
+            "description": "How many of the host's tokens it ended."
+          }
+        },
+        "required": ["token", "revoked"]
+      },
       "ModelCheck": {
         "type": "object",
         "description": "`POST /api/model-check`: whether the language model this server was given answers, asked now with one small question.",

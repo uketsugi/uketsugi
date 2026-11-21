@@ -15,6 +15,7 @@ import {
   type PeopleList,
   type ProjectList,
   type SignInCode,
+  type TokenReplaced,
   type TokenRevoked,
 } from "@uketsugi/contracts";
 import type { JobCounts } from "@uketsugi/core";
@@ -235,10 +236,15 @@ export async function projects(server: Running): Promise<ProjectList> {
   return (await (await request(server, "/api/projects", signed(server))).json()) as ProjectList;
 }
 
+/** What the server answers to a body-less POST from whoever runs it. */
+async function post<T>(server: Running, path: string, within?: number): Promise<T> {
+  const init = { ...signed(server), method: "POST" };
+  return (await (await request(server, path, init, within)).json()) as T;
+}
+
 /** A code that signs a browser in to the dashboard once. */
 export async function signInCode(server: Running): Promise<SignInCode> {
-  const init = { ...signed(server), method: "POST" };
-  return (await (await request(server, "/api/sign-in-codes", init)).json()) as SignInCode;
+  return post(server, "/api/sign-in-codes");
 }
 
 /** One project's facts as a Markdown document. */
@@ -252,9 +258,7 @@ const MODEL_ANSWERS_WITHIN_MS = 45_000;
 
 /** Whether the language model the server was given answers, asked now. */
 export async function modelCheck(server: Running): Promise<ModelCheck> {
-  const init = { ...signed(server), method: "POST" };
-  const asked = await request(server, "/api/model-check", init, MODEL_ANSWERS_WITHIN_MS);
-  return (await asked.json()) as ModelCheck;
+  return post(server, "/api/model-check", MODEL_ANSWERS_WITHIN_MS);
 }
 
 /** The jobs the server holds, as it tells whoever runs it and no one else. */
@@ -283,9 +287,12 @@ export async function invite(server: Running, input: InviteRequest): Promise<Inv
 
 /** Ends one token; the others go on working. */
 export async function revoke(server: Running, tokenId: string): Promise<TokenRevoked> {
-  const path = `/api/tokens/${encodeURIComponent(tokenId)}/revoke`;
-  const init = { ...signed(server), method: "POST" };
-  return (await (await request(server, path, init)).json()) as TokenRevoked;
+  return post(server, `/api/tokens/${encodeURIComponent(tokenId)}/revoke`);
+}
+
+/** Replaces the host's own harness token: the server ends the old ones and returns the new one. */
+export async function replaceToken(server: Running): Promise<TokenReplaced> {
+  return post(server, "/api/token/rotate");
 }
 
 /** A snapshot of the whole store, taken by the server while it serves. */

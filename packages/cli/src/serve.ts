@@ -280,7 +280,7 @@ function tokenNeedLine(told: Told, beyond: boolean): string {
 function tokenLine(home: Home, onFile: boolean): string {
   if (onFile) return `token: ${home.tokenFile} (print it with \`ukt token\`)`;
   return home.givenToken === undefined
-    ? "token: none is on file. Stop the server and run `ukt token --rotate` to make one."
+    ? "token: none is on file. Run `ukt token --rotate` to make one."
     : `token: taken from ${TOKEN_ENV}`;
 }
 

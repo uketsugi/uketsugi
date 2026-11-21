@@ -345,10 +345,10 @@ only, unless you set it up with `--host`.
   later exports. The text stays in the store's own files, and so in a backup made afterwards. On a
   PostgreSQL server it stays in the server's files and write-ahead log, though not in a `pg_dump`
   made afterwards. If the text was a secret, change the secret as well.
-- `ukt token --rotate` replaces your token. A server that runs as the service is stopped for it
-  and started again. A harness that sends a token keeps the one it was given until you give it
-  the new one: remove the server from it and add it again with the lines on the Connect page.
-  One that sends none is not affected.
+- `ukt token --rotate` replaces your token. A server that is running does it and goes on serving:
+  the old token is refused at once. A harness that sends a token keeps the one it was given until
+  you give it the new one: remove the server from it and add it again with the lines on the
+  Connect page. One that sends none is not affected.
 
 ### Removing Uketsugi
 

@@ -573,6 +573,12 @@ export interface DirectoryRepo {
   credentialByTokenHash(tokenHash: string): Promise<Credential | null>;
   addCredential(credential: NewCredential): Promise<void>;
   credentials(orgId: string, principalId: string): Promise<Credential[]>;
+  /**
+   * Ends every live agent credential of a person and stores `credential` in their place, as one
+   * step that no other replacement of theirs interleaves with: afterwards exactly one of their
+   * agent credentials is live. Returns how many it ended.
+   */
+  replaceAgentCredentials(credential: NewCredential, at: Date): Promise<number>;
   /** False when the organization has no such live credential. */
   revokeCredential(orgId: string, id: string, at: Date): Promise<boolean>;
   /** Display names by principal id; an unknown id has none. */

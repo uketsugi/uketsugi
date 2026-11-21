@@ -198,30 +198,28 @@ describe("a server that runs as the service", () => {
     });
   });
 
-  test("is stopped for token --rotate and started again with the new token", async () => {
-    const { dataDir, machine, env, io } = await served();
+  test("is not stopped for token --rotate: the running server replaces the token and the old one is refused at once", async () => {
+    const { dataDir, machine, origin, env, io } = await served();
     const old = (await token(io(), { dataDir }, env)).lines[0] ?? "";
     const before = machine.changes.length;
+    const reach = (bearer: string) =>
+      fetch(`${origin}/api/projects`, { headers: { authorization: `Bearer ${bearer}` } });
 
-    const asked = io();
-    const rotated = await token(asked, { dataDir, rotate: true, yes: true }, env);
+    const rotated = await token(io(), { dataDir, rotate: true, yes: true }, env);
     const fresh = rotated.lines[0] ?? "";
     const running = await doctor(io(), { dataDir }, env);
 
     expect(fresh).not.toBe(old);
-    expect(asked.errLines).toContain(
-      "The server runs as your service (uketsugi.service): it is stopped for this and started again afterwards.",
-    );
-    expect(machine.changes.slice(before, before + 3)).toEqual([
-      "systemctl --user stop uketsugi.service",
-      "systemctl --user reset-failed uketsugi.service",
-      "systemctl --user start uketsugi.service",
-    ]);
+    // The manager was asked to run nothing: no stop, no start, no reset.
+    expect(machine.changes.slice(before)).toEqual([]);
+    expect(machine.running).toBe(true);
     expect(rotated.lines.slice(1, 3)).toEqual([
       "Every earlier token of yours has stopped working.",
-      "The service is running again, with the new token.",
+      "The server is running, with the new token.",
     ]);
-    // The server that came back accepts the new token: doctor's store check asks with it.
+    expect((await reach(old)).status).toBe(401);
+    expect((await reach(fresh)).status).toBe(200);
+    expect((await token(io(), { dataDir }, env)).lines[0]).toBe(fresh);
     expect(findingsOf(running, "store")[0]).toMatchObject({ state: "ok" });
   });
 
@@ -254,7 +252,7 @@ describe("a server that runs as the service", () => {
     /** Longer than the two minutes `ukt` gives a program unless it is told more, shorter than the unit's own limit. */
     const SLOW_STOP_MS = 300_000;
 
-    test("restore completes and the server is back, token --rotate leaves it running, and setup does not disable the unit", async () => {
+    test("restore completes and the server is back, and setup does not disable the unit", async () => {
       const { dataDir, machine, env, io, options } = await served();
       machine.stopTakes = SLOW_STOP_MS;
       const snapshot = String((await backup({ dataDir }, env)).data["file"]);
@@ -265,16 +263,6 @@ describe("a server that runs as the service", () => {
       expect(restored).toMatchObject({
         lines: expect.arrayContaining([
           "The service is running again, on the restored store.",
-        ]) as string[],
-      });
-      expect(machine.running).toBe(true);
-
-      const rotated = await token(io(), { dataDir, rotate: true, yes: true }, env).catch(
-        (error: unknown) => error,
-      );
-      expect(rotated).toMatchObject({
-        lines: expect.arrayContaining([
-          "The service is running again, with the new token.",
         ]) as string[],
       });
       expect(machine.running).toBe(true);
@@ -304,7 +292,9 @@ describe("a server that runs as the service", () => {
     // The same account entered with `su`: its unit is on disk, its manager out of reach.
     const su = fakeIo({ run: new Machine({ home, manager: false }).run });
 
-    const refused = await token(su, { dataDir, rotate: true, yes: true }, env).catch(
+    const snapshot = String((await backup({ dataDir }, env)).data["file"]);
+
+    const refused = await restore(su, snapshot, { dataDir, yes: true }, env).catch(
       (error: unknown) => error,
     );
 
@@ -313,7 +303,7 @@ describe("a server that runs as the service", () => {
         meaning: expect.stringContaining(
           "It runs as your service (uketsugi.service), and no systemd user manager answers in this shell",
         ) as string,
-        next: "Run `ukt token --rotate` from a shell of your own login, where `systemctl --user stop uketsugi` works.",
+        next: "Run `ukt restore` from a shell of your own login, where `systemctl --user stop uketsugi` works.",
       },
     });
   });

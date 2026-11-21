@@ -155,6 +155,47 @@ describe("ukt serve on a temporary data directory", () => {
     expect((await stat(join(dataDir, "host.key"))).mode & 0o777).toBe(0o600);
   });
 
+  test("token --rotate goes through the running server: the new token works at once, the old one is refused, and the server keeps serving", async () => {
+    const old = (await token(fakeIo(), { dataDir }, {})).lines[0] ?? "";
+    const reach = (bearer: string) =>
+      fetch(`${url}/api/projects`, { headers: { authorization: `Bearer ${bearer}` } });
+
+    const rotated = await token(fakeIo(), { dataDir, rotate: true, yes: true }, {});
+    const fresh = rotated.lines[0] ?? "";
+
+    expect(rotated.data).toEqual({ token: fresh, revoked: 1 });
+    expect(rotated.lines.slice(1, 3)).toEqual([
+      "Every earlier token of yours has stopped working.",
+      "The server is running, with the new token.",
+    ]);
+    expect(rotated.lines.join("\n")).not.toContain("Start the server again");
+    expect((await reach(old)).status).toBe(401);
+    expect((await reach(fresh)).status).toBe(200);
+    expect((await token(fakeIo(), { dataDir }, {})).lines[0]).toBe(fresh);
+  });
+
+  test("token --rotate run several times at once leaves one working token, and any run whose token was replaced says so", async () => {
+    const reach = (bearer: string) =>
+      fetch(`${url}/api/projects`, { headers: { authorization: `Bearer ${bearer}` } });
+
+    const runs = await Promise.allSettled(
+      Array.from({ length: 4 }, () => token(fakeIo(), { dataDir, rotate: true, yes: true }, {})),
+    );
+    const printed = runs.flatMap((run) => (run.status === "fulfilled" ? [run.value.lines[0]] : []));
+    const live = await Promise.all(printed.map((t) => reach(t ?? "")));
+    const onFile = (await token(fakeIo(), { dataDir }, {})).lines[0] ?? "";
+
+    expect(live.filter((r) => r.status === 200).length).toBeLessThanOrEqual(1);
+    // A file that holds a refused token is never left behind by runs that all said they succeeded.
+    if ((await reach(onFile)).status !== 200)
+      expect(runs.some((run) => run.status === "rejected")).toBe(true);
+    for (const run of runs)
+      if (run.status === "rejected")
+        expect(run.reason).toMatchObject({
+          failure: { what: expect.stringContaining("Another `ukt token --rotate`") as string },
+        });
+  });
+
   test("refuses the verbs that need the store to themselves, and says to stop it first", async () => {
     const stopFirst = {
       failure: {
@@ -166,9 +207,6 @@ describe("ukt serve on a temporary data directory", () => {
     await expect(
       restore(fakeIo(), join(dataDir, "token"), { dataDir, yes: true }, {}),
     ).rejects.toMatchObject(stopFirst);
-    await expect(token(fakeIo(), { dataDir, rotate: true, yes: true }, {})).rejects.toMatchObject(
-      stopFirst,
-    );
     await expect(
       serve(fakeIo(), { dataDir, host: "127.0.0.1", port: "0" }, {}),
     ).rejects.toMatchObject({ failure: { next: "Use the running server, or stop it first." } });
