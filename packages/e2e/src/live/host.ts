@@ -6,7 +6,7 @@
  * before anything is copied from the case. The earlier session's home is the one carried, so what
  * the harness wrote into its own memory goes with it.
  */
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isMemoryCall, type Adapter, type AdapterContext } from "../recall/adapter.ts";
 import { parseTranscript } from "../recall/transcript.ts";
@@ -17,9 +17,17 @@ import type { JudgeContext } from "../recall/judge.ts";
 import type { Items } from "../recall/items.ts";
 import type { SessionPlan } from "../recall/plan.ts";
 import type { Tools } from "../recall/preflight.ts";
-import { run } from "../recall/process.ts";
 import { copyEvidence, sessionIn, type Suite } from "../recall/runner.ts";
-import { MINUTE, type Arm, type Host, type Job, type Outcome } from "./pair.ts";
+import { copyCache } from "../recall/copy.ts";
+import {
+  MINUTE,
+  timerOf,
+  type Arm,
+  type Host,
+  type Job,
+  type Outcome,
+  type Phase,
+} from "./pair.ts";
 import { writeFile } from "node:fs/promises";
 
 /** An arm's product and its configuration. */
@@ -40,12 +48,15 @@ export interface LiveSetup {
   readonly out: string;
   /** A Go build cache warmed once, copied into each case's home; none when it was not made. */
   readonly warmCache?: string;
+  /** Called when a session's steps are done, with its case, before the session is counted as ended and before its store is read: the dry run has the stand-in earlier session store facts here, as a real one does. */
+  readonly afterSession?: (job: Job, c: Case) => Promise<void>;
+  /** Called with the case's home before a session is copied from it: the dry run writes the stand-in's instructions there. */
+  readonly beforeSession?: (job: Job, home: string) => Promise<void>;
+  /** The latest the set-up may end (`fit.ts`): an earlier case opened after it is void. */
+  readonly setupLimitMs: number;
   /** The time the run's command was given, in epoch milliseconds. */
   readonly startedAt: number;
 }
-
-/** A case's set-up may not take longer than this from the command: later, its units are void. */
-export const SET_UP_LIMIT_MS = 10 * MINUTE;
 
 const readingsOf = async (dir: string): Promise<string> => {
   const folder = join(dir, "transcripts");
@@ -131,41 +142,90 @@ export class LiveHost implements Host {
     const name = `u${job.unit}-${job.arm}-${job.task ?? "E"}`;
     const dir = dirname(job.dirs.home);
     const deadline = Date.now() + job.capMs;
+    const phases: Phase[] = [];
+    const timed = timerOf(this.now, phases);
+    const onPhase = (what: string, from: number, to: number): void => {
+      phases.push({ name: what, startMs: from - s.startedAt, endMs: to - s.startedAt });
+    };
     let c: Case | undefined;
-    let end: End = { kind: "done" };
+    let end: End;
+    let sessionEndMs: number | undefined;
     try {
-      c = await Case.open({
-        adapter,
-        context: s.context,
-        tools: s.tools,
-        config,
-        name,
-        chain: s.chain,
-        dir,
-        seeded: false,
-        carried,
-      });
-      if (this.now() > SET_UP_LIMIT_MS && !carried) {
-        end = { kind: "void", cause: "clock", detail: "set-up was not done by minute 10" };
-      } else {
-        if (s.warmCache !== undefined) await this.warm(c.home);
-        const ran = await sessionIn(
-          c,
-          this.suiteFor(job.arm),
-          plan,
+      c = await timed("open", () =>
+        Case.open({
+          adapter,
+          context: s.context,
+          tools: s.tools,
           config,
-          job.dirs.tree,
-          deadline,
-        );
-        this.harness ||= (ran.setup as { version?: string } | undefined)?.version ?? "";
-        end = ran.capped ?? ran.harness ?? end;
-      }
+          name,
+          chain: s.chain,
+          dir,
+          seeded: false,
+          carried,
+          homeInPlace: true,
+        }),
+      );
+      const ran = await this.work(c, job, plan, carried, deadline, timed, onPhase);
+      end = ran.end;
+      sessionEndMs = ran.sessionEndMs;
+      if (ran.sessionBeganMs !== undefined && sessionEndMs !== undefined)
+        phases.push({ name: "session", startMs: ran.sessionBeganMs, endMs: sessionEndMs });
     } catch (error) {
       end = failed(error);
     }
-    if (c !== undefined) await this.finish(c, name, plan.id);
-    if (job.arm === "none" && end.kind !== "void") end = (await this.leak(dir, name)) ?? end;
-    return { end, readings: await readingsOf(dir) };
+    if (c !== undefined) await this.finish(c, name, timed);
+    if (job.arm === "none" && end.kind !== "void")
+      end = (await timed("leak check", () => this.leak(dir, name))) ?? end;
+    return {
+      end,
+      readings: await readingsOf(dir),
+      phases,
+      ...(sessionEndMs === undefined ? {} : { sessionEndMs }),
+    };
+  }
+
+  /** The session in an opened case: warm cache, the steps with their judging, and when it ended. */
+  private async work(
+    c: Case,
+    job: Job,
+    plan: SessionPlan,
+    carried: boolean,
+    deadline: number,
+    timed: <T>(what: string, fn: () => Promise<T>) => Promise<T>,
+    onPhase: (what: string, from: number, to: number) => void,
+  ): Promise<{ end: End; sessionEndMs?: number; sessionBeganMs?: number }> {
+    const s = this.setup;
+    if (this.now() > s.setupLimitMs && !carried)
+      return {
+        end: {
+          kind: "void",
+          cause: "clock",
+          detail: `set-up was not done by minute ${(s.setupLimitMs / MINUTE).toFixed(1)}`,
+        },
+      };
+    // a later session's home was given its cache while the earlier session ran
+    if (s.warmCache !== undefined && !carried) await timed("warm", () => this.warm(c.home));
+    await s.beforeSession?.(job, c.home);
+    job.sessionStarted?.();
+    const began = this.now();
+    const ran = await sessionIn(
+      c,
+      this.suiteFor(job.arm),
+      plan,
+      s.arms[job.arm].config,
+      job.dirs.tree,
+      deadline,
+      onPhase,
+    );
+    // what the stand-in stores is the session's own work, as a real session's is: it is inside the session
+    await s.afterSession?.(job, c);
+    const sessionEndMs = this.now();
+    this.harness ||= (ran.setup as { version?: string } | undefined)?.version ?? "";
+    return {
+      end: ran.capped ?? ran.harness ?? { kind: "done" },
+      sessionEndMs,
+      sessionBeganMs: began,
+    };
   }
 
   /** A no-memory session whose transcripts show a call to the memory server: the baseline had memory, and the run is void. Said loudly. */
@@ -186,31 +246,57 @@ export class LiveHost implements Host {
     return undefined;
   }
 
-  /** Copies the warm Go build cache into a home, where Go looks for it. */
-  private async warm(home: string): Promise<void> {
-    const cache = join(home, ".cache", "go-build");
-    await mkdir(dirname(cache), { recursive: true });
-    await run("cp", ["-a", join(this.setup.warmCache as string, "go-build"), cache]);
+  /** Gives a home a private copy of the warm Go build cache, where Go looks for it: nothing is shared with any other home. */
+  private warm(home: string): Promise<void> {
+    return copyCache(join(this.setup.warmCache as string, "go-build"), home);
+  }
+
+  /** The same for a later session's home, made while the earlier session runs (the pair shape calls it). */
+  async warmHome(home: string): Promise<void> {
+    if (this.setup.warmCache !== undefined) await this.warm(home);
   }
 
   /**
    * Keeps the case's evidence and the store as it stands, then stops the server by waiting for its
    * exit. The home that goes on is the session's own, which holds what the harness wrote.
    */
-  private async finish(c: Case, name: string, session: string): Promise<void> {
-    await writeFile(
-      join(c.dir, "facts.json"),
-      JSON.stringify(await c.readStore(PROJECT).catch(() => [])),
+  private async finish(
+    c: Case,
+    name: string,
+    timed: <T>(what: string, fn: () => Promise<T>) => Promise<T>,
+  ): Promise<void> {
+    await timed("read facts", async () =>
+      writeFile(
+        join(c.dir, "facts.json"),
+        JSON.stringify(await c.readStore(PROJECT).catch(() => [])),
+      ),
     );
-    await c.close().catch(() => undefined);
-    const own = join(c.dir, "session-homes", session);
-    await readdir(own).then(
-      async () => {
-        await rm(c.home, { recursive: true, force: true });
-        await run("cp", ["-a", own, c.home]);
-      },
-      () => undefined,
+    await timed("release case", () => c.close(timed).catch(() => undefined));
+    // What the later sessions do not wait for is done after them: the evidence is copied while they run.
+    this.defer(name, "copy evidence", () =>
+      copyEvidence(c.dir, join(this.setup.out, "cases", name)),
     );
-    await copyEvidence(c.dir, join(this.setup.out, "cases", name));
+  }
+
+  private readonly deferred: Promise<unknown>[] = [];
+  private readonly deferredPhases = new Map<string, Phase[]>();
+
+  /** Starts `work` now and lets go of it: `settle` waits for it, and keeps how long it took under the unit's arm. */
+  private defer(name: string, phase: string, work: () => Promise<unknown>): void {
+    const [unit, arm, role] = name.split("-");
+    const key = `${unit}-${arm}`;
+    const startMs = this.now();
+    this.deferred.push(
+      work().then(() => {
+        const list = this.deferredPhases.get(key) ?? [];
+        list.push({ name: `${role}: ${phase}`, startMs, endMs: this.now() });
+        this.deferredPhases.set(key, list);
+      }),
+    );
+  }
+
+  async settle(): Promise<Readonly<Record<string, readonly Phase[]>>> {
+    await Promise.all(this.deferred);
+    return Object.fromEntries(this.deferredPhases);
   }
 }

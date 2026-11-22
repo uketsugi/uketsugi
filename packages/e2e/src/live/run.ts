@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Guard } from "../recall/quota.ts";
-import { runPairs, type Host, type UnitRecord } from "./pair.ts";
+import { runPairs, type Deadlines, type Host, type Phase, type UnitRecord } from "./pair.ts";
 import { poolSection } from "./pool.ts";
 import { proofsOf } from "./proofs.ts";
 import { render } from "./report.ts";
@@ -20,6 +20,11 @@ export interface RunOptions {
   /** Folder for the sessions' homes, trees and stores. */
   readonly work: string;
   readonly out: string;
+  readonly deadlines: Deadlines;
+  /** The set-up's stages on the run's clock, whether the release was cached, and the schedule worked out before the run (its arithmetic). */
+  readonly setup: readonly Phase[];
+  readonly releaseCached: boolean;
+  readonly schedule: readonly string[];
   readonly build: string;
   readonly config: string;
   readonly model: string;
@@ -47,6 +52,7 @@ export async function runUnits(host: Host, options: RunOptions): Promise<string>
     host,
     guard: options.guard,
     work: options.work,
+    deadlines: options.deadlines,
   });
   const file = {
     build: options.build,
@@ -55,16 +61,20 @@ export async function runUnits(host: Host, options: RunOptions): Promise<string>
     harness: options.harness(),
     hash: options.hash,
     minutes: host.now() / 60_000,
+    setup: options.setup,
+    releaseCached: options.releaseCached,
     units,
   };
   await writeRunFile(options.out, file);
+  const printing = host.now();
   const { failed, notes } = await proofsOf(options.out, file);
   const scored = await scoreRun(options.out, options.scoring);
   const earlier = await Promise.all(
     options.pool.map((folder) => scoreRun(folder, options.scoring)),
   );
-  const body = `${render(scored.meta, scored.units, poolSection(scored, earlier))}\n\nProofs:\n${[...notes, ...failed.map((f) => `FAILED ${f}`)].join("\n")}`;
+  const body = `${render(scored.meta, scored.units, poolSection(scored, earlier))}\n\nSchedule (worked out before the run, from the measured times):\n${options.schedule.join("\n")}\n\nProofs:\n${[...notes, ...failed.map((f) => `FAILED ${f}`)].join("\n")}`;
   const text = failed.length === 0 ? body : `VOID (a proof failed: ${failed.join("; ")}) · ${body}`;
   await writeFile(join(options.out, "report.txt"), text + "\n");
+  await writeRunFile(options.out, { ...file, printMs: host.now() - printing });
   return text;
 }

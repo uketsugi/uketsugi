@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -111,6 +112,8 @@ async function execute(
   tag: string,
   extraClaude = "",
   freezeFirst = true,
+  warmCache?: string,
+  afterSession?: (job: { unit: number; arm: string; task?: string }) => Promise<void>,
   armsFor: Record<"memory" | "none", { adapter: Adapter; config: string }> = {
     memory: { adapter: product, config: "setup" },
     none: { adapter: none, config: "none" },
@@ -160,6 +163,9 @@ ${extraClaude}echo '{"type":"result","is_error":false,"result":"ok"}'
     items: ITEMS,
     arms: armsFor,
     out,
+    ...(warmCache === undefined ? {} : { warmCache }),
+    ...(afterSession === undefined ? {} : { afterSession: (job) => afterSession(job) }),
+    setupLimitMs: 10 * 60_000,
     startedAt: Date.now(),
   });
 
@@ -170,6 +176,10 @@ ${extraClaude}echo '{"type":"result","is_error":false,"result":"ok"}'
     guard: new Guard({ utilization: 0.5, ok: true }),
     work: join(root, `work${tag}`),
     out,
+    deadlines: { capEMs: 22 * 60_000, capLMs: 18 * 60_000, lastStartMs: 36 * 60_000 },
+    setup: [],
+    releaseCached: true,
+    schedule: ["stand-in: no schedule"],
     build: "stand-in",
     config: "setup",
     model: "haiku",
@@ -302,3 +312,95 @@ test("the arms the command builds: the no-memory arm has no server, no MCP confi
   expect(memory.session("setup").allowedTools).toContain("mcp__uketsugi");
   expect(installCommands("setup").some((c) => c.join(" ").includes("mcp add"))).toBe(true);
 });
+
+const WANTED_PHASES = [
+  "E: tree",
+  "E: open",
+  "E: session",
+  "E: task T1 #0",
+  "E: judge T1 #0",
+  "E: reset T2",
+  "E: judge T2 #0",
+  "E: read facts",
+  "E: stop server",
+  "E: copy evidence",
+  "T4: tree",
+  "T4: carry",
+  "T4: open",
+  "T4: session",
+  "T4: judge T4 #0",
+  "T8: carry",
+];
+
+interface TimedArm {
+  phases: { name: string; startMs: number; endMs: number }[];
+  earlier: { startedMs: number; endedMs: number; readyMs: number };
+  later: Record<string, { startedMs: number; endedMs: number; readyMs: number }>;
+}
+
+/** What one arm's timing must show: every phase, each with a length, the session's end its own, and the later start after the host let go. */
+function checkTimedArm(arm: string, a: TimedArm): void {
+  const names = a.phases.map((p) => p.name);
+  for (const wanted of WANTED_PHASES) expect(names, `${arm} phases`).toContain(wanted);
+  for (const p of a.phases) expect(p.endMs).toBeGreaterThanOrEqual(p.startMs);
+  expect(a.earlier.endedMs).toBeLessThanOrEqual(a.earlier.readyMs);
+  expect(a.earlier.endedMs).toBe(a.phases.find((p) => p.name === "E: session")?.endMs);
+  expect(a.later["T4"]?.startedMs).toBeGreaterThanOrEqual(a.earlier.readyMs);
+}
+
+test("every phase of each arm is timed and kept in run.json, a session's end is its own end, and the printed result has a timing section", async () => {
+  const { out, text } = await execute("-t");
+  const run = JSON.parse(readFileSync(join(out, "run.json"), "utf8")) as {
+    units: { arms: Record<string, TimedArm> }[];
+  };
+  for (const arm of ["memory", "none"]) checkTimedArm(arm, run.units[0]?.arms[arm] as TimedArm);
+  expect(text).toContain("Timing, in minutes on the run's clock");
+  expect(text).toMatch(
+    /u1 memory: earlier session [\d.]+-[\d.]+, ready [\d.]+ \(stop [\d.]+, evidence [\d.]+\); T4: tree [\d.]+, carry [\d.]+, started [\d.]+/,
+  );
+  expect(text).toMatch(/slowest phase [^;\n]+ [\d.]+ min/);
+}, 240_000);
+
+test("every home has a private copy of the Go cache, the later sessions' made while the earlier session runs, and none is shared with another home or the master", async () => {
+  const warm = join(root, "warm-master");
+  mkdirSync(join(warm, "go-build", "ab"), { recursive: true });
+  writeFileSync(join(warm, "go-build", "ab", "entry"), "compiled");
+  const done = await execute("-w", "", true, warm);
+  const run = JSON.parse(readFileSync(join(done.out, "run.json"), "utf8")) as {
+    units: {
+      arms: Record<
+        string,
+        {
+          phases: { name: string; startMs: number; endMs: number }[];
+          earlier: { endedMs: number };
+        }
+      >;
+    }[];
+  };
+  const master = statSync(join(warm, "go-build", "ab", "entry")).ino;
+  const inodes: number[] = [master];
+  for (const arm of ["memory", "none"]) {
+    const a = run.units[0]?.arms[arm];
+    const named = (n: string) => a?.phases.find((p) => p.name === n);
+    expect(named("E: warm")).toBeDefined();
+    for (const task of ["T4", "T8"]) {
+      // made while the earlier session ran: it is over before the earlier session's end
+      expect(named(`${task}: warm`)?.endMs).toBeLessThanOrEqual(a?.earlier.endedMs as number);
+    }
+    for (const role of ["E", "T4", "T8"]) {
+      const file = join(done.work, "u1", arm, role, "home", ".cache", "go-build", "ab", "entry");
+      expect(readFileSync(file, "utf8")).toBe("compiled");
+      inodes.push(statSync(file).ino);
+    }
+  }
+  expect(new Set(inodes).size).toBe(inodes.length);
+}, 240_000);
+
+test("the host tells what to do when a session has ended, once for each of the six, before its store is read", async () => {
+  const calls: string[] = [];
+  await execute("-h", "", true, undefined, (job) => {
+    calls.push(`${job.arm}${job.task ?? "E"}`);
+    return Promise.resolve();
+  });
+  expect(calls.sort()).toEqual(["memoryE", "memoryT4", "memoryT8", "noneE", "noneT4", "noneT8"]);
+}, 240_000);

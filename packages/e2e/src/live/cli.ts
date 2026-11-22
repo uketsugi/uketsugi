@@ -6,6 +6,8 @@
  *     (the newest rate-limit event in the earlier run's kept transcripts) and fetches nothing.
  * `live --prepare-only --ergo <mirror> [--units N]`  set-up with no task session, timed.
  * `live --calibrate --ergo <mirror> [--provider-k N]`                  measures the machine and the provider, writes width.json.
+ * `live --dry-run --durations <file> [--scale x] [--facts <file>] --ergo <mirror> --units N`  the whole run with a stand-in for the harness: no tokens, no sign-in.
+ * `live --measure <run folder>[,<run folder>...] --out <file>`  the times those runs show, for `--measured` of the next run.
  * `live --memcheck`                                   whether the harness's own memory is read in a later session.
  * `live --rescore <run folder> [--pool <earlier run folders>]`  scores a kept run with no session.
  *
@@ -19,7 +21,14 @@ import { uketsugi } from "../recall/uketsugi.ts";
 import { poolSection } from "./pool.ts";
 import { render } from "./report.ts";
 import { scoreRun, type Scoring } from "./score.ts";
-import { liveCalibrate, liveMemcheck, liveRun, prepareOnly } from "./start.ts";
+import {
+  liveCalibrate,
+  liveDry,
+  liveMeasure,
+  liveMemcheck,
+  liveRun,
+  prepareOnly,
+} from "./start.ts";
 
 const USAGE = [
   "usage: live --ergo <mirror> --reading-from <earlier run folder> [--config setup] [--units N | --width width.json] [--pool a,b] [--out dir]",
@@ -44,6 +53,12 @@ const OPTIONS = {
   width: { type: "string" },
   pool: { type: "string" },
   "provider-k": { type: "string" },
+  "dry-run": { type: "boolean" },
+  measure: { type: "string" },
+  measured: { type: "string" },
+  durations: { type: "string" },
+  scale: { type: "string" },
+  facts: { type: "string" },
   help: { type: "boolean" },
 } as const;
 
@@ -65,6 +80,8 @@ async function main(): Promise<void> {
   else if (values.rescore !== undefined)
     console.log(await rescore(values.rescore, values.pool?.split(",") ?? []));
   else if (values["prepare-only"] === true) await prepareOnly(values);
+  else if (values.measure !== undefined) await liveMeasure(values);
+  else if (values["dry-run"] === true) await liveDry(values);
   else if (values.calibrate === true) await liveCalibrate(values);
   else if (values.memcheck === true) await liveMemcheck(values);
   else await liveRun(values);

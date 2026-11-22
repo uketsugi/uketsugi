@@ -23,6 +23,8 @@ export interface Build {
 }
 
 export interface Release {
+  /** Taken from the per-commit cache, not built. */
+  readonly cached: boolean;
   readonly dir: string;
   readonly tarball: string;
   readonly installScript: string;
@@ -64,7 +66,7 @@ export async function buildRelease(
   await mkdir(dir);
   if (kept !== undefined && existsSync(join(kept, tarball))) {
     for (const name of FILES(tarball)) await copyFile(join(kept, name), join(dir, name));
-    return { dir, tarball, installScript: join(dir, "install.sh") };
+    return { dir, tarball, installScript: join(dir, "install.sh"), cached: true };
   }
   await run("bash", [join(repo, "deploy", "build.sh")], { cwd: repo });
   const dist = join(repo, "deploy", "dist");
@@ -73,7 +75,19 @@ export async function buildRelease(
     await mkdir(kept, { recursive: true });
     for (const name of FILES(tarball)) await copyFile(join(dist, name), join(kept, name));
   }
-  return { dir, tarball, installScript: join(dir, "install.sh") };
+  return { dir, tarball, installScript: join(dir, "install.sh"), cached: false };
+}
+
+/** Whether a release of this tree is already in the cache: a clean tree whose commit has a kept tarball. */
+export async function releaseCached(cache: string, repo = REPOSITORY): Promise<boolean> {
+  const build = await describeBuild(repo);
+  const manifest = JSON.parse(
+    await readFile(join(repo, "packages", "cli", "package.json"), "utf8"),
+  ) as { version: string };
+  return (
+    !build.dirty &&
+    existsSync(join(cache, build.head, `uketsugi-${manifest.version}-linux-x64.tar.gz`))
+  );
 }
 
 /** Installs the release into `home`, as a person would, with no other tool of the machine's on PATH. */

@@ -55,7 +55,9 @@ describe("the report of a kept run", () => {
     const text = await reported("capped", true);
     const first = text.split("\n")[0] as string;
     expect(first).toContain("live-hour b1 setup haiku · 3 units, 1 void, 1 capped, 42 min");
-    expect(first).toContain("stored 7/10 (outright 4/4, in passing 3/4, found 0/2)");
+    expect(first).toContain(
+      "stored 8/15 (outright 4/6, in passing 4/6, found 0/3) [from the 3 units whose earlier session ran, 1 of them void]",
+    );
     expect(first).toContain("found 5/7 · used 4/5");
     expect(first).toContain("deciding tests with memory 4/6, without 0/6");
     expect(first).toContain("tasks 2/4 vs 0/4");
@@ -120,10 +122,10 @@ describe("the report of a kept run", () => {
   test("the ladder keeps told outright, in passing and found apart, and the void is named with its cause", async () => {
     const text = await reported("ladder", false);
     expect(text).toMatch(
-      /P1 +outright, +stored 2\/2 {2}found 1\/2 \(brief 0, search 1\) {2}used 1\/1/,
+      /P1 +outright, +stored 2\/3 {2}found 1\/2 \(brief 0, search 1\) {2}used 1\/1/,
     );
-    expect(text).toMatch(/D1 +passing, +stored 2\/2 {2}found 2\/2/);
-    expect(text).toMatch(/D8 +found, +stored 0\/2/);
+    expect(text).toMatch(/D1 +passing, +stored 3\/3 {2}found 2\/2/);
+    expect(text).toMatch(/D8 +found, +stored 0\/3/);
     expect(text).toContain("u2 none T4: provider, HTTP 429");
     expect(text).toContain("u1 memory: suite: /api/capabilities degraded=[]");
   });

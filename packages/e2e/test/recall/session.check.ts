@@ -37,7 +37,7 @@ async function releaseToUse(workspace: Workspace): Promise<Release> {
   if (dir === undefined) return buildRelease(workspace);
   const tarball = readdirSync(dir).find((f) => /^uketsugi-.*-linux-x64\.tar\.gz$/.test(f));
   if (tarball === undefined) throw new Error(`no release tarball in ${dir}`);
-  return { dir, tarball, installScript: join(dir, "install.sh") };
+  return { dir, tarball, installScript: join(dir, "install.sh"), cached: true };
 }
 
 beforeAll(async () => {

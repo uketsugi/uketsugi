@@ -19,6 +19,13 @@ const arm = (t4: LaterScore, t8: LaterScore): ArmScore => ({
   unmatched: [],
   storedByPatterns: {},
   labelled: null,
+  timing: {
+    phases: [],
+    earlierStartMs: null,
+    earlierEndMs: null,
+    earlierReadyMs: null,
+    laterStartMs: { T4: null, T8: null },
+  },
   minutes: 1,
 });
 

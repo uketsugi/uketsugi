@@ -17,6 +17,7 @@ import { Environment, MODEL_PORT, SERVER_PORT } from "./environment.ts";
 import { Forwarder } from "./forwarder.ts";
 import { startMailRelay, type MailRelay } from "./mailrelay.ts";
 import { endWithServer, serverEnd } from "./ending.ts";
+import { copyHome } from "./copy.ts";
 import { run } from "./process.ts";
 import type { Tools } from "./preflight.ts";
 import { runSession, type SessionOptions, type SessionResult } from "./session.ts";
@@ -43,6 +44,8 @@ export interface CaseOptions {
   readonly config: string;
   readonly name: string;
   readonly chain?: ChainData;
+  /** The session runs in the case's own home, not in a copy of it: for a case that has one session, whose home goes on to the next (no copy at the start, none to put back at the end). */
+  readonly homeInPlace?: boolean;
   /** The case's folder, when the caller has made it (a later session's, holding the carried home and store); else one is made in the workspace. */
   readonly dir?: string;
   /** The folder already holds a set-up home and a store: nothing is installed, and nothing is seeded. */
@@ -120,10 +123,11 @@ export class Case {
   /** Runs one step of a session; the steps of one `name` share one copy of the set-up home. */
   async session({ name, ...rest }: StepOptions): Promise<SessionResult> {
     const { adapter, context, config } = this.options;
-    const sessionHome = join(this.dir, "session-homes", name);
+    const sessionHome =
+      this.options.homeInPlace === true ? this.home : join(this.dir, "session-homes", name);
     if (!existsSync(sessionHome)) {
       await mkdir(dirname(sessionHome), { recursive: true });
-      await run("cp", ["-a", this.home, sessionHome]);
+      await copyHome(this.home, sessionHome);
     }
     const step = this.steps.get(name) ?? 0;
     this.steps.set(name, step + 1);
@@ -179,10 +183,13 @@ export class Case {
     if (this.serving.port > 0) await this.environment.expose(SERVER_PORT, this.serving.port);
   }
 
-  async close(): Promise<void> {
-    await this.relay?.stop();
-    await this.serving.stop();
-    await this.forwarder.stop();
-    await this.environment.close();
+  /** Stops what the case started; `timed`, when given, is told each stop so that a run can keep how long each took. */
+  async close(
+    timed: <T>(name: string, fn: () => Promise<T>) => Promise<T> = (_, fn) => fn(),
+  ): Promise<void> {
+    await timed("stop mail relay", async () => this.relay?.stop());
+    await timed("stop server", () => this.serving.stop());
+    await timed("stop forwarder", () => this.forwarder.stop());
+    await timed("close environment", () => this.environment.close());
   }
 }

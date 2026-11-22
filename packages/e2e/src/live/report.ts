@@ -10,7 +10,7 @@
  * server lacked the model, or when more than a quarter of the units are void.
  */
 import { wilcoxonExact } from "./exact.ts";
-import { ARMS, LATER, type Arm } from "./pair.ts";
+import { ARMS, LATER, MINUTE, type Arm } from "./pair.ts";
 import { ITEMS, TOLD, type Told } from "./data.ts";
 import { DECIDING, rungsOf, type RunMeta, type UnitScore } from "./score.ts";
 
@@ -146,6 +146,10 @@ function costFigure(c: Cost, withP: boolean): string {
   return `${mega(c.memory)} vs ${mega(c.none)} a ${withP ? "session" : "unit"} (${change(c)}${withP && c.p !== null ? `, p ${c.p.toFixed(2)}` : ""})`;
 }
 
+/** Units whose earlier session ran, void or not: what they stored is known whatever became of their later sessions. */
+const ranEarlier = (units: readonly UnitScore[]): UnitScore[] =>
+  units.filter((u) => u.arms.memory.timing.earlierEndMs !== null);
+
 function storedByTold(counted: readonly UnitScore[], kind: Told): string {
   const items = ITEMS.filter((i) => TOLD[i] === kind);
   const hits = sum(
@@ -166,10 +170,15 @@ function labelNote(counted: readonly UnitScore[], byLabels: number): string {
 /** The one line, first. */
 export function headline(meta: RunMeta, units: readonly UnitScore[]): string {
   const f = figuresOf(units);
-  const rungs = f.counted.map(rungsOf);
-  const cells = rungs.flatMap((r) => Object.values(r));
+  const cells = f.counted.flatMap((u) => Object.values(rungsOf(u)));
   const stored = cells.filter((c) => c.stored);
   const found = stored.filter((c) => c.found !== null);
+  const ran = ranEarlier(units);
+  const storedCells = ran.flatMap((u) => Object.values(rungsOf(u))).filter((c) => c.stored);
+  const voidNote =
+    ran.length === f.counted.length
+      ? ""
+      : ` [from the ${ran.length} units whose earlier session ran, ${ran.length - f.counted.length} of them void]`;
   const decide = (arm: Arm): number =>
     sum(
       f.counted.map(
@@ -188,7 +197,7 @@ export function headline(meta: RunMeta, units: readonly UnitScore[]): string {
   return [
     `${lead}live-hour ${meta.build} ${meta.config} ${meta.model}`,
     `${units.length} units, ${f.voidUnits} void, ${f.capped} capped, ${Math.round(meta.minutes)} min`,
-    `stored ${share(stored.length, cells.length)}${labelNote(f.counted, stored.length)} (outright ${storedByTold(f.counted, "outright")}, in passing ${storedByTold(f.counted, "passing")}, found ${storedByTold(f.counted, "found")})`,
+    `stored ${share(storedCells.length, ran.length * ITEMS.length)}${labelNote(ran, storedCells.length)} (outright ${storedByTold(ran, "outright")}, in passing ${storedByTold(ran, "passing")}, found ${storedByTold(ran, "found")})${voidNote}`,
     `found ${share(found.length, stored.length)}`,
     `used ${share(found.filter((c) => c.used).length, found.length)}`,
     `deciding tests with memory ${share(decide("memory"), f.counted.length * DECIDING.length)}, without ${share(decide("none"), f.counted.length * DECIDING.length)}`,
@@ -202,15 +211,17 @@ export function headline(meta: RunMeta, units: readonly UnitScore[]): string {
 /** The ladder per item: each rung's count among the units that reached it, and the routes of found apart. */
 export function ladder(units: readonly UnitScore[]): string {
   const counted = units.filter((u) => !u.void);
+  const ran = ranEarlier(units);
   const rows = ITEMS.map((item) => {
+    const storedHere = ran.map((u) => rungsOf(u)[item]).filter((c) => c !== undefined);
     const cells = counted.map((u) => rungsOf(u)[item]).filter((c) => c !== undefined);
     const stored = cells.filter((c) => c.stored);
     const found = stored.filter((c) => c.found !== null);
     const brief = found.filter((c) => c.found === "brief").length;
-    return `${item.padEnd(3)} ${(TOLD[item] + ",").padEnd(9)} stored ${share(stored.length, cells.length)}  found ${share(found.length, stored.length)} (brief ${brief}, search ${found.length - brief})  used ${share(found.filter((c) => c.used).length, found.length)}`;
+    return `${item.padEnd(3)} ${(TOLD[item] + ",").padEnd(9)} stored ${share(storedHere.filter((c) => c.stored).length, storedHere.length)}  found ${share(found.length, stored.length)} (brief ${brief}, search ${found.length - brief})  used ${share(found.filter((c) => c.used).length, found.length)}`;
   });
   return [
-    "The ladder, per item (a cell is a unit; each rung counts those that reached it):",
+    `The ladder, per item (a cell is a unit; stored counts every unit whose earlier session ran, void or not; found and used count the units that were not void):`,
     ...rows,
   ].join("\n");
 }
@@ -248,6 +259,41 @@ export function unmatched(units: readonly UnitScore[]): string {
   ].join("\n");
 }
 
+const min = (ms: number): string => (ms / MINUTE).toFixed(1);
+
+/** One arm's path from the earlier session's end to the later sessions' start, phase by phase. */
+function armTiming(u: UnitScore, arm: Arm): string {
+  const t = u.arms[arm].timing;
+  const ended = t.earlierEndMs;
+  if (ended === null) return `u${u.unit} ${arm}: the earlier session did not start`;
+  const length = (name: string): number =>
+    t.phases.filter((p) => p.name === name).reduce((sum, p) => sum + p.endMs - p.startMs, 0);
+  const ready =
+    t.earlierReadyMs === null
+      ? ""
+      : `, ready ${min(t.earlierReadyMs)} (stop ${min(length("E: stop server"))}, evidence ${min(length("E: copy evidence"))})`;
+  const later = LATER.map((task) => {
+    const started = t.laterStartMs[task];
+    return started === null
+      ? `${task} did not start`
+      : `${task}: tree ${min(length(`${task}: tree`))}, carry ${min(length(`${task}: carry`))}, started ${min(started)} (${min(started - ended)} after the earlier session ended)`;
+  }).join("; ");
+  const slowest = [...t.phases].sort((a, b) => b.endMs - b.startMs - (a.endMs - a.startMs))[0];
+  const slow =
+    slowest === undefined
+      ? ""
+      : `; slowest phase ${slowest.name} ${min(slowest.endMs - slowest.startMs)} min`;
+  return `u${u.unit} ${arm}: earlier session ${min(t.earlierStartMs ?? 0)}-${min(ended)}${ready}; ${later}${slow}`;
+}
+
+/** Where the time went, unit by unit and arm by arm, and the slowest phase of each. */
+export function timing(units: readonly UnitScore[]): string {
+  const rows = units.flatMap((u) => ARMS.map((arm) => armTiming(u, arm)));
+  return ["Timing, in minutes on the run's clock (every phase is in run.json):", ...rows].join(
+    "\n",
+  );
+}
+
 export function voids(units: readonly UnitScore[]): string {
   const lines = units.flatMap((u) => u.voids);
   const capped = units
@@ -277,6 +323,8 @@ export function render(meta: RunMeta, units: readonly UnitScore[], pooled: strin
     unmatched(units),
     "",
     arms(units),
+    "",
+    timing(units),
     "",
     voids(units),
     "",

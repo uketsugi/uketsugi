@@ -132,7 +132,12 @@ function writeArm(folder: string, unit: number, arm: "memory" | "none", spec: Ar
       "requests.jsonl": requests(tokens[task]),
     });
   }
-  return { earlier: at(spec.end?.E ?? DONE), later, carried: { memory: [], instructions: [] } };
+  return {
+    phases: [],
+    earlier: at(spec.end?.E ?? DONE),
+    later,
+    carried: { memory: [], instructions: [] },
+  };
 }
 
 export interface UnitSpec {

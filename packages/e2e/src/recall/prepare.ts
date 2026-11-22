@@ -72,11 +72,26 @@ export async function prepare(
   chain: ChainData,
   ergo: string,
   verify = true,
-  options: { tasks?: readonly string[]; releaseCache?: string } = {},
+  options: {
+    tasks?: readonly string[];
+    releaseCache?: string;
+    /** Told what each stage of the set-up took (epoch milliseconds). */
+    onPhase?: (name: string, from: number, to: number) => void;
+  } = {},
 ): Promise<Prepared> {
   say(`workspace ${workspace.path}`);
   say(`cloning ergo from ${ergo}, rebuilding the chain`);
-  const rebuilt = await rebuildChain(chain, ergo, workspace.at("mirror"), options.tasks);
+  const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    const from = Date.now();
+    try {
+      return await fn();
+    } finally {
+      options.onPhase?.(name, from, Date.now());
+    }
+  };
+  const rebuilt = await timed("set-up: rebuild the chain", () =>
+    rebuildChain(chain, ergo, workspace.at("mirror"), options.tasks),
+  );
   const context: JudgeContext = {
     chain,
     tools,
@@ -86,13 +101,17 @@ export async function prepare(
   let verified = true;
   if (verify) {
     say("judging every task at its parent and at its squash, in the sandbox");
-    verified = await judgeChain(context, rebuilt, workspace, options.tasks);
+    verified = await timed("set-up: prove the tasks", () =>
+      judgeChain(context, rebuilt, workspace, options.tasks),
+    );
   }
   say("building the working tree");
   const build = await describeBuild(REPOSITORY);
-  const release = await buildRelease(workspace, REPOSITORY, options.releaseCache);
+  const release = await timed("set-up: release", () =>
+    buildRelease(workspace, REPOSITORY, options.releaseCache),
+  );
   const home = workspace.at("ukt-home");
-  const version = await installRelease(release, home);
+  const version = await timed("set-up: install release", () => installRelease(release, home));
   say(
     `installed: ukt --version ${version} (commit ${build.head.slice(0, 12)}${build.dirty ? ", dirty" : ""})`,
   );

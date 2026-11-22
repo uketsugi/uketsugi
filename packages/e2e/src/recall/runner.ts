@@ -77,6 +77,8 @@ export interface Running {
   /** When the session must end, as a time: a step is stopped there, and no step starts after it. */
   readonly deadline?: number;
   readonly startedAt?: number;
+  /** Told how long each step, judging and reset took (epoch milliseconds), so that a live run can keep every phase. */
+  readonly onPhase?: (name: string, from: number, to: number) => void;
   /** Set when the session was stopped at its deadline: nothing more is asked of it. */
   capped?: End;
   /** Set when the harness failed on its own (the recall suite goes on and judges the tree, as it always has; a live run records it). */
@@ -101,6 +103,7 @@ async function step(
 ): Promise<SessionResult> {
   const { c, plan } = run;
   const index = c.stepOf(plan.id);
+  const began = Date.now();
   const result = await c.session({
     name: plan.id,
     tree: run.tree,
@@ -110,6 +113,7 @@ async function step(
     ...(run.deadline === undefined ? {} : { capMs: Math.max(1, run.deadline - Date.now()) }),
     stopAtFirstWrite: plan.kill_after === "write",
   });
+  run.onPhase?.(`${kind}${task === null ? "" : ` ${task}`} #${index}`, began, Date.now());
   if (result.end.kind === "capped") run.capped = result.end;
   else if (result.end.kind === "harness") run.harness ??= result.end;
   else if (result.end.kind !== "done") throw new SessionEnded(result.end);
@@ -141,7 +145,9 @@ async function task(run: Running, name: string): Promise<void> {
     if (expired(run)) return;
     const result = await step(run, attempt === 0 ? "task" : "followup", prompt, name);
     if (result.killed && run.capped === undefined) return;
+    const judging = Date.now();
     const judged = await judge(suite.judge, name, run.tree);
+    run.onPhase?.(`judge ${name} #${attempt}`, judging, Date.now());
     await mkdir(join(c.dir, "judge"), { recursive: true });
     await writeJson(join(c.dir, "judge", `${plan.id}.${name}.${attempt}.json`), judged);
     if (judged.passed || run.capped !== undefined) return;
@@ -156,9 +162,11 @@ export async function steps(run: Running): Promise<void> {
   if (row.firstMessage !== undefined) await step(run, "activate", row.firstMessage, null);
   for (const x of plan.steps) {
     if (expired(run)) return;
-    if ("reset" in x)
+    if ("reset" in x) {
+      const resetting = Date.now();
       await resetTree(suite.rebuilt, suite.rebuilt.parent[x.reset] as string, run.tree);
-    else if ("task" in x) await task(run, x.task);
+      run.onPhase?.(`reset ${x.reset}`, resetting, Date.now());
+    } else if ("task" in x) await task(run, x.task);
     else await step(run, "say", x.say_after_task, null);
   }
 }
@@ -171,6 +179,7 @@ export async function sessionIn(
   config: string,
   tree: string,
   deadline?: number,
+  onPhase?: Running["onPhase"],
 ): Promise<Running> {
   const baseline = plan.role === "probe" ? await treeStatus(tree) : undefined;
   const run: Running = {
@@ -184,6 +193,7 @@ export async function sessionIn(
     setup: undefined,
     startedAt: Date.now(),
     ...(deadline === undefined ? {} : { deadline }),
+    ...(onPhase === undefined ? {} : { onPhase }),
   };
   await steps(run);
   return run;

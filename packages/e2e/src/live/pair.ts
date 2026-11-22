@@ -11,14 +11,19 @@
  * The host does what needs a harness, a server and a tree; this runs the order and the clock.
  */
 import { existsSync } from "node:fs";
-import { cp, mkdir, readdir } from "node:fs/promises";
+import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { End } from "../recall/ending.ts";
+import { copyHome, copyTree } from "../recall/copy.ts";
 import type { Guard } from "../recall/quota.ts";
 
 export const MINUTE = 60_000;
-export const CAP_MS = 22 * MINUTE;
-export const LAST_START_MS = 30 * MINUTE;
+/** The deadlines inside the owner's hour (`fit.ts` says what each is for): the caps of the earlier and of a later session, and the last minute a later session may start. */
+export interface Deadlines {
+  readonly capEMs: number;
+  readonly capLMs: number;
+  readonly lastStartMs: number;
+}
 export const ARMS = ["memory", "none"] as const;
 export const LATER = ["T4", "T8"] as const;
 
@@ -40,10 +45,23 @@ export interface Job {
   readonly dirs: Dirs;
   /** The session is stopped this long after it starts. */
   readonly capMs: number;
+  /** Called by the host as the session's first step is about to start: what the later sessions need that does not depend on it can be made from here. */
+  readonly sessionStarted?: () => void;
+}
+
+/** One phase of a unit's arm, on the run's clock: what took the time between the command and the result. */
+export interface Phase {
+  readonly name: string;
+  readonly startMs: number;
+  readonly endMs: number;
 }
 
 export interface Outcome {
   readonly end: End;
+  /** What the host timed inside the session: opening the case, each step, each judging, the server's stop, the copies. */
+  readonly phases?: readonly Phase[];
+  /** When the session itself ended (its last step and the judging of it), before anything is stopped or copied. */
+  readonly sessionEndMs?: number;
   /** Text of the session's transcripts that holds its rate-limit events, for the guard. */
   readonly readings: string;
 }
@@ -57,11 +75,18 @@ export interface Host {
   earlier(job: Job): Promise<Outcome>;
   /** Runs one later session to its end in a case that holds the carried home and store. */
   later(job: Job): Promise<Outcome>;
+  /** Gives the home a later session will run in what does not depend on the earlier session (its private copy of the warm Go cache); called while the earlier session runs. */
+  warmHome?(home: string): Promise<void>;
+  /** Waits for what the host left to do after letting go of its sessions (copying their evidence, removing what they replaced), and says how long each took, by `u<unit>-<arm>`. */
+  settle?(): Promise<Readonly<Record<string, readonly Phase[]>>>;
 }
 
 export interface SessionRecord {
   readonly startedMs: number | null;
+  /** The session's own end: its last step and the judging of it. */
   readonly endedMs: number | null;
+  /** When the host had stopped its server and let go of it: what the later sessions wait for. */
+  readonly readyMs?: number | null;
   readonly end: End;
 }
 
@@ -72,6 +97,8 @@ export interface Carried {
 }
 
 export interface ArmRecord {
+  /** Every phase of this arm, in the order they began, on the run's clock. */
+  readonly phases: readonly Phase[];
   readonly earlier: SessionRecord;
   readonly later: Partial<Record<Later, SessionRecord>>;
   readonly carried: Carried;
@@ -95,10 +122,8 @@ export async function memoryFilesOf(home: string): Promise<string[]> {
 
 /** Copies E's home and store (an arm with no product has none), and E's tree's instruction files, to where L runs; says what went. */
 export async function carry(from: Dirs, to: Dirs): Promise<Carried> {
-  await mkdir(to.home, { recursive: true });
-  await cp(from.home, to.home, { recursive: true, preserveTimestamps: true });
-  if (existsSync(from.data))
-    await cp(from.data, to.data, { recursive: true, preserveTimestamps: true });
+  await copyHome(from.home, to.home);
+  if (existsSync(from.data)) await copyTree(from.data, to.data);
   const instructions: string[] = [];
   for (const name of INSTRUCTIONS) {
     const copied = await cp(join(from.tree, name), join(to.tree, name), {
@@ -119,6 +144,22 @@ export interface PairOptions {
   readonly guard: Guard;
   /** Folder for the sessions' homes, trees and stores. */
   readonly work: string;
+  readonly deadlines: Deadlines;
+}
+
+/** Times each call of what it is given on `now`'s clock and pushes the phase. */
+export function timerOf(
+  now: () => number,
+  phases: Phase[],
+): <T>(name: string, fn: () => Promise<T>) => Promise<T> {
+  return async (name, fn) => {
+    const startMs = now();
+    try {
+      return await fn();
+    } finally {
+      phases.push({ name, startMs, endMs: now() });
+    }
+  };
 }
 
 const dirsOf = (work: string, unit: number, arm: Arm, role: string): Dirs => ({
@@ -138,26 +179,57 @@ class Run {
   private async attempt(
     job: Omit<Job, "capMs">,
     go: (job: Job) => Promise<Outcome>,
+    phases: Phase[],
+    role: string,
   ): Promise<SessionRecord> {
-    const { host, guard } = this.options;
+    const { host, guard, deadlines } = this.options;
     const startedMs = host.now();
     const barred: End | undefined = !guard.mayStart()
       ? { kind: "void", cause: "quota", detail: "the window is near full: no session starts" }
-      : startedMs > LAST_START_MS
+      : startedMs > deadlines.lastStartMs
         ? { kind: "void", cause: "clock", detail: "past minute 30 of the run: no session starts" }
         : undefined;
     if (barred !== undefined) return { startedMs: null, endedMs: null, end: barred };
-    const outcome = await go({ ...job, capMs: CAP_MS });
+    const outcome = await go({
+      ...job,
+      capMs: job.task === undefined ? deadlines.capEMs : deadlines.capLMs,
+    });
     guard.observe(outcome.readings, Date.now() / 1000);
-    return { startedMs, endedMs: host.now(), end: outcome.end };
+    const readyMs = host.now();
+    phases.push(...(outcome.phases ?? []).map((p) => ({ ...p, name: `${role}: ${p.name}` })));
+    return { startedMs, endedMs: outcome.sessionEndMs ?? readyMs, readyMs, end: outcome.end };
   }
 
   /** One unit in one arm: E, then both L at once. */
   async arm(unit: number, arm: Arm): Promise<ArmRecord> {
     const { host, work } = this.options;
+    const phases: Phase[] = [];
+    const timed = timerOf(() => host.now(), phases);
     const dirs = dirsOf(work, unit, arm, "E");
-    await host.tree("T1", dirs.tree);
-    const earlier = await this.attempt({ unit, arm, dirs }, (job) => host.earlier(job));
+    await timed("E: tree", () => host.tree("T1", dirs.tree));
+    // The later sessions' trees do not depend on the earlier session: they are made while it runs, from the moment it starts.
+    const trees = new Map<Later, Promise<void>>();
+    const prefetch = (): void => {
+      for (const task of LATER)
+        if (!trees.has(task))
+          trees.set(
+            task,
+            (async () => {
+              const there = dirsOf(work, unit, arm, task);
+              await timed(`${task}: tree`, () => host.tree(task, there.tree));
+              if (host.warmHome !== undefined) {
+                const warm = host.warmHome.bind(host);
+                await timed(`${task}: warm`, () => warm(there.home));
+              }
+            })(),
+          );
+    };
+    const earlier = await this.attempt(
+      { unit, arm, dirs, sessionStarted: prefetch },
+      (job) => host.earlier(job),
+      phases,
+      "E",
+    );
     const later: Partial<Record<Later, SessionRecord>> = {};
     let carried: Carried = { memory: [], instructions: [] };
     await Promise.all(
@@ -171,14 +243,19 @@ class Run {
           return;
         }
         const there = dirsOf(work, unit, arm, task);
-        await host.tree(task, there.tree);
-        carried = await carry(dirs, there);
-        later[task] = await this.attempt({ unit, arm, task, dirs: there }, (job) =>
-          host.later(job),
+        if (!trees.has(task)) prefetch();
+        await trees.get(task);
+        carried = await timed(`${task}: carry`, () => carry(dirs, there));
+        later[task] = await this.attempt(
+          { unit, arm, task, dirs: there },
+          (job) => host.later(job),
+          phases,
+          task,
         );
       }),
     );
-    return { earlier, later, carried };
+    await Promise.allSettled(trees.values());
+    return { phases, earlier, later, carried };
   }
 }
 
@@ -188,7 +265,7 @@ const voidOf = (arm: ArmRecord): boolean =>
 /** Runs every unit in both arms at once, each as soon as its own parts allow, and says which units are void. */
 export async function runPairs(options: PairOptions): Promise<UnitRecord[]> {
   const run = new Run(options);
-  return Promise.all(
+  const units = await Promise.all(
     Array.from({ length: options.units }, async (_, n) => {
       const unit = n + 1;
       const [memory, none] = await Promise.all(ARMS.map((arm) => run.arm(unit, arm)));
@@ -196,4 +273,18 @@ export async function runPairs(options: PairOptions): Promise<UnitRecord[]> {
       return { unit, arms, void: voidOf(arms.memory) || voidOf(arms.none) };
     }),
   );
+  const late = (await options.host.settle?.()) ?? {};
+  const merged = (unit: number, arm: Arm, record: ArmRecord): ArmRecord => ({
+    ...record,
+    phases: [...record.phases, ...(late[`u${unit}-${arm}`] ?? [])].sort(
+      (a, b) => a.startMs - b.startMs,
+    ),
+  });
+  return units.map((u) => ({
+    ...u,
+    arms: {
+      memory: merged(u.unit, "memory", u.arms.memory),
+      none: merged(u.unit, "none", u.arms.none),
+    },
+  }));
 }

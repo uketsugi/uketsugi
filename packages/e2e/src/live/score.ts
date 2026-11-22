@@ -18,7 +18,15 @@ import { Seed, boilerplateStarts, recalled, stored } from "../recall/measure.ts"
 import { spendOf } from "../recall/spend.ts";
 import { ITEMS, TOLD } from "./data.ts";
 import { factsStating, labelProblems, readLabels, type Labels } from "./labels.ts";
-import { ARMS, LATER, type Arm, type Later, type UnitRecord } from "./pair.ts";
+import {
+  ARMS,
+  LATER,
+  type Arm,
+  type Later,
+  type Phase,
+  type ArmRecord,
+  type UnitRecord,
+} from "./pair.ts";
 
 export const DECIDING = ["D1", "D2", "P1"] as const;
 
@@ -33,6 +41,10 @@ export interface RunMeta {
 
 export interface RunFile extends RunMeta {
   readonly units: readonly UnitRecord[];
+  /** The set-up's stages, on the run's clock; whether the release came from the cache; how long scoring and printing took. */
+  readonly setup?: readonly Phase[];
+  readonly releaseCached?: boolean;
+  readonly printMs?: number;
 }
 
 export interface Rungs {
@@ -56,6 +68,14 @@ export interface LaterScore extends SessionScore {
   readonly found: Record<string, "brief" | "search" | null>;
 }
 
+export interface ArmTiming {
+  readonly phases: readonly Phase[];
+  readonly earlierStartMs: number | null;
+  readonly earlierEndMs: number | null;
+  readonly earlierReadyMs: number | null;
+  readonly laterStartMs: Record<Later, number | null>;
+}
+
 export interface ArmScore {
   readonly earlier: SessionScore;
   readonly later: Record<Later, LaterScore | null>;
@@ -63,6 +83,8 @@ export interface ArmScore {
   readonly stored: Record<string, boolean>;
   /** What the server's log says of its model; null for an arm with no server. */
   readonly modelLine: string | null;
+  /** What took the time: the arm's phases, and the times the schedule turns on. */
+  readonly timing: ArmTiming;
   /** The memory arm's store by the patterns alone, item by item; empty for the other arm. */
   readonly storedByPatterns: Record<string, boolean>;
   /** How many stored facts the hand labels cover; null when the run has no labels. */
@@ -194,6 +216,54 @@ function unmatchedOf(
     .map((f) => f.claim);
 }
 
+function timingOf(record: ArmRecord): ArmTiming {
+  return {
+    phases: record.phases ?? [],
+    earlierStartMs: record.earlier.startedMs,
+    earlierEndMs: record.earlier.endedMs,
+    earlierReadyMs: record.earlier.readyMs ?? null,
+    laterStartMs: {
+      T4: record.later.T4?.startedMs ?? null,
+      T8: record.later.T8?.startedMs ?? null,
+    },
+  };
+}
+
+/** What the earlier session's store says: stored by labels where there are some, else by the patterns, and what matched no item. */
+function storeScore(
+  unit: number,
+  arm: Arm,
+  facts: readonly StoreFact[],
+  scoring: Scoring,
+  labels: Labels | undefined,
+) {
+  const memory = arm === "memory";
+  const stating =
+    labels === undefined || !memory
+      ? undefined
+      : (item: string): readonly StoreFact[] => factsStating(labels, unit, facts, item);
+  const byPatterns = Object.fromEntries(
+    ITEMS.map((i) => [i, stored(facts, new Set(), itemOf(scoring.items, i)).stored]),
+  );
+  const part = {
+    storedByPatterns: memory ? byPatterns : {},
+    labelled: memory && labels !== undefined ? facts.length : null,
+    unmatched: !memory
+      ? []
+      : unmatchedOf(
+          facts,
+          scoring.items,
+          stating === undefined ? undefined : (f) => ITEMS.some((i) => stating(i).includes(f)),
+        ),
+    stored: !memory
+      ? {}
+      : stating === undefined
+        ? byPatterns
+        : Object.fromEntries(ITEMS.map((i) => [i, stating(i).length > 0])),
+  };
+  return { part, stating };
+}
+
 async function armScore(
   folder: string,
   unit: UnitRecord,
@@ -207,13 +277,7 @@ async function armScore(
     ? await load<StoreFact[]>(join(at("E"), "facts.json"))
     : [];
   const capped = (s: { end: { kind: string } } | undefined): boolean => s?.end.kind === "capped";
-  const stating =
-    labels === undefined || arm !== "memory"
-      ? undefined
-      : (item: string): readonly StoreFact[] => factsStating(labels, unit.unit, facts, item);
-  const byPatterns = Object.fromEntries(
-    ITEMS.map((i) => [i, stored(facts, new Set(), itemOf(scoring.items, i)).stored]),
-  );
+  const { part, stating } = storeScore(unit.unit, arm, facts, scoring, labels);
   const later = {} as Record<Later, LaterScore | null>;
   for (const task of LATER) {
     const ran = record.later[task]?.startedMs != null;
@@ -224,25 +288,11 @@ async function armScore(
   const sessions = [record.earlier, ...LATER.map((t) => record.later[t])];
   const ms = sessions.reduce((sum, x) => sum + ((x?.endedMs ?? 0) - (x?.startedMs ?? 0)), 0);
   return {
-    unmatched:
-      arm !== "memory"
-        ? []
-        : unmatchedOf(
-            facts,
-            scoring.items,
-            labels === undefined ? undefined : (f) => ITEMS.some((i) => stating?.(i).includes(f)),
-          ),
-    storedByPatterns: arm === "memory" ? byPatterns : {},
-    labelled: arm === "memory" && labels !== undefined ? facts.length : null,
+    ...part,
+    timing: timingOf(record),
     minutes: ms / 60_000,
     earlier: { ...(await spendOrZero(at("E"))), capped: capped(record.earlier) },
     later,
-    stored:
-      arm !== "memory"
-        ? {}
-        : stating === undefined
-          ? byPatterns
-          : Object.fromEntries(ITEMS.map((i) => [i, stating(i).length > 0])),
     modelLine: arm === "memory" ? await modelLineOf(at("E")) : null,
   };
 }

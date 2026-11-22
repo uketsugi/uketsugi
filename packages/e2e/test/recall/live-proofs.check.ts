@@ -12,6 +12,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const ran = { startedMs: 0, endedMs: 1, end: { kind: "done" as const } };
 const carried = { memory: [], instructions: [] };
+const phases: never[] = [];
 const run: RunFile = {
   build: "b",
   config: "setup",
@@ -24,8 +25,8 @@ const run: RunFile = {
       unit: 1,
       void: false,
       arms: {
-        memory: { earlier: ran, later: { T4: ran, T8: ran }, carried },
-        none: { earlier: ran, later: { T4: ran, T8: ran }, carried },
+        memory: { phases, earlier: ran, later: { T4: ran, T8: ran }, carried },
+        none: { phases, earlier: ran, later: { T4: ran, T8: ran }, carried },
       },
     },
   ],

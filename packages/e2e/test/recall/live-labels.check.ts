@@ -142,3 +142,41 @@ describe("labels that do not fit the run are refused", () => {
     ).rejects.toThrow(/items must be exactly/);
   });
 });
+
+describe("a void run still says what its earlier sessions stored", () => {
+  const voided: UnitSpec = {
+    memory: {
+      stored: ["D1", "D2"],
+      end: { T4: { kind: "void", cause: "clock", detail: "past minute 30" } },
+    },
+    none: {},
+  };
+
+  test("the stored figure counts every unit whose earlier session ran, marked as such, and a void run's headline does not read 0/0", async () => {
+    const { meta, units } = await scoreRun(
+      await run("void-stored", undefined, [voided, voided]),
+      SCORING,
+    );
+    const first = render(meta, units, "").split("\n")[0] as string;
+    expect(first).toContain("2 units, 2 void");
+    expect(first).toContain("stored 4/10");
+    expect(first).toContain("[from the 2 units whose earlier session ran, 2 of them void]");
+    expect(first).not.toContain("stored 0/0");
+  });
+
+  test("the ladder's stored rung counts them and says so", async () => {
+    const { meta, units } = await scoreRun(await run("void-ladder", undefined, [voided]), SCORING);
+    const text = render(meta, units, "");
+    expect(text).toContain("stored counts every unit whose earlier session ran, void or not");
+    expect(text).toMatch(/D1 +passing, +stored 1\/1 {2}found 0\/0/);
+  });
+
+  test("a unit whose earlier session did not start counts for nothing", async () => {
+    const never: UnitSpec = {
+      memory: { end: { E: { kind: "void", cause: "clock", detail: "x" } } },
+      none: {},
+    };
+    const { meta, units } = await scoreRun(await run("void-never", undefined, [never]), SCORING);
+    expect(render(meta, units, "").split("\n")[0]).toContain("stored 0/0");
+  });
+});
