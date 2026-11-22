@@ -170,7 +170,9 @@ export class LiveHost implements Host {
 
   /** A no-memory session whose transcripts show a call to the memory server: the baseline had memory, and the run is void. Said loudly. */
   private async leak(dir: string, name: string): Promise<End | undefined> {
-    const memory = this.setup.arms.memory.adapter.memory;
+    const spec = this.setup.arms.memory.adapter.memory;
+    // only what can be a call to the memory server: its tool names (and a tool search for it), not any string that holds the product's name
+    const memory = { ...spec, touch: [] };
     const folder = join(dir, "transcripts");
     for (const file of await readdir(folder).catch(() => [])) {
       const called = parseTranscript(await readFile(join(folder, file), "utf8")).calls.find((c) =>

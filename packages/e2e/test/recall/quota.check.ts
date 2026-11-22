@@ -30,6 +30,21 @@ describe("reading a transcript", () => {
     expect(readingOf(text, NOW)).toEqual({ utilization: 0.76, ok: true });
   });
 
+  test("reads the window from where the harness reports it: under unifiedWindows.seven_day", () => {
+    const line = JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        resetsAt: NOW + 86_400,
+        isUsingOverage: false,
+        unifiedWindows: {
+          seven_day: { utilization: 0.76, resetsAt: NOW + 86_400, status: "allowed" },
+        },
+      },
+    });
+    expect(readingOf(line, NOW)).toEqual({ utilization: 0.76, ok: true });
+  });
+
   test("says nothing when the transcript holds no event", () => {
     expect(readingOf('{"type":"result"}', NOW)).toBeUndefined();
   });

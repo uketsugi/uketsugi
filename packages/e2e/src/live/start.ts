@@ -57,6 +57,7 @@ export interface Values {
   readonly "reading-from"?: string;
   readonly width?: string;
   readonly pool?: string;
+  readonly "provider-k"?: string;
 }
 
 const stamp = (): string => new Date().toISOString().replace(/[:.]/g, "-");
@@ -251,6 +252,7 @@ export async function liveCalibrate(values: Values): Promise<void> {
       tools: m.tools,
       workspace,
       out,
+      ...(values["provider-k"] === undefined ? {} : { providerMax: Number(values["provider-k"]) }),
     });
     console.log(JSON.stringify(result, null, 1));
     console.log(`width.json: ${join(out, "width.json")}`);

@@ -1,12 +1,6 @@
 /** Calibration's decisions, from trials a stand-in runs: the machine's K, the provider's K, and `width.json`. */
 import { describe, expect, test } from "vitest";
-import {
-  MAX_RATIO,
-  machineWidth,
-  providerWidth,
-  widthOf,
-  type MachineTrial,
-} from "../../src/live/width.ts";
+import { machineWidth, providerWidth, widthOf, type MachineTrial } from "../../src/live/width.ts";
 
 const trial = (k: number, over: Partial<MachineTrial> = {}): MachineTrial => ({
   k,
@@ -16,24 +10,57 @@ const trial = (k: number, over: Partial<MachineTrial> = {}): MachineTrial => ({
   ...over,
 });
 
+const MAX_RATIO_PRINTED = 1.25;
+
 describe("the machine's K", () => {
-  test("is the widest of 8, 16, 24 and 32 at which every judgement passes, every server stays up and the median time is within 1.25 times solo", async () => {
-    const asked: number[] = [];
-    const found = await machineWidth((k) => {
-      asked.push(k);
-      return Promise.resolve(trial(k, k === 24 ? { ratio: MAX_RATIO + 0.01 } : {}));
+  test("is the widest of 8, 16, 24 and 32 at which every judgement passed and every server stayed up in every one of three repeats, whatever the times", async () => {
+    const asked: string[] = [];
+    const found = await machineWidth((k, repeat) => {
+      asked.push(`${k}.${repeat}`);
+      return Promise.resolve(trial(k, { ratio: k * 3 }));
     });
-    expect(found.k).toBe(16);
-    expect(asked).toEqual([8, 16, 24]);
+    expect(found.k).toBe(32);
+    expect(asked).toHaveLength(12);
+    expect(found.trials.every((t) => t.ratio > MAX_RATIO_PRINTED)).toBe(true);
   });
 
-  test("a failed judgement or a server that went down ends it", async () => {
+  test("a repeat that fails at a K ends the search there: the K before it is the width", async () => {
+    const asked: string[] = [];
+    const found = await machineWidth((k, repeat) => {
+      asked.push(`${k}.${repeat}`);
+      return Promise.resolve(trial(k, k === 24 && repeat === 2 ? { allPassed: false } : {}));
+    });
+    expect(found.k).toBe(16);
+    expect(asked.slice(-4)).toEqual(
+      ["24.0", "24.1", "24.2"].slice(-3).length ? ["16.2", "24.0", "24.1", "24.2"] : [],
+    );
+    expect(asked).toHaveLength(9);
+  });
+
+  test("a failed judgement or a server that went down ends it, and it stops at that repeat", async () => {
     expect(
       (await machineWidth((k) => Promise.resolve(trial(k, k === 16 ? { serversUp: false } : {}))))
         .k,
     ).toBe(8);
     expect((await machineWidth((k) => Promise.resolve(trial(k, { allPassed: false })))).k).toBe(0);
-    expect((await machineWidth((k) => Promise.resolve(trial(k)))).k).toBe(32);
+    let calls = 0;
+    await machineWidth((k) => {
+      calls += 1;
+      return Promise.resolve(trial(k, { allPassed: false }));
+    });
+    expect(calls).toBe(1);
+  });
+
+  test("the kept calibration (one trial a K, all held, times 1.8 to 36 times solo) gives the machine's K 32 when a repeat is one, and W 16 with the provider's 16", () => {
+    const kept = [8, 16, 24, 32].map((k) =>
+      trial(k, { ratio: [1.85, 7.12, 35.77, 4.32][k / 8 - 1] as number }),
+    );
+    let at = 0;
+    return machineWidth(() => Promise.resolve(kept[Math.floor(at++)] as MachineTrial), 1).then(
+      (m) => {
+        expect(widthOf(m, { k: 16, tries: [] })).toMatchObject({ width: 16, units: 4 });
+      },
+    );
   });
 });
 

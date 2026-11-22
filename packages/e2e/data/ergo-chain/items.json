@@ -100,7 +100,7 @@
         "benchtests/test_t12_clean_slate.py::test_the_founders_notice_is_in_the_house_style"
       ]
     },
-    "pattern": "\\b(?:unsolicited|own[- ]initiative|on its own (?:initiative|accord)|unprompted|unrequested|without being (?:asked|prompted)|uninvited|house style|not (?:in|as) (?:an? )?(?:answer|reply|response) to a command)\\b[^.\\n]{0,240}(?:square brackets|bracketed|\\[#\\w+\\]|\\[<[^>\\]]*channel[^>\\]]*>\\])|(?:square brackets|bracketed|\\[#\\w+\\]|\\[<[^>\\]]*channel[^>\\]]*>\\])[^.\\n]{0,240}\\b(?:unsolicited|own[- ]initiative|on its own (?:initiative|accord)|unprompted|unrequested|without being (?:asked|prompted)|uninvited|house style|not (?:in|as) (?:an? )?(?:answer|reply|response) to a command)\\b"
+    "pattern": "\\b(?:unsolicited|own[- ]initiative|on its own (?:initiative|accord)|unprompted|unrequested|(?:nobody|no one) asked(?: for)?|without being (?:asked|prompted)|uninvited|house style|not (?:in|as) (?:an? )?(?:answer|reply|response) to a command)\\b[^.\\n]{0,240}(?:square brackets|bracketed|\\[#\\w+\\]|\\[<[^>\\]]*channel[^>\\]]*>\\])|(?:square brackets|bracketed|\\[#\\w+\\]|\\[<[^>\\]]*channel[^>\\]]*>\\])[^.\\n]{0,240}\\b(?:unsolicited|own[- ]initiative|on its own (?:initiative|accord)|unprompted|unrequested|(?:nobody|no one) asked(?: for)?|without being (?:asked|prompted)|uninvited|house style|not (?:in|as) (?:an? )?(?:answer|reply|response) to a command)\\b"
   },
   "D8": {
     "kind": "probe",

@@ -17,6 +17,7 @@ import { patternOf, type Item, type Items } from "../recall/items.ts";
 import { Seed, boilerplateStarts, recalled, stored } from "../recall/measure.ts";
 import { spendOf } from "../recall/spend.ts";
 import { ITEMS, TOLD } from "./data.ts";
+import { factsStating, labelProblems, readLabels, type Labels } from "./labels.ts";
 import { ARMS, LATER, type Arm, type Later, type UnitRecord } from "./pair.ts";
 
 export const DECIDING = ["D1", "D2", "P1"] as const;
@@ -62,6 +63,12 @@ export interface ArmScore {
   readonly stored: Record<string, boolean>;
   /** What the server's log says of its model; null for an arm with no server. */
   readonly modelLine: string | null;
+  /** The memory arm's store by the patterns alone, item by item; empty for the other arm. */
+  readonly storedByPatterns: Record<string, boolean>;
+  /** How many stored facts the hand labels cover; null when the run has no labels. */
+  readonly labelled: number | null;
+  /** The claims of the facts E stored that matched no item: what "not stored" rests on, since a pattern misses some paraphrase. */
+  readonly unmatched: readonly string[];
   /** Minutes the arm's sessions ran, from their starts to their ends. */
   readonly minutes: number;
 }
@@ -120,6 +127,7 @@ async function laterScore(
   facts: readonly StoreFact[],
   capped: boolean,
   scoring: Scoring,
+  stating?: (item: string) => readonly StoreFact[],
 ): Promise<LaterScore> {
   const judged = await lastJudgement(dir, task);
   const needed = Object.keys(scoring.items).filter(
@@ -134,11 +142,30 @@ async function laterScore(
   const found: LaterScore["found"] = {};
   const tests: Record<string, boolean> = {};
   for (const item of needed.filter((i) => i in TOLD)) {
-    const r = recalled(delivered, write, itemOf(scoring.items, item), seed, patterns, boiler);
+    const base = itemOf(scoring.items, item);
+    const r = recalled(
+      delivered,
+      write,
+      stating === undefined ? base : byFacts(base, stating(item)),
+      seed,
+      patterns,
+      boiler,
+    );
     found[item] = r.recalled ? (r.via === "hook" ? "brief" : "search") : null;
     tests[item] = testsOf(scoring.items, item, task).every((t) => judged?.tests[t] === "passed");
   }
   return { ...(await spendOrZero(dir)), capped, passed: judged?.passed ?? false, tests, found };
+}
+
+const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The item with its pattern replaced by the facts the labels say state it: found when one of them is delivered (by its id or the start of its claim). */
+function byFacts(item: Item, facts: readonly StoreFact[]): Item {
+  const source =
+    facts.length === 0
+      ? "(?!)"
+      : facts.map((f) => `${escape(f.id)}|${escape(f.claim.slice(0, 50))}`).join("|");
+  return { ...item, pattern: source };
 }
 
 async function modelLineOf(dir: string): Promise<string | null> {
@@ -151,11 +178,28 @@ async function modelLineOf(dir: string): Promise<string | null> {
   );
 }
 
+/** The facts none of the five items' patterns matches, by their claims. */
+function unmatchedOf(
+  facts: readonly StoreFact[],
+  items: Items,
+  stating?: (f: StoreFact) => boolean,
+): string[] {
+  if (stating !== undefined) return facts.filter((f) => !stating(f)).map((f) => f.claim);
+  const patterns = ITEMS.map((i) => patternOf(itemOf(items, i)) as RegExp);
+  return facts
+    .filter((f) => {
+      const text = [f.claim, f.detail ?? "", f.question ?? ""].join(" ");
+      return !patterns.some((rx) => rx.test(text));
+    })
+    .map((f) => f.claim);
+}
+
 async function armScore(
   folder: string,
   unit: UnitRecord,
   arm: Arm,
   scoring: Scoring,
+  labels?: Labels,
 ): Promise<ArmScore> {
   const record = unit.arms[arm];
   const at = (role: string): string => join(folder, "cases", `u${unit.unit}-${arm}-${role}`);
@@ -163,25 +207,42 @@ async function armScore(
     ? await load<StoreFact[]>(join(at("E"), "facts.json"))
     : [];
   const capped = (s: { end: { kind: string } } | undefined): boolean => s?.end.kind === "capped";
+  const stating =
+    labels === undefined || arm !== "memory"
+      ? undefined
+      : (item: string): readonly StoreFact[] => factsStating(labels, unit.unit, facts, item);
+  const byPatterns = Object.fromEntries(
+    ITEMS.map((i) => [i, stored(facts, new Set(), itemOf(scoring.items, i)).stored]),
+  );
   const later = {} as Record<Later, LaterScore | null>;
   for (const task of LATER) {
     const ran = record.later[task]?.startedMs != null;
     later[task] = ran
-      ? await laterScore(at(task), task, facts, capped(record.later[task]), scoring)
+      ? await laterScore(at(task), task, facts, capped(record.later[task]), scoring, stating)
       : null;
   }
   const sessions = [record.earlier, ...LATER.map((t) => record.later[t])];
   const ms = sessions.reduce((sum, x) => sum + ((x?.endedMs ?? 0) - (x?.startedMs ?? 0)), 0);
   return {
+    unmatched:
+      arm !== "memory"
+        ? []
+        : unmatchedOf(
+            facts,
+            scoring.items,
+            labels === undefined ? undefined : (f) => ITEMS.some((i) => stating?.(i).includes(f)),
+          ),
+    storedByPatterns: arm === "memory" ? byPatterns : {},
+    labelled: arm === "memory" && labels !== undefined ? facts.length : null,
     minutes: ms / 60_000,
     earlier: { ...(await spendOrZero(at("E"))), capped: capped(record.earlier) },
     later,
     stored:
-      arm === "memory"
-        ? Object.fromEntries(
-            ITEMS.map((i) => [i, stored(facts, new Set(), itemOf(scoring.items, i)).stored]),
-          )
-        : {},
+      arm !== "memory"
+        ? {}
+        : stating === undefined
+          ? byPatterns
+          : Object.fromEntries(ITEMS.map((i) => [i, stating(i).length > 0])),
     modelLine: arm === "memory" ? await modelLineOf(at("E")) : null,
   };
 }
@@ -204,11 +265,24 @@ function voidsOf(unit: UnitRecord): string[] {
   });
 }
 
+/** Refuses labels that name a fact the run did not store, or leave a stored fact out. */
+async function refuseBadLabels(folder: string, run: RunFile, labels: Labels): Promise<void> {
+  const stores: Record<number, StoreFact[]> = {};
+  for (const u of run.units) {
+    const path = join(folder, "cases", `u${u.unit}-memory-E`, "facts.json");
+    stores[u.unit] = existsSync(path) ? await load<StoreFact[]>(path) : [];
+  }
+  const problems = labelProblems(labels, stores);
+  if (problems.length > 0) throw new Error(`the labels file is refused:\n${problems.join("\n")}`);
+}
+
 export async function scoreRun(
   folder: string,
   scoring: Scoring,
 ): Promise<{ meta: RunMeta; units: UnitScore[] }> {
   const run = await load<RunFile>(join(folder, "run.json"));
+  const labels = await readLabels(folder);
+  if (labels !== undefined) await refuseBadLabels(folder, run, labels);
   const units: UnitScore[] = [];
   for (const unit of run.units) {
     const sessions = ARMS.flatMap((arm) => [
@@ -223,7 +297,7 @@ export async function scoreRun(
       cappedSessions: sessions.filter((s) => s?.end.kind === "capped").length,
       sessions: sessions.filter((s) => s?.startedMs != null).length,
       arms: {
-        memory: await armScore(folder, unit, "memory", scoring),
+        memory: await armScore(folder, unit, "memory", scoring, labels),
         none: await armScore(folder, unit, "none", scoring),
       },
     });

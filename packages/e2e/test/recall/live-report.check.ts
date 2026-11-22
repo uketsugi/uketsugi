@@ -77,6 +77,46 @@ describe("the report of a kept run", () => {
     expect(text.split("\n")[0]).toContain("whole unit 5.0 M vs 7.0 M");
   });
 
+  test("a pair left out for a session with no tokens is said in the printed result", async () => {
+    const folder = join(root, "dropped");
+    mkdirSync(folder);
+    const list = units(false);
+    writeRun(folder, [
+      { ...list[0]!, none: { ...list[0]!.none, tokens: { T4: 0, T8: 3.5e6 } } },
+      list[2]!,
+    ]);
+    const { meta, units: scored } = await scoreRun(folder, SCORING);
+    expect(render(meta, scored, "").split("\n")[0]).toContain(
+      "[1 pairs left out: a session with no tokens]",
+    );
+  });
+
+  test("the claims of what E stored that matched no item are printed, so a reader sees what not stored rests on", async () => {
+    const folder = join(root, "unmatched");
+    mkdirSync(folder);
+    writeRun(folder, [
+      {
+        memory: {
+          stored: ["D1"],
+          other: [
+            "ChanServ NOTE keeps private notes on a channel",
+            "An entry message of 200 CJK characters exceeds the line limit",
+          ],
+        },
+        none: {},
+      },
+    ]);
+    const { meta, units: scored } = await scoreRun(folder, SCORING);
+    const text = render(meta, scored, "");
+    expect(text).toContain("Facts the earlier session stored that matched no item");
+    expect(text).toContain("u1: ChanServ NOTE keeps private notes on a channel");
+    expect(text).toContain("u1: An entry message of 200 CJK characters exceeds the line limit");
+    expect(text).not.toContain("u1: marker-D1");
+    expect(render(meta, (await scoreRun(join(root, "whole"), SCORING)).units, "")).toContain(
+      "\nnone\n",
+    );
+  });
+
   test("the ladder keeps told outright, in passing and found apart, and the void is named with its cause", async () => {
     const text = await reported("ladder", false);
     expect(text).toMatch(

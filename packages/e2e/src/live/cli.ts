@@ -5,7 +5,7 @@
  *     and prints the result by minute 55. It refuses to start without a reading of the seven-day window
  *     (the newest rate-limit event in the earlier run's kept transcripts) and fetches nothing.
  * `live --prepare-only --ergo <mirror> [--units N]`  set-up with no task session, timed.
- * `live --calibrate --ergo <mirror>`                  measures the machine and the provider, writes width.json.
+ * `live --calibrate --ergo <mirror> [--provider-k N]`                  measures the machine and the provider, writes width.json.
  * `live --memcheck`                                   whether the harness's own memory is read in a later session.
  * `live --rescore <run folder> [--pool <earlier run folders>]`  scores a kept run with no session.
  *
@@ -24,7 +24,7 @@ import { liveCalibrate, liveMemcheck, liveRun, prepareOnly } from "./start.ts";
 const USAGE = [
   "usage: live --ergo <mirror> --reading-from <earlier run folder> [--config setup] [--units N | --width width.json] [--pool a,b] [--out dir]",
   "       live --prepare-only --ergo <mirror> [--units N]",
-  "       live --calibrate --ergo <mirror>",
+  "       live --calibrate --ergo <mirror> [--provider-k N]",
   "       live --memcheck",
   "       live --rescore <run folder> [--pool a,b]",
 ].join("\n");
@@ -43,6 +43,7 @@ const OPTIONS = {
   "reading-from": { type: "string" },
   width: { type: "string" },
   pool: { type: "string" },
+  "provider-k": { type: "string" },
   help: { type: "boolean" },
 } as const;
 

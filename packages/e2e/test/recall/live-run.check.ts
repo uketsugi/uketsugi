@@ -251,6 +251,19 @@ test("the manifest is written, with its hash, before the first session starts, a
   await expect(execute("-n", "", false)).rejects.toThrow(/manifest is not frozen/);
 }, 240_000);
 
+test("a no-memory session that only touches a path holding the product's name is not a call to the memory server", async () => {
+  const call = JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [
+        { type: "tool_use", id: "b1", name: "Bash", input: { command: "ls /srv/uketsugi" } },
+      ],
+    },
+  });
+  const done = await execute("-p", `echo '${call}'\n`);
+  expect(done.text.split("\n")[0]).not.toContain("called the memory server");
+}, 240_000);
+
 test("a no-memory session that calls the memory server voids the run, loudly", async () => {
   const said = vi.spyOn(console, "error").mockImplementation(() => undefined);
   try {

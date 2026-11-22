@@ -46,6 +46,10 @@ export interface ArmSpec {
   tokens?: { E?: number; T4?: number; T8?: number };
   end?: { E?: End; T4?: End; T8?: End };
   model?: boolean;
+  /** Facts E stored that state none of the five items. */
+  other?: string[];
+  /** Which of `other` (by index) L was handed by a search, by later task. */
+  foundOther?: { T4?: number[]; T8?: number[] };
 }
 
 const ALL_ITEMS = ["D1", "D2", "D3", "D8", "P1"];
@@ -68,16 +72,32 @@ const requests = (tokens: number): string =>
     usage: { input: tokens, cache_write: 0, cache_read: 0, output: 0 },
   }) + "\n";
 
+/** The store when E ended: a fact for each stored item, and the others. */
+const factsOf = (spec: ArmSpec): { id: string; claim: string }[] => [
+  ...(spec.stored ?? []).map((i) => ({
+    id: `f-${i}`,
+    claim: `marker-${i} is what the person told us`,
+  })),
+  ...(spec.other ?? []).map((claim, n) => ({ id: `o-${n}`, claim })),
+];
+
+/** The facts L was handed by a search: those of the items named, and those of `other` named by index. */
+const handedOf = (spec: ArmSpec, task: "T4" | "T8"): { id: string; claim: string }[] => [
+  ...(spec.found?.[task] ?? []).map((i) => ({
+    id: `g-${i}`,
+    claim: `marker-${i} is what the person told us`,
+  })),
+  ...(spec.foundOther?.[task] ?? []).map((n) => ({
+    id: `o-${n}`,
+    claim: (spec.other ?? [])[n] as string,
+  })),
+];
+
 function writeArm(folder: string, unit: number, arm: "memory" | "none", spec: ArmSpec): ArmRecord {
   const dir = (role: string): string => join(folder, "cases", `u${unit}-${arm}-${role}`);
   const tokens = { E: 1e6, T4: 2e6, T8: 2e6, ...spec.tokens };
   writeCase(dir("E"), {
-    "facts.json": JSON.stringify(
-      (spec.stored ?? []).map((i) => ({
-        id: `f-${i}`,
-        claim: `marker-${i} is what the person told us`,
-      })),
-    ),
+    "facts.json": JSON.stringify(factsOf(spec)),
     "steps.jsonl": "",
     "requests.jsonl": requests(tokens.E),
     "server.log":
@@ -88,10 +108,7 @@ function writeArm(folder: string, unit: number, arm: "memory" | "none", spec: Ar
     const end = spec.end?.[task] ?? DONE;
     later[task] = at(end);
     if (end.kind === "void") continue;
-    const handed = (spec.found?.[task] ?? []).map((i) => ({
-      id: `g-${i}`,
-      claim: `marker-${i} is what the person told us`,
-    }));
+    const handed = handedOf(spec, task);
     const judged = {
       passed: spec.taskPasses?.[task] === true,
       tests: Object.fromEntries((spec.passed?.[task] ?? []).map((i) => [`t::${i}`, "passed"])),
@@ -107,7 +124,10 @@ function writeArm(folder: string, unit: number, arm: "memory" | "none", spec: Ar
           killed: false,
           first_write: null,
         }) + "\n",
-      "transcripts/L.0.jsonl": search(`s-${task}`, { facts: handed, degraded: [] }),
+      "transcripts/L.0.jsonl": search(`s-${task}`, {
+        facts: handed,
+        degraded: [],
+      }),
       [`judge/L.${task}.0.json`]: JSON.stringify(judged),
       "requests.jsonl": requests(tokens[task]),
     });

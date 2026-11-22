@@ -16,6 +16,9 @@ const arm = (t4: LaterScore, t8: LaterScore): ArmScore => ({
   later: { T4: t4, T8: t8 },
   stored: {},
   modelLine: null,
+  unmatched: [],
+  storedByPatterns: {},
+  labelled: null,
   minutes: 1,
 });
 

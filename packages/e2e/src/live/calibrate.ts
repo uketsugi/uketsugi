@@ -29,6 +29,8 @@ export interface CalibrateDeps {
   readonly tools: Tools;
   readonly workspace: Workspace;
   readonly out: string;
+  /** The provider trial goes no wider than this: the width the run that follows needs, so that no more of the owner's window is spent than that run would. */
+  readonly providerMax?: number;
 }
 
 const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
@@ -131,22 +133,25 @@ export async function calibrate(
     solo[task] = Date.now() - began;
     console.log(`${task} judged alone in ${(solo[task] / 1000).toFixed(1)} s`);
   }
-  const machine = await machineWidth(async (k) => {
+  const machine = await machineWidth(async (k, repeat) => {
     const trial = await machineTrial(d, k, trees, solo);
     console.log(
-      `machine K=${k}: all passed ${trial.allPassed}, servers up ${trial.serversUp}, median ${trial.ratio.toFixed(2)} times solo`,
+      `machine K=${k} repeat ${repeat + 1}: all passed ${trial.allPassed}, servers up ${trial.serversUp}, median ${trial.ratio.toFixed(2)} times solo`,
     );
     return trial;
   });
   let tokens = 0;
-  const provider = await providerWidth(machine.k, async (k) => {
-    const trial = await providerTrial(d, k, rebuilt.parent["T1"] as string);
-    tokens += trial.tokens;
-    console.log(
-      `provider K=${k}: refused ${trial.refused}, ${(trial.tokens / 1e6).toFixed(1)} M tokens`,
-    );
-    return trial;
-  });
+  const provider = await providerWidth(
+    Math.min(machine.k, d.providerMax ?? machine.k),
+    async (k) => {
+      const trial = await providerTrial(d, k, rebuilt.parent["T1"] as string);
+      tokens += trial.tokens;
+      console.log(
+        `provider K=${k}: refused ${trial.refused}, ${(trial.tokens / 1e6).toFixed(1)} M tokens`,
+      );
+      return trial;
+    },
+  );
   const width = { ...widthOf(machine, provider), tokens };
   await writeFile(join(d.out, "width.json"), JSON.stringify(width, null, 1));
   return width;

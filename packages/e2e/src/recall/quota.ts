@@ -22,6 +22,12 @@ export interface Reading {
   readonly ok: boolean;
 }
 
+/** Claude Code 2.1 reports the window under `unifiedWindows.seven_day`, with no `utilization` of its own at the top. */
+function sevenDay(info: Record<string, unknown>): unknown {
+  const windows = info["unifiedWindows"] as { seven_day?: { utilization?: unknown } } | undefined;
+  return windows?.seven_day?.utilization;
+}
+
 /** The newest reading in a transcript, ignoring a window that has reset (it says nothing of the new one), or undefined. */
 export function readingOf(transcript: string, nowSeconds: number): Reading | undefined {
   let best: Reading | undefined;
@@ -32,7 +38,7 @@ export function readingOf(transcript: string, nowSeconds: number): Reading | und
         .rate_limit_info;
       if (typeof info["resetsAt"] === "number" && info["resetsAt"] < nowSeconds) continue;
       best = {
-        utilization: Number(info["utilization"] ?? 0),
+        utilization: Number(info["utilization"] ?? sevenDay(info) ?? 0),
         ok:
           info["isUsingOverage"] !== true &&
           (info["status"] === "allowed" || info["status"] === "allowed_warning"),

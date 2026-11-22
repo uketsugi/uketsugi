@@ -175,7 +175,7 @@ async function run(values: Values): Promise<void> {
     repeat: Math.max(1, integer(values.repeat, 1, "repeat")),
     repeatFrom: integer(values["repeat-from"], 0, "repeat-from"),
     control: values["no-control"] !== true,
-    jobs: Math.min(6, Math.max(1, jobs)),
+    jobs: Math.max(1, jobs),
     out:
       values.out ??
       join(

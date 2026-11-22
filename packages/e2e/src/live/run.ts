@@ -58,12 +58,12 @@ export async function runUnits(host: Host, options: RunOptions): Promise<string>
     units,
   };
   await writeRunFile(options.out, file);
-  const failed = await proofsOf(options.out, file);
+  const { failed, notes } = await proofsOf(options.out, file);
   const scored = await scoreRun(options.out, options.scoring);
   const earlier = await Promise.all(
     options.pool.map((folder) => scoreRun(folder, options.scoring)),
   );
-  const body = render(scored.meta, scored.units, poolSection(scored, earlier));
+  const body = `${render(scored.meta, scored.units, poolSection(scored, earlier))}\n\nProofs:\n${[...notes, ...failed.map((f) => `FAILED ${f}`)].join("\n")}`;
   const text = failed.length === 0 ? body : `VOID (a proof failed: ${failed.join("; ")}) · ${body}`;
   await writeFile(join(options.out, "report.txt"), text + "\n");
   return text;

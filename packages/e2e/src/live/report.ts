@@ -33,6 +33,30 @@ export interface Figures {
 const modelLoaded = (u: UnitScore): boolean =>
   u.arms.memory.modelLine?.includes("degraded=[]") === true;
 
+const labelsOf = (units: readonly UnitScore[]): boolean =>
+  units.some((u) => u.arms.memory.labelled !== null);
+
+/** How many of the stored cells the patterns alone would have counted, over the counted units. */
+const storedByPatterns = (counted: readonly UnitScore[]): number =>
+  sum(counted.map((u) => ITEMS.filter((i) => u.arms.memory.storedByPatterns[i] === true).length));
+
+/** What "stored" rests on: the hand labels (how many facts, how many cells differ from the patterns), or the patterns alone. */
+export function basis(units: readonly UnitScore[]): string {
+  if (!labelsOf(units))
+    return "Stored rests on: patterns alone, a floor (a pattern misses some paraphrase).";
+  const differing = sum(
+    units.map(
+      (u) =>
+        ITEMS.filter(
+          (i) =>
+            (u.arms.memory.stored[i] === true) !== (u.arms.memory.storedByPatterns[i] === true),
+        ).length,
+    ),
+  );
+  const facts = sum(units.map((u) => u.arms.memory.labelled ?? 0));
+  return `Stored rests on: hand labels of ${facts} stored facts (labels.json beside the run); ${differing} cells differ from what the patterns alone give.`;
+}
+
 export function figuresOf(units: readonly UnitScore[]): Figures {
   const counted = units.filter((u) => !u.void);
   const voidUnits = units.length - counted.length;
@@ -130,6 +154,15 @@ function storedByTold(counted: readonly UnitScore[], kind: Told): string {
   return share(hits, counted.length * items.length);
 }
 
+/** Beside the stored figure of a labelled run: the figure the patterns alone give, when it differs. */
+function labelNote(counted: readonly UnitScore[], byLabels: number): string {
+  if (!labelsOf(counted)) return "";
+  const patterns = storedByPatterns(counted);
+  return patterns === byLabels
+    ? " by labels"
+    : ` by labels (by patterns alone ${patterns}/${counted.length * ITEMS.length})`;
+}
+
 /** The one line, first. */
 export function headline(meta: RunMeta, units: readonly UnitScore[]): string {
   const f = figuresOf(units);
@@ -155,7 +188,7 @@ export function headline(meta: RunMeta, units: readonly UnitScore[]): string {
   return [
     `${lead}live-hour ${meta.build} ${meta.config} ${meta.model}`,
     `${units.length} units, ${f.voidUnits} void, ${f.capped} capped, ${Math.round(meta.minutes)} min`,
-    `stored ${share(stored.length, cells.length)} (outright ${storedByTold(f.counted, "outright")}, in passing ${storedByTold(f.counted, "passing")}, found ${storedByTold(f.counted, "found")})`,
+    `stored ${share(stored.length, cells.length)}${labelNote(f.counted, stored.length)} (outright ${storedByTold(f.counted, "outright")}, in passing ${storedByTold(f.counted, "passing")}, found ${storedByTold(f.counted, "found")})`,
     `found ${share(found.length, stored.length)}`,
     `used ${share(found.filter((c) => c.used).length, found.length)}`,
     `deciding tests with memory ${share(decide("memory"), f.counted.length * DECIDING.length)}, without ${share(decide("none"), f.counted.length * DECIDING.length)}`,
@@ -202,6 +235,19 @@ export function arms(units: readonly UnitScore[]): string {
   return ["The arms:", ...ARMS.map(line)].join("\n");
 }
 
+/** What the earlier session stored that matched no item, so that a reader sees what "not stored" rests on. */
+export function unmatched(units: readonly UnitScore[]): string {
+  const rows = units.flatMap((u) =>
+    u.arms.memory.unmatched.map(
+      (claim) => `u${u.unit}: ${claim.replace(/\s+/g, " ").slice(0, 220)}`,
+    ),
+  );
+  return [
+    "Facts the earlier session stored that matched no item (a pattern misses some paraphrase: read these before trusting a 'not stored'):",
+    ...(rows.length === 0 ? ["none"] : rows),
+  ].join("\n");
+}
+
 export function voids(units: readonly UnitScore[]): string {
   const lines = units.flatMap((u) => u.voids);
   const capped = units
@@ -224,7 +270,11 @@ export function render(meta: RunMeta, units: readonly UnitScore[], pooled: strin
   return [
     headline(meta, units),
     "",
+    basis(units),
+    "",
     ladder(units),
+    "",
+    unmatched(units),
     "",
     arms(units),
     "",

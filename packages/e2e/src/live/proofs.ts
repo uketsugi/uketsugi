@@ -16,9 +16,13 @@ const idsOf = async (path: string): Promise<string[]> =>
     ? (JSON.parse(await readFile(path, "utf8")) as StoreFact[]).map((f) => f.id)
     : [];
 
-/** The proofs that failed, in words; none when every one held. */
-export async function proofsOf(out: string, run: RunFile): Promise<string[]> {
+/** The proofs that failed, in words (none when every one held), and what each proof was made of: a proof over an empty store proves nothing, and says so. */
+export async function proofsOf(
+  out: string,
+  run: RunFile,
+): Promise<{ failed: string[]; notes: string[] }> {
   const failed: string[] = [];
+  const notes: string[] = [];
   const at = (unit: number, arm: string, role: string): string =>
     join(out, "cases", `u${unit}-${arm}-${role}`);
   for (const unit of run.units) {
@@ -29,6 +33,11 @@ export async function proofsOf(out: string, run: RunFile): Promise<string[]> {
         failed.push(`u${unit.unit} none ${role}: the no-memory arm had a server`);
     }
     const left = await idsOf(join(at(unit.unit, "memory", "E"), "facts.json"));
+    notes.push(
+      left.length === 0
+        ? `u${unit.unit}: E stored nothing, so the carried-store proof proved nothing`
+        : `u${unit.unit}: E stored ${left.length} facts; every later server was checked to serve them`,
+    );
     for (const task of LATER) {
       if (!ran(unit.arms.memory.later[task])) continue;
       const served = await idsOf(join(at(unit.unit, "memory", task), "facts.json"));
@@ -39,5 +48,5 @@ export async function proofsOf(out: string, run: RunFile): Promise<string[]> {
         );
     }
   }
-  return failed;
+  return { failed, notes };
 }

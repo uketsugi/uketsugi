@@ -2,7 +2,7 @@
  * Whether Claude Code's own memory, carried in a home, is read by a later session: the baseline of
  * the live test (both arms carry it) is not what the design says unless it is. A session in a box is
  * told something to keep in its own memory; a second session, in a copy of that home on another tree
- * at the same path inside the box (`/home/demo/work`), is asked something only that memory holds.
+ * at the same path inside the box (`/home/demo/work`), is asked something only that memory holds, in the words a person would use (no hint to look at memory, none against it: the harness loads its memory index, and opening a note is the session's own choice).
  * The two transcripts are kept. If the second session does not answer from it, the check fails.
  */
 import { randomUUID } from "node:crypto";
@@ -19,8 +19,7 @@ import { memoryFilesOf } from "./pair.ts";
 
 export const CODE_WORD = "quince-47";
 const TELL = `Please keep this in your own memory for later sessions in this project: the staging deploy code word is ${CODE_WORD}. Just confirm that you have noted it.`;
-const ASK =
-  "What is the staging deploy code word for this project? Answer in one line, from what you already know about this project; do not search the disk.";
+const ASK = "What is the staging deploy code word for this project? Answer in one line.";
 
 export interface MemCheck {
   readonly passed: boolean;
