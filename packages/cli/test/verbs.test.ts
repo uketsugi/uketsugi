@@ -13,7 +13,7 @@ import { exportFacts, ui } from "../src/remote-verbs.ts";
 import { CliFailure, confirmPlan, progressLine, runVerb, type Report } from "../src/report.ts";
 import { nextCommands, setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
-import { fakeIo, tempDir } from "./support.ts";
+import { fakeIo, tempDir, unusedPort } from "./support.ts";
 
 // The port a verb is not told is the default one, where this machine's own server may answer: a
 // test of "no server running" looks at a port that is free instead.
@@ -367,14 +367,16 @@ describe("ukt doctor with no server running", () => {
 
   test("says a server that left its record no longer answers", async () => {
     const dataDir = await tempDir();
-    await writeFile(join(dataDir, "server.json"), JSON.stringify({ url: "http://127.0.0.1:1" }));
+    // An address that was free when it was picked: a fetch is refused there. (Port 1 is one a fetch will not try, which is no refusal.)
+    const url = `http://127.0.0.1:${await unusedPort()}`;
+    await writeFile(join(dataDir, "server.json"), JSON.stringify({ url }));
 
     const findings = findingsOf((await doctor(fakeIo(), { dataDir }, {})).data);
 
     expect(findings.find((finding) => finding.check === "server")).toEqual({
       check: "server",
       state: "fail",
-      detail: "not running: a server left its record and no longer answers at http://127.0.0.1:1",
+      detail: `not running: a server left its record and no longer answers at ${url}`,
       fix: "ukt serve",
     });
   });

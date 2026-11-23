@@ -7,10 +7,14 @@
  * A worker's syncs, and every thread's with HOLD_ALL=1, then wait until HOLD_DIR/released holds a
  * number at least n. The wait polls a file the test writes: it is not a deadline.
  *
+ * The main thread also appends `listening <port>` when a server of its own is bound, which is what
+ * tells a test that the process it started holds its port and not something else that answers there.
+ *
  * The main thread also appends `tick` every 20 ms, which is a turn of its event loop: where a test
  * has sent a signal, two ticks after it show the loop has handled whatever the signal started.
  */
 import fs from "node:fs";
+import { Server } from "node:net";
 import { syncBuiltinESMExports } from "node:module";
 import { isMainThread } from "node:worker_threads";
 
@@ -35,5 +39,16 @@ if (dir !== undefined) {
     sync(fd);
   };
   syncBuiltinESMExports();
+  if (isMainThread) {
+    const proto = Server.prototype as unknown as {
+      emit: (this: Server, event: string | symbol, ...args: unknown[]) => boolean;
+    };
+    const emit = proto.emit;
+    proto.emit = function (event, ...args) {
+      if (event === "listening")
+        fs.appendFileSync(`${dir}/log`, `listening ${(this.address() as { port: number }).port}\n`);
+      return emit.call(this, event, ...args);
+    };
+  }
   if (isMainThread) setInterval(() => fs.appendFileSync(`${dir}/log`, "tick\n"), 20).unref();
 }

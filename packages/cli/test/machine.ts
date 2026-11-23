@@ -6,11 +6,11 @@
  */
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { connectInfo, hostProof } from "@uketsugi/server";
 import { afterEach } from "vitest";
-import type { Io, Ran } from "../src/report.ts";
+import { describe, type Io, type Ran } from "../src/report.ts";
 import { serve } from "../src/serve.ts";
 import type { SetupOptions } from "../src/setup-parts.ts";
 import { fakeIo, tempDir, type FakeIoOptions } from "./support.ts";
@@ -42,6 +42,10 @@ export class Machine {
   /** What the manager does to start the unit's server, handed the unit, and to stop it: a test's own server. */
   onStart: ((unit: string) => Promise<void>) | undefined;
   onStop: (() => Promise<void>) | undefined;
+  /** What the account does before any start of the server, which a test's own `onStart` does not replace: it gives up the port the account held. */
+  beforeStart: (() => Promise<void>) | undefined;
+  /** Why the last start of the unit's server failed, in a sentence; undefined where none did. */
+  startError: string | undefined;
   /** How long a stop of the unit takes, in milliseconds; null where it is instant. */
   stopTakes: number | null = null;
   /** How long each command that ran was waited for, as `ukt` said: left out where it said nothing. */
@@ -55,6 +59,14 @@ export class Machine {
   /** Where `ukt` writes the unit for the account of this home. */
   get unitFile(): string {
     return join(this.options.home, ".config", "systemd", "user", "uketsugi.service");
+  }
+
+  /** What to say of a server that is not running: why its start failed, or that set-up never asked for one. */
+  whyDown(setUpSaid: readonly string[]): string {
+    return (
+      this.startError ??
+      `the manager was never asked to start the server. Set-up said: ${setUpSaid.join(" | ")}`
+    );
   }
 
   /** The command lines that changed something: everything but the questions `ukt` asks first. */
@@ -101,10 +113,14 @@ export class Machine {
     if (verb === "enable" || verb === "disable") this.enabled = verb === "enable";
     if (verb === "start" || verb === "restart") {
       // A server that fails to start exits at once: the manager has it not running.
+      await this.beforeStart?.();
       this.running =
         (await this.onStart?.(unit).then(
           () => true,
-          () => false,
+          (error: unknown) => {
+            this.startError = describe(error);
+            return false;
+          },
         )) ?? true;
     }
   }
@@ -120,13 +136,25 @@ export class Machine {
   }
 }
 
-/** A port nothing listens on, for a server a test starts at an address it must know beforehand. */
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise((resolve) => probe.close(resolve));
-  return port;
+/**
+ * A port for a server that is started later, held until then: a port that was only free when it
+ * was picked can be taken by anything on the machine before the server binds it. What holds it
+ * takes a connection and drops it, which is as good as no server to whoever asks, and `release`
+ * gives it up when the server is about to bind it.
+ */
+async function reservedPort(): Promise<{ port: number; release: () => Promise<void> }> {
+  const holder = createNetServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => holder.listen(0, "127.0.0.1", resolve));
+  const { port } = holder.address() as AddressInfo;
+  let held = true;
+  return {
+    port,
+    async release() {
+      if (!held) return;
+      held = false;
+      await new Promise((resolve) => holder.close(resolve));
+    },
+  };
 }
 
 const servers: { close(): Promise<void> }[] = [];
@@ -178,7 +206,7 @@ export async function account(has: Omit<MachineOptions, "home"> & { real?: boole
   const home = await tempDir();
   const dataDir = join(home, "data");
   const machine = new Machine({ home, ...has });
-  const port = await freePort();
+  const { port, release } = await reservedPort();
   let serving: { close(): Promise<void> } | undefined;
   const start = async (): Promise<void> => {
     serving =
@@ -187,6 +215,7 @@ export async function account(has: Omit<MachineOptions, "home"> & { real?: boole
         : await standIn(dataDir, port);
     servers.push(serving);
   };
+  machine.beforeStart = release;
   machine.onStart = start;
   machine.onStop = async () => {
     await serving?.close();
@@ -207,6 +236,11 @@ export async function account(has: Omit<MachineOptions, "home"> & { real?: boole
       port: String(port),
     } satisfies SetupOptions,
     /** Starts the server as a person does who runs `ukt serve` themselves. */
-    byHand: start,
+    byHand: async () => {
+      await release();
+      await start();
+    },
+    /** Gives up the port, for a test that puts a listener of its own there. */
+    free: release,
   };
 }

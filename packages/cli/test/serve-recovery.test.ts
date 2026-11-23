@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { createServer as httpServer } from "node:http";
 import { createServer } from "node:net";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -75,15 +76,9 @@ async function serving(dataDir: string, holdAll = true, flags: string[] = []): P
     );
     const run = await held([CLI, "serve", "--data-dir", dataDir, ...flags], holdAll);
     const url = `http://127.0.0.1:${port}`;
-    // Started: it listens, or it has begun to sync a store (a held sync keeps it from listening yet).
-    await eventually(async () => {
-      const begun = run.log().some((line) => line.startsWith("sync"));
-      if (
-        !run.over &&
-        !begun &&
-        (await ask(url, "/healthz", { signal: AbortSignal.timeout(1000) })) === "refused"
-      )
-        throw new Error("not started yet");
+    // Started: it listens, or has ended. What answers at the port is not what shows it: something else may hold the port and answer.
+    await eventually(() => {
+      if (!run.over && !run.log().includes(`listening ${port}`)) throw new Error("not started yet");
     });
     if (!run.over || attempt === 5) return { run, url, dataDir };
   }
@@ -182,23 +177,35 @@ describe("ukt serve on a killed store", () => {
     expect(at("recovered:")).toBeLessThan(at("uketsugi is serving"));
   });
 
-  test("a port taken between its being picked and its being bound does not end the test's server", async () => {
-    const taker = createServer().listen(0, "127.0.0.1");
-    await once(taker, "listening");
-    next.port = (taker.address() as { port: number }).port;
-    try {
-      const server = await serving(await copyOf(killed));
+  test.each([
+    ["listens and says nothing", () => createServer().listen(0, "127.0.0.1")],
+    [
+      "is a server that answers",
+      () =>
+        httpServer((_request, response) => {
+          response.setHeader("content-type", "application/json").end("{}");
+        }).listen(0, "127.0.0.1"),
+    ],
+  ])(
+    "a port taken between its being picked and its being bound, by something that %s, does not end the test's server",
+    async (_what, take) => {
+      const taker = take();
+      await once(taker, "listening");
+      next.port = (taker.address() as { port: number }).port;
+      try {
+        const server = await serving(await copyOf(killed));
 
-      expect(await heldBy(server.run, 1)).toBe("worker");
-      expect(server.run.over).toBe(false);
-      server.run.release(everything);
-      await bannerOf(server.run);
-      server.run.child.kill("SIGTERM");
-      await server.run.ended;
-    } finally {
-      taker.close();
-    }
-  });
+        expect(await heldBy(server.run, 1)).toBe("worker");
+        expect(server.run.over).toBe(false);
+        server.run.release(everything);
+        await bannerOf(server.run);
+        server.run.child.kill("SIGTERM");
+        await server.run.ended;
+      } finally {
+        taker.close();
+      }
+    },
+  );
 
   test("with --json every line is JSON: the recovery is told as an event and the report is the one envelope; a stop with SIGTERM leaves the store clean", async () => {
     const dataDir = await copyOf(killed);

@@ -40,6 +40,10 @@ export interface Running extends ServerRecord {
 const timedOut = (error: unknown): boolean =>
   error instanceof Error && error.name === "TimeoutError";
 
+/** Whether a fetch failed because nothing listens at the address. */
+const refused = (error: unknown): boolean =>
+  error instanceof Error && (error.cause as { code?: string } | undefined)?.code === "ECONNREFUSED";
+
 /** One request to the server. A refusal or silence becomes a `CliFailure`. */
 async function request(
   server: ServerRecord,
@@ -101,7 +105,7 @@ export async function capabilities(
 
 /**
  * The server that holds this data directory right now: its record, if one is there. A server
- * that answers is. One that takes the connection and says nothing in time is told by its
+ * that answers is. One that takes the connection and says nothing in time, or drops it, is told by its
  * process: the store's lock names the process that holds the store (a record written by any
  * release has one), and a record names its own server for a store that has no lock (PostgreSQL).
  * A busy server runs and is found, a gone one is not. Where neither can say which, this stops with
@@ -112,13 +116,15 @@ export async function capabilities(
 export async function servingNow(home: Home): Promise<ServerRecord | null> {
   const record = await readRecord(home);
   if (record === null) return null;
+  // Only a refused connection, or an answer that is not ours, says nothing listens. A connection
+  // that is dropped, or that says nothing in time, may be a server holding the store: its process says.
   const answered = await fetch(new URL("/api/capabilities", record.url), {
     signal: AbortSignal.timeout(PROBE_WITHIN_MS),
   }).then(
     (response) => response.ok,
-    (error: unknown) => (timedOut(error) ? "silent" : false),
+    (error: unknown) => (refused(error) ? false : "unwell"),
   );
-  if (answered !== "silent") return answered ? record : null;
+  if (answered !== "unwell") return answered ? record : null;
   const runs = processRuns((await lockOwner(home.dataDir)) ?? record);
   if (runs === null)
     throw new CliFailure({

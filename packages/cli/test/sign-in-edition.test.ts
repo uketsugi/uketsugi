@@ -78,6 +78,7 @@ async function signInServer(dataDir: string, origin: string, port: number): Prom
 async function theirAccount() {
   const made = await account();
   await setup(made.io(), { ...made.options, service: false }, made.env);
+  await made.free();
   await signInServer(made.dataDir, made.origin, Number(new URL(made.origin).port));
   return made;
 }

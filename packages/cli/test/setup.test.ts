@@ -219,8 +219,9 @@ describe("ukt setup on a machine with a service manager", () => {
   });
 
   test("with its port taken by something else, starts nothing and names --port", async () => {
-    const { dataDir, machine, origin, env, io, options } = await account(MANAGED);
+    const { dataDir, machine, origin, env, io, options, free } = await account(MANAGED);
     const other = createServer((_request, response) => response.end("{}"));
+    await free();
     const port = Number(new URL(origin).port);
     await new Promise<void>((resolve) => other.listen(port, "127.0.0.1", resolve));
 

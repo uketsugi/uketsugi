@@ -1,5 +1,7 @@
+import { once } from "node:events";
+import { createServer } from "node:net";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { SERVER_NAME } from "@uketsugi/server";
 import { doctor, type Finding } from "../src/doctor.ts";
@@ -21,8 +23,42 @@ const settingsOf = async (dataDir: string): Promise<unknown> =>
 /** An account that has run set-up to the end: the service runs the server. */
 async function served() {
   const made = await account({ manager: true, linger: "no", real: true });
-  return { ...made, report: await setup(made.io(), { ...made.options, yes: true }, made.env) };
+  const report = await setup(made.io(), { ...made.options, yes: true }, made.env);
+  // A server that did not start says why here, and not as a wrong answer further on.
+  expect(made.machine.running, made.machine.whyDown(report.lines)).toBe(true);
+  return { ...made, report };
 }
+
+describe("an account's server on the port the account was given", () => {
+  test("starts though another program tries to take the port after it was picked and before set-up starts the server", async () => {
+    const made = await account({ manager: true, linger: "no", real: true });
+    const taker = createServer().listen(Number(made.options.port), "127.0.0.1");
+    // Whether the taker gets the port is the account's to decide: the server must run either way.
+    await Promise.race([once(taker, "listening"), once(taker, "error")]).catch(() => undefined);
+
+    await setup(made.io(), { ...made.options, yes: true }, made.env);
+
+    taker.close();
+    expect(made.machine.running, made.machine.whyDown([])).toBe(true);
+  });
+
+  test("says why a server did not run: what its failed start said, or that set-up never asked for one", async () => {
+    const made = await account({ manager: true, linger: "no", real: true });
+    expect(made.machine.whyDown(["nothing was done"])).toBe(
+      "the manager was never asked to start the server. Set-up said: nothing was done",
+    );
+
+    await made.byHand();
+    await mkdir(dirname(made.machine.unitFile), { recursive: true });
+    await writeFile(made.machine.unitFile, "[Service]\n");
+    await made.machine.run("systemctl", ["--user", "start", "uketsugi.service"], {
+      env: made.env,
+    });
+
+    expect(made.machine.running).toBe(false);
+    expect(made.machine.whyDown([])).toContain("already running");
+  });
+});
 
 // The manager of these tests runs the real server, which a test stops and starts again more than
 // once: each start is a new engine, a second alone and several beside other test files.
