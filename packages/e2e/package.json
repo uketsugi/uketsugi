@@ -6,10 +6,7 @@
   "type": "module",
   "scripts": {
     "benchmark": "node --conditions=@uketsugi/source src/benchmark/cli.ts",
-    "benchmark:replay": "node --conditions=@uketsugi/source src/benchmark/replay/cli.ts",
-    "live": "node --conditions=@uketsugi/source src/live/cli.ts",
-    "recall": "node --conditions=@uketsugi/source src/recall/cli.ts",
-    "recall:check": "vitest run -c test/recall/vitest.config.ts"
+    "benchmark:replay": "node --conditions=@uketsugi/source src/benchmark/replay/cli.ts"
   },
   "devDependencies": {
     "@uketsugi/contracts": "workspace:*",

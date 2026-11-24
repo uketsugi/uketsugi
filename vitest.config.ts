@@ -5,9 +5,8 @@ import { HANG_GUARD_MS } from "./packages/testkit/src/guard.ts";
  * One test run for the whole workspace. Packages resolve each other through the `@uketsugi/source`
  * export condition, so tests run against `src` and need no build. Nothing that needs a harness, a
  * model or a built release is matched here: those run only when asked for, as `*.live.ts` under
- * `deploy/vitest.config.js` and as the store-and-recall suite's `*.check.ts` under
- * `pnpm --filter @uketsugi/e2e recall:check`. Every run has a home directory of its own
- * (`own-home.ts`), so no test can read or write the home of whoever runs it.
+ * `deploy/vitest.config.js`. Every run has a home directory of its own (`own-home.ts`), so no test
+ * can read or write the home of whoever runs it.
  *
  * Half the processors run test files at once, where Vitest's default is all but one. About half
  * the files start the embedded engine, and a new engine is a second of computation that gains
