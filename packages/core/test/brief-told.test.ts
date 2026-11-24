@@ -26,6 +26,36 @@ describe("what the person told leads the facts", () => {
     expect(new Set(factLines(text)).size).toBe(factLines(text).length);
   });
 
+  test("a told fact's line says it cites the person, and no other line does", () => {
+    const { text } = composeBrief(sources({ facts: standing.slice(0, 3), told, factCount: 5 }));
+    const marked = factLines(text).filter((line) => line.endsWith("(cites your person)"));
+    expect(marked).toHaveLength(2);
+    expect(marked.every((line) => told.some((entry) => line.includes(entry.id)))).toBe(true);
+  });
+
+  test("a told fact the share did not hold is marked where the standing facts list it", () => {
+    const many = Array.from({ length: 20 }, (_, n) =>
+      fact(100 + n, `Rule ${n} ${"c".repeat(200)}`),
+    );
+    const { brief, text } = composeBrief(
+      sources({ facts: [...many, ...standing], told: many, factCount: 32 }),
+    );
+    const told = factLines(text).filter((line) => many.some((rule) => line.includes(rule.id)));
+    // The share holds four of them at most; the rest are listed among the standing facts.
+    expect(told.length).toBeGreaterThan(4);
+    expect(told.every((line) => line.endsWith("(cites your person)"))).toBe(true);
+    expect(brief.facts.length).toBeGreaterThan(4);
+    expect(factLines(text).filter((line) => line.endsWith("(cites your person)"))).toHaveLength(
+      told.length,
+    );
+  });
+
+  test("a told fact a model wrote says so first, then that it cites the person", () => {
+    const written = { ...fact(7, "Ship Fridays"), from_session: "session-1" } as BriefFact;
+    const { text } = composeBrief(sources({ facts: [written], told: [written], factCount: 1 }));
+    expect(factLines(text)[0]).toMatch(/\(written by a model, unchecked\) \(cites your person\)$/);
+  });
+
   test("they take at most their share of the brief's room, and the standing facts keep the rest", () => {
     const many = Array.from({ length: 20 }, (_, n) =>
       fact(100 + n, `Rule ${n} ${"c".repeat(200)}`),

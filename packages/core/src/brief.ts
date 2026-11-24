@@ -169,14 +169,21 @@ function taskSection(
  * fact, or that a model wrote it and nobody has. No recorded run held a fact a model wrote, so
  * every other line reads as it was measured.
  */
-function factLine(fact: BriefFact): string {
+function factLine(fact: BriefFact, told: ReadonlySet<string>): string {
   const standing =
     fact.trust === "reviewed"
       ? " (reviewed)"
       : fact.from_session === undefined
         ? ""
         : " (written by a model, unchecked)";
-  return `- ${fact.id} · ${fact.claim}${standing}`;
+  // The closing line's words say what to do with a fact that quotes the person, wherever it is listed.
+  const quotes = told.has(fact.id) ? " (cites your person)" : "";
+  return `- ${fact.id} · ${fact.claim}${standing}${quotes}`;
+}
+
+/** The ids of the facts the person told, which every line of the brief that lists one marks. */
+function toldIds(sources: BriefSources): ReadonlySet<string> {
+  return new Set(sources.told.map((fact) => fact.id));
 }
 
 /** The same line under a heading that already says a model wrote what it lists. */
@@ -222,7 +229,7 @@ function factList(
   heading: string,
   facts: readonly BriefFact[],
   budget: number,
-  line: (fact: BriefFact) => string = factLine,
+  line: (fact: BriefFact) => string,
 ): Section<BriefFact> {
   const listed = facts.slice(0, LIMITS.published);
   return section(listed, listed.map(line), budget, {
@@ -247,6 +254,7 @@ function previousSection(
     "Facts published while it ran:",
     sources.previous.published,
     budget - sizeOf(head),
+    (fact) => factLine(fact, toldIds(sources)),
   );
   const digested = factList(
     "Facts a model wrote from what it left, which nobody has checked:",
@@ -290,13 +298,14 @@ function factSection(
   };
   const unlisted = (fact: BriefFact) => !listed.some((entry) => entry.id === fact.id);
   const room = budget - heading(sources.factCount).length - 1;
+  const line = (fact: BriefFact) => factLine(fact, toldIds(sources));
   const told = sources.told.filter(unlisted);
-  const lead = fitting(told.map(factLine), Math.min(SHARES.told, Math.floor(room / 2)));
+  const lead = fitting(told.map(line), Math.min(SHARES.told, Math.floor(room / 2)));
   const led = told.slice(0, lead.length);
   const rest = sources.facts.filter(
     (fact) => unlisted(fact) && !led.some((entry) => entry.id === fact.id),
   );
-  const kept = fitting(rest.map(factLine), room - sizeOf(lead));
+  const kept = fitting(rest.map(line), room - sizeOf(lead));
   return {
     lines: [heading(lead.length + kept.length), ...lead, ...kept],
     shown: [...led, ...rest.slice(0, kept.length)],
