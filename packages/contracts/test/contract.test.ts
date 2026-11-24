@@ -25,6 +25,15 @@ describe("the contract", () => {
     expect(readFileSync(path, "utf8")).toBe(text);
   });
 
+  test("publish_fact's citations say how to send what a person told the agent", () => {
+    const publish = TOOLS.find((tool) => tool.name === "publish_fact");
+    const citations = (publish?.inputSchema.properties as Record<string, { description: string }>)
+      .citations;
+    expect(citations?.description).toContain(
+      'What a person told you is `{"kind":"person","who":"...","quote":"..."}`, the quote being all they said about it, with any limit or condition they put on it.',
+    );
+  });
+
   test("every tool requires a project and its input schema is valid JSON Schema", () => {
     const ajv = new Ajv({ strict: true });
     expect(TOOLS.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
@@ -51,7 +60,7 @@ describe("the contract", () => {
 
   test("the measured texts are the ones the recording runs used, and the instructions stay short", () => {
     expect(sha256(BLOCK_TEXT)).toBe(
-      "90d5693e880e39ea365516cf8621fd2ce49ecff0f7e8d774acdb5c2217bdd212",
+      "9954e16ca3cdcbf90f9b97db8ae92c4bdb4abb8cfe87a6a91bcbe5629d207800",
     );
     expect(PROJECT_REFUSAL).toBe(
       "project is required. Pass this repository's origin remote as host/owner/name (run: git remote get-url origin). If this directory is not a repository, pass the project named in your instructions.",

@@ -78,7 +78,8 @@ const WHAT_TO_SEND: Record<string, string> = {
   web: 'a URL, or `{"kind":"web","url":"https://example.com/page"}`',
   fact: 'a fact id, or `{"kind":"fact","fact":"<fact id>"}`',
   document: '`{"kind":"document","title":"Design review notes","url":"https://example.com/doc"}`',
-  person: '`{"kind":"person","who":"Priya, on call","at":"2026-11-19"}`',
+  person:
+    '`{"kind":"person","who":"Priya, on call","at":"2026-11-19","quote":"all they said about it, limits included"}`',
 };
 
 /** The failure for an object citation that lacks a field its kind needs. */
@@ -178,7 +179,7 @@ function fromObject(given: Record<string, unknown>, project: ProjectRef, at: str
     case "document":
       return { kind, title: need("title"), ...optional("url") };
     case "person":
-      return { kind, who: need("who"), ...optional("at") };
+      return { kind, who: need("who"), ...optional("at"), ...optional("quote") };
     default:
       // An unknown kind counts as testimony: what it says is kept as a local observation.
       return {
@@ -352,13 +353,14 @@ export function citationText(citation: Citation): string {
 
 /**
  * What a citation holds that its one line (`ref`) does not say, so that a result sent back as it
- * was shown names the same source: the repository when it is not the project's, a web quote, the
- * time of a person's word or an observation.
+ * was shown names the same source: the repository when it is not the project's, a web or
+ * person quote, the time of a person's word or an observation.
  */
 function beyondRef(citation: Citation, project: string): Record<string, string> {
   const extra: Record<string, string> = {};
   if ("repo" in citation && citation.repo !== project) extra.repo = citation.repo;
-  if (citation.kind === "web" && citation.quote !== undefined) extra.quote = citation.quote;
+  if ((citation.kind === "web" || citation.kind === "person") && citation.quote !== undefined)
+    extra.quote = citation.quote;
   if ((citation.kind === "person" || citation.kind === "observation") && citation.at !== undefined)
     extra.at = citation.at;
   return extra;

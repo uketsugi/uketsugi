@@ -303,7 +303,7 @@ export interface PublishFactInput {
   project: string;
   claim: string;
   /**
-   * Where the claim comes from, at least one. Each is a string (`path:lines`, `path:lines@commit`, a commit or a URL) or an object. A reference anyone can open (a repository item, a public web page) is checkable. One that needs sign-in is kept as testimony.
+   * Where the claim comes from, at least one. Each is a string (`path:lines`, `path:lines@commit`, a commit or a URL) or an object. What a person told you is `{"kind":"person","who":"...","quote":"..."}`, the quote being all they said about it, with any limit or condition they put on it. A reference anyone can open (a repository item, a public web page) is checkable. One that needs sign-in is kept as testimony.
    *
    * @minItems 1
    */
@@ -686,7 +686,7 @@ export interface Citation {
    */
   repo?: string;
   /**
-   * The quoted words of a web citation.
+   * The quoted words of a web or person citation.
    */
   quote?: string;
   /**

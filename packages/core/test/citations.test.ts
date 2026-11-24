@@ -10,6 +10,7 @@ import {
 } from "../src/facts/citations.ts";
 import type { Citation, ProjectRef } from "../src/domain.ts";
 import { ToolFailure } from "../src/failure.ts";
+import { scanCitations } from "../src/usecases/facts/write.ts";
 
 const repository = { kind: "repository" as const, key: "github.com/acme/api" };
 const named = { kind: "named" as const, key: "me/notes" };
@@ -170,6 +171,8 @@ describe("citations", () => {
     { kind: "person", who: "Priya" },
     { kind: "person", who: "Priya", at: "2026-11-19" },
     { kind: "person", who: "Priya", at: "last week" },
+    { kind: "person", who: "Priya", at: "2026-11-19", quote: "Make the limit 40, not 60." },
+    { kind: "person", who: "Priya", quote: "Make the limit 40, not 60." },
     { kind: "observation", text: "the retry loop was read by hand" },
     { kind: "observation", text: "the retry loop was read by hand", at: "Tuesday" },
   ];
@@ -199,5 +202,36 @@ describe("citations", () => {
       }
     })();
     expect((failure as ToolFailure).toText()).toContain('{"kind":"pull_request","number":42}');
+  });
+
+  test("a person citation that lacks who says to send the person's whole words, limits included", () => {
+    const failure = (() => {
+      try {
+        return parseCitation({ kind: "person", quote: "Make it 40." }, repository, 0);
+      } catch (error) {
+        return error;
+      }
+    })();
+    expect((failure as ToolFailure).toText()).toContain("all they said about it");
+  });
+
+  test("a person's words are kept as sent, shown beside the ref, and still testimony", () => {
+    const sent = { kind: "person", who: "Priya", quote: "Make the limit 40, not 60." };
+    const stored = scanCitations([parseCitation(sent, repository, 0)]).citations;
+    const classed = classify(stored[0] as Citation, never);
+    expect(classed.class).toBe("testimony");
+    expect(classed.reason).toBe("a person said so");
+    expect(citationView(classed, repository.key)).toMatchObject({
+      ref: "Priya",
+      kind: "person",
+      quote: "Make the limit 40, not 60.",
+    });
+  });
+
+  test("a person's words are scanned like every other text, and the replacement is reported", () => {
+    const sent = { kind: "person", who: "Priya", quote: "Mail ask.me@corp.io about it" };
+    const { citations, replaced } = scanCitations([parseCitation(sent, repository, 0)]);
+    expect(citations[0]).toMatchObject({ quote: "Mail [redacted:email] about it" });
+    expect(replaced).toEqual([{ field: "citations[0].quote", rule: "email" }]);
   });
 });

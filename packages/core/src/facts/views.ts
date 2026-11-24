@@ -123,7 +123,11 @@ export async function apiFacts(
 
 function citationLine(citation: Citation): string {
   const reason = citation.reason === undefined ? "" : `, ${citation.reason}`;
-  return `${citation.ref} (${citation.class}${reason})`;
+  // A person's words are shown with the line, as the person said them: the text says what is
+  // kept, and a harness that hands its model this text and not the JSON loses nothing.
+  const said =
+    citation.kind === "person" && citation.quote !== undefined ? `: "${citation.quote}"` : "";
+  return `${citation.ref} (${citation.class}${reason})${said}`;
 }
 
 /**

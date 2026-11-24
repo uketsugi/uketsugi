@@ -109,7 +109,7 @@ export type Citation =
   | { kind: "fact"; fact: string }
   | { kind: "observation"; text: string; at?: string }
   | { kind: "document"; title: string; url?: string }
-  | { kind: "person"; who: string; at?: string };
+  | { kind: "person"; who: string; at?: string; quote?: string };
 
 /** A citation with the class the server gave it, and why when it is testimony. */
 export interface ClassedCitation {
