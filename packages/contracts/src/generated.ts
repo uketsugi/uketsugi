@@ -292,7 +292,7 @@ export interface SearchFactsInput {
    */
   explain?: boolean;
   /**
-   * The most facts to return.
+   * The most facts to return, not counting up to 2 more that cite the person: when the search matched such facts below this limit they follow, so a result may hold 2 more facts than the limit.
    */
   limit: number;
 }
@@ -627,6 +627,10 @@ export interface BriefFact {
    * Present when a model wrote the fact from what a session left: that session's display id. The brief's line says so, since nobody checked the fact when it was written.
    */
   from_session?: string;
+  /**
+   * Present when one of the fact's citations is something the person told an agent; the brief's line ends with the same words.
+   */
+  cites?: "cites your person";
 }
 /**
  * This interface was referenced by `ContractTypes`'s JSON-Schema

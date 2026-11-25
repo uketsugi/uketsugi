@@ -6,6 +6,7 @@ import {
 } from "@uketsugi/contracts";
 import { embedWithin, liveHeads, scopeOf, type CallContext, type Outcome } from "../../context.ts";
 import type { Fact } from "../../domain.ts";
+import { citesPerson } from "../../facts/citations.ts";
 import { factViews } from "../../facts/views.ts";
 import { invalidInput } from "../../failure.ts";
 import type { CorePorts, ModelVector } from "../../ports.ts";
@@ -27,6 +28,10 @@ type Asker = Pick<CallContext, "caller" | "project">;
 
 /** How long a search waits for the query's vector before it runs on the lexical passes alone. */
 const QUERY_EMBED_BUDGET_MS = 1500;
+/** The most matched facts below the limit that cite the person, which a result shows after the others. */
+const TOLD_BELOW_LIMIT = 2;
+/** How many ranks below the limit are read at a time while looking for them. */
+const TOLD_READ_BATCH = 20;
 /** The most candidates an explanation lists. */
 const EXPLAIN_LIMIT = 50;
 
@@ -135,8 +140,30 @@ export async function rankFacts(
   };
 }
 
+/**
+ * The first facts that cite the person among those the search matched below the limit, in rank
+ * order: a decision the person told is not cut by the facts about the code that outrank it. They
+ * are read a few ranks at a time and the reading stops at the second.
+ */
+async function toldBelow(ports: CorePorts, ctx: Asker, ranking: Ranking, limit: number) {
+  const scope = scopeOf(ctx.caller);
+  const told: Fact[] = [];
+  for (let from = limit; from < ranking.ranked.length && told.length < TOLD_BELOW_LIMIT;) {
+    const ids = ranking.ranked.slice(from, (from += TOLD_READ_BATCH)).map((entry) => entry.factId);
+    const stored = new Map(
+      (await ports.store.facts.getMany(scope, ids)).map((fact) => [fact.id, fact]),
+    );
+    for (const id of ids) {
+      const fact = stored.get(id);
+      if (fact !== undefined && citesPerson(fact) && told.length < TOLD_BELOW_LIMIT)
+        told.push(fact);
+    }
+  }
+  return told;
+}
+
 /** The ranking's reasoning: how the query was read, what was skipped, and every candidate's place and why. */
-function explanation(ranking: Ranking, shown: number): Record<string, unknown> {
+function explanation(ranking: Ranking, shown: ReadonlySet<string>): Record<string, unknown> {
   const { query, ranked, verdict, degraded, profile } = ranking;
   return {
     query: {
@@ -150,7 +177,7 @@ function explanation(ranking: Ranking, shown: number): Record<string, unknown> {
     candidates: ranked.slice(0, EXPLAIN_LIMIT).map((candidate, index) => ({
       id: candidate.factId,
       position: index + 1,
-      shown: index < shown,
+      shown: shown.has(candidate.factId),
       ranks: candidate.ranks,
       relevance: candidate.relevance,
       cosine: candidate.cosine,
@@ -178,13 +205,14 @@ export async function searchFacts(
     throw invalidInput("search_facts needs a query or an id.", "Pass your question as `query`.");
   }
   const ranking = await rankFacts(ports, ctx, text, input.limit);
-  const facts = await factViews(ports, ctx.caller, ranking.facts);
+  const shownFacts = [...ranking.facts, ...(await toldBelow(ports, ctx, ranking, input.limit))];
+  const facts = await factViews(ports, ctx.caller, shownFacts);
   const { confidence } = ranking.verdict;
   const lead =
     facts.length === 0
       ? NOTHING_FOUND
       : confidence === "low"
-        ? noConfidentMatch(facts.length)
+        ? noConfidentMatch(ranking.facts.length)
         : undefined;
   return {
     matched: ranking.matched,
@@ -193,6 +221,8 @@ export async function searchFacts(
     facts,
     degraded: ranking.degraded,
     ...(lead === undefined ? {} : { message: lead }),
-    ...(input.explain === true ? { explain: explanation(ranking, facts.length) } : {}),
+    ...(input.explain === true
+      ? { explain: explanation(ranking, new Set(facts.map((fact) => fact.id))) }
+      : {}),
   };
 }

@@ -36,7 +36,7 @@
             "minimum": 1,
             "maximum": 50,
             "default": 10,
-            "description": "The most facts to return."
+            "description": "The most facts to return, not counting up to 2 more that cite the person: when the search matched such facts below this limit they follow, so a result may hold 2 more facts than the limit."
           }
         },
         "required": ["project"]
@@ -1563,6 +1563,10 @@
         "from_session": {
           "type": "string",
           "description": "Present when a model wrote the fact from what a session left: that session's display id. The brief's line says so, since nobody checked the fact when it was written."
+        },
+        "cites": {
+          "const": "cites your person",
+          "description": "Present when one of the fact's citations is something the person told an agent; the brief's line ends with the same words."
         }
       },
       "required": ["id", "claim", "trust"]

@@ -31,6 +31,25 @@ describeUseCases("the person's words lead the brief", (w) => {
     expect(first.text).toContain(`- ${told.id} · Never email founders when a greeting changes`);
   });
 
+  test("a fact that cites the person and a file is marked in the brief's text and JSON", async () => {
+    const server = serverWith(w, undefined);
+    const mixed = await server.call("publish_fact", {
+      claim: "Greetings are stored per channel",
+      citations: [{ kind: "person", who: "the user" }, "irc/greetings.go:10-20"],
+    });
+    const plain = await server.call("publish_fact", {
+      claim: "Handlers validate their input",
+      citations: ["irc/handler.go:1-9"],
+    });
+    const first = await server.another("search_facts", { query: "greetings" });
+    const lines = first.text?.split("\n").filter((entry) => entry.startsWith("- ")) ?? [];
+    expect(lines.find((entry) => entry.includes(mixed.id))).toMatch(/\(cites your person\)$/);
+    expect(lines.find((entry) => entry.includes(plain.id))).not.toContain("cites your person");
+    const facts = first.brief?.last_session?.published ?? [];
+    expect(facts.find((entry) => entry.id === mixed.id)?.cites).toBe("cites your person");
+    expect(facts.find((entry) => entry.id === plain.id)?.cites).toBeUndefined();
+  });
+
   test("superseded facts cited only to the person do not take the slots of the live one", async () => {
     const server = serverWith(w, undefined);
     const told = await server.call("publish_fact", {

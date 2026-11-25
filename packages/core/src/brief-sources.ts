@@ -10,9 +10,10 @@
  * composes it first within its share.
  */
 import type { BriefFact, Fact as FactView } from "@uketsugi/contracts";
-import { composeBrief, type BriefSources, type ComposedBrief } from "./brief.ts";
+import { CITES_PERSON, composeBrief, type BriefSources, type ComposedBrief } from "./brief.ts";
 import { scopeOf, type CallContext } from "./context.ts";
 import type { Fact, ReadScope } from "./domain.ts";
+import { citesPerson } from "./facts/citations.ts";
 import { isLive, type LiveFact } from "./facts/duplicates.ts";
 import { factViews } from "./facts/views.ts";
 import type { CorePorts } from "./ports.ts";
@@ -26,10 +27,11 @@ const FACT_POOL = 60;
 /** How many facts cited only to the person are read, newest first: more than their share holds. */
 const TOLD_POOL = 20;
 
-/** A fact as a brief lists it. */
-function briefFact(view: FactView): BriefFact {
+/** A fact as a brief lists it; `cited` holds the ids of the facts that cite the person. */
+function briefFact(view: FactView, cited: ReadonlySet<string>): BriefFact {
   const from = view.from_session === undefined ? {} : { from_session: view.from_session };
-  return { id: view.id, claim: view.claim, trust: view.trust, ...from };
+  const cites = cited.has(view.id) ? ({ cites: CITES_PERSON } as const) : {};
+  return { id: view.id, claim: view.claim, trust: view.trust, ...from, ...cites };
 }
 
 /**
@@ -125,6 +127,11 @@ export async function briefSources(
     standingFacts(ports, scope, project, picks),
     toldFacts(ports, scope, project),
   ]);
+  const cited = new Set(
+    withTold(standing, told)
+      .filter(citesPerson)
+      .map((fact) => fact.id),
+  );
   const taskIds = tasks.map((task) => task.id);
   const [views, notes, during] = await Promise.all([
     factViews(ports, caller, withTold(standing, told)),
@@ -148,14 +155,14 @@ export async function briefSources(
         ? null
         : {
             session: previous,
-            published: left.filter((view) => !byModel(view)).map(briefFact),
-            digested: left.filter(byModel).map(briefFact),
+            published: left.filter((view) => !byModel(view)).map((view) => briefFact(view, cited)),
+            digested: left.filter(byModel).map((view) => briefFact(view, cited)),
           },
     facts: chosenFirst(
       byStanding(standing, views.filter(isStanding), caller.principalId, now),
       picks,
-    ).map(briefFact),
-    told: told.flatMap(viewOf).map(briefFact),
+    ).map((view) => briefFact(view, cited)),
+    told: told.flatMap(viewOf).map((view) => briefFact(view, cited)),
     factCount,
   };
 }

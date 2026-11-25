@@ -9,6 +9,7 @@ const CLIENT = { name: "ranking-test", version: null, conversationId: null };
 interface Candidate {
   id: string;
   position: number;
+  shown: boolean;
   ranks: Record<string, number>;
   relevance: number;
   cosine: number | null;
@@ -175,5 +176,67 @@ describe("golden ranking: what a search must and must not return", () => {
     await publish("Refund batches settle nightly at two");
     const lexical = await search("when do refund batches settle");
     expect(lexical).toMatchObject({ matched: 1, degraded: ["embedder_unavailable"] });
+  });
+
+  test("facts that cite the person and matched below the limit follow the others, two at most", async () => {
+    open();
+    const code: string[] = [];
+    for (let n = 0; n < 10; n += 1) {
+      code.push(
+        await publish(`Webhook retry backoff number ${n} is exponential over five attempts`),
+      );
+    }
+    const told: string[] = [];
+    for (let n = 0; n < 3; n += 1) {
+      told.push(
+        await publish(`Webhook retry, decided by the person: variant ${n}`, {
+          citations: [{ kind: "person", who: "the user" }, "src/billing/retry.ts:10-20"],
+        }),
+      );
+    }
+    const query = "webhook retry backoff exponential";
+    const found = await search(query);
+    const ids = found.facts.map((fact) => fact.id);
+    expect(found.matched).toBe(13);
+    expect(ids.slice(0, 10).sort()).toEqual([...code].sort());
+    // The two that follow are the first two of the three in rank order.
+    const order = found.explain.candidates
+      .map((entry) => entry.id)
+      .filter((id) => told.includes(id));
+    expect(ids.slice(10)).toEqual(order.slice(0, 2));
+    expect(found.shown).toBe(12);
+    expect(found.explain.candidates.filter((entry) => entry.shown)).toHaveLength(12);
+
+    // A small limit is exceeded by the same two.
+    expect((await search(query, { limit: 1 })).shown).toBe(3);
+
+    // Nothing is added when no fact that cites the person matched below the limit.
+    expect((await search(query, { limit: 13 })).shown).toBe(13);
+    open();
+    for (let n = 0; n < 12; n += 1)
+      await publish(`Webhook retry backoff number ${n} is exponential`);
+    expect(await search(query)).toMatchObject({ matched: 12, shown: 10 });
+  });
+
+  test("a result with a fact appended below the limit lists it in the text, and the weak-match line counts the head only", async () => {
+    open();
+    // Equal matches rank the newer first, so the one the person told is older and falls below.
+    const told = await publish("Cookie banners appear only once, as the person put it", {
+      citations: [{ kind: "person", who: "the user" }],
+    });
+    const head = await publish("Sessions expire after thirty minutes of inactivity");
+    const found = await search("does the session cookie survive a browser restart", { limit: 1 });
+    expect(found.facts.map((fact) => fact.id)).toEqual([head, told]);
+    expect(found).toMatchObject({ matched: 2, shown: 2, confidence: "low" });
+    expect(found.message).toBe(noConfidentMatch(1));
+    const lines = found.text.split("\n");
+    expect(lines.slice(0, 2)).toEqual([
+      noConfidentMatch(1),
+      "2 matched · 2 shown · confidence low",
+    ]);
+    expect(lines.filter((line) => line.startsWith(head) || line.startsWith(told))).toHaveLength(2);
+    expect(lines.findIndex((line) => line.startsWith(told))).toBeGreaterThan(
+      lines.findIndex((line) => line.startsWith(head)),
+    );
   });
 });

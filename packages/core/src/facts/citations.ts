@@ -5,7 +5,7 @@
  * address that is not public.
  */
 import type { Citation as CitationView } from "@uketsugi/contracts";
-import type { Citation, ClassedCitation, ProjectRef } from "../domain.ts";
+import type { Citation, ClassedCitation, Fact, ProjectRef } from "../domain.ts";
 import { invalidInput } from "../failure.ts";
 import { isRecord } from "../validate.ts";
 
@@ -41,6 +41,11 @@ function fileOf(value: string, repo: string): Citation | null {
     ...(from === undefined ? {} : { lines: to === undefined ? from : `${from}-${to}` }),
     ...(commit === undefined ? {} : { commit: commit.toLowerCase() }),
   };
+}
+
+/** Whether a fact cites the person: one of its citations is a person's word. */
+export function citesPerson(fact: Pick<Fact, "citations">): boolean {
+  return fact.citations.some((entry) => entry.citation.kind === "person");
 }
 
 /** A string that names a source by itself: a URL, a fact, a commit or a file. Anything else is prose. */
