@@ -93,6 +93,10 @@ export type PublishFactResult = Envelope & {
    * With `audience: private`, when the fact is the caller's own.
    */
   private_because?: "project" | "model_unchecked" | "no_source" | "cites_private" | "merged_word";
+  /**
+   * True when the fact was confirmed and the citation this publish added made it unconfirmed again: check it once more.
+   */
+  lost_confirmation?: boolean;
 };
 /**
  * What the scanner replaced before anything was stored: the field and the rule that matched, never the text.
@@ -231,6 +235,9 @@ export interface ContractTypes {
   ProjectChoiceRequest?: ProjectChoiceRequest;
   SignInRequest?: SignInRequest;
   InviteRequest?: InviteRequest;
+  FactCorrection?: FactCorrection;
+  FactConfirmation?: FactConfirmation;
+  ProjectNamed?: ProjectNamed;
   DashboardSession?: DashboardSession;
   HostProof?: HostProof;
   SignInCode?: SignInCode;
@@ -252,6 +259,12 @@ export interface ContractTypes {
   TokenRevoked?: TokenRevoked;
   TokenReplaced?: TokenReplaced;
   ModelCheck?: ModelCheck;
+  FactCorrected?: FactCorrected;
+  FactConfirmed?: FactConfirmed;
+  TaskClosed?: TaskClosed;
+  NoteRemoved?: NoteRemoved;
+  ProjectContents?: ProjectContents;
+  ProjectDeleted?: ProjectDeleted;
 }
 export interface ToolError {
   error: {
@@ -887,6 +900,31 @@ export interface InviteRequest {
   operator_name?: string;
 }
 /**
+ * `POST /api/facts/:id/correct`: the person's own words for their fact, which replace its claim and detail.
+ */
+export interface FactCorrection {
+  claim: string;
+  /**
+   * Left out, the fact's detail stays; null takes it away.
+   */
+  detail?: string | null;
+}
+/**
+ * `POST /api/facts/:id/confirm`: the person has checked the fact.
+ */
+export interface FactConfirmation {
+  /**
+   * What they checked it against.
+   */
+  checked?: string;
+}
+/**
+ * `GET /api/projects/contents` query and `DELETE /api/projects` body: one of the person's projects, by its canonical key.
+ */
+export interface ProjectNamed {
+  project: string;
+}
+/**
  * `GET /api/session`: who is signed in. A 401 means nobody: the person runs `ukt ui` again.
  */
 export interface DashboardSession {
@@ -1438,6 +1476,20 @@ export interface ActivitySession {
       reason: string;
     } | null;
   } | null;
+  /**
+   * What the session left as its note, kept private to the person; null when it left none or it was removed.
+   */
+  note: {
+    text: string;
+    /**
+     * Whether it was the session's last word.
+     */
+    final: boolean;
+    /**
+     * ISO 8601, UTC.
+     */
+    at: string;
+  } | null;
 }
 /**
  * `GET /api/projects`.
@@ -1631,6 +1683,78 @@ export interface ModelCheck {
    */
   budget_tokens?: number;
 }
+/**
+ * `POST /api/facts/:id/correct`: whether the words changed, and what the scan took out of them.
+ */
+export interface FactCorrected {
+  id: string;
+  changed: boolean;
+  redacted?: Redacted;
+}
+/**
+ * `POST /api/facts/:id/confirm`: the fact's status now.
+ */
+export interface FactConfirmed {
+  id: string;
+  status: Status;
+}
+/**
+ * `POST /api/tasks/:id/close`: the task is done; `changed` is false when it already was.
+ */
+export interface TaskClosed {
+  id: string;
+  changed: boolean;
+}
+/**
+ * `DELETE /api/sessions/:session/note`: the session's note and its captured turns are gone.
+ */
+export interface NoteRemoved {
+  session: string;
+}
+/**
+ * `GET /api/projects/contents`: what deleting the project takes, and what of other people's stays.
+ */
+export interface ProjectContents {
+  project: string;
+  /**
+   * The person's facts there: live, earlier wordings merged away and redacted stubs.
+   */
+  facts: number;
+  /**
+   * The tasks they published there.
+   */
+  tasks: number;
+  /**
+   * Their sessions there, each with its note.
+   */
+  sessions: number;
+  /**
+   * Other people's facts in the project, which stay. Counted among those the person can see.
+   */
+  others_facts: number;
+  /**
+   * Other people's tasks in the project, which stay.
+   */
+  others_tasks: number;
+}
+/**
+ * `DELETE /api/projects`: what went.
+ */
+export interface ProjectDeleted {
+  project: string;
+  /**
+   * How many facts.
+   */
+  facts: number;
+  /**
+   * How many tasks.
+   */
+  tasks: number;
+  /**
+   * How many sessions.
+   */
+  sessions: number;
+}
 
 export const TOOL_NAMES = ["search_facts","publish_fact","update_fact","search_tasks","publish_task","claim_task","update_task"] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -1666,4 +1790,7 @@ export interface ApiRequests {
   ProjectChoiceRequest: ProjectChoiceRequest;
   SignInRequest: SignInRequest;
   InviteRequest: InviteRequest;
+  FactCorrection: FactCorrection;
+  FactConfirmation: FactConfirmation;
+  ProjectNamed: ProjectNamed;
 }

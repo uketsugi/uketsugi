@@ -142,7 +142,7 @@ describe("Tasks", () => {
     expect(limits.length).toBeGreaterThan(2);
   });
 
-  it("opens a task from the keyboard, shows what is to be done, every note and its history, and changes nothing", async () => {
+  it("opens a task from the keyboard, shows what is to be done, every note and its history, and offers to close it", async () => {
     const user = open("/tasks");
     const row = await screen.findByRole("link", { name: TASK });
     row.focus();
@@ -175,9 +175,10 @@ describe("Tasks", () => {
     );
     expect(history[3]).toMatch(/^Handed off · you via claude-code \(s-51d2\) · .+ ago$/);
 
-    // A person reads here: the one control is the drawer's own.
+    // A person reads here and may close the task: the drawer's own control and that one.
     expect(drawer.getAllByRole("button")).toEqual([
       drawer.getByRole("button", { name: "Close the task" }),
+      drawer.getByRole("button", { name: "Close task…" }),
     ]);
     expect(screen.getByRole("link", { name: TASK, current: "page" })).toBeTruthy();
     expect(await violations()).toEqual([]);

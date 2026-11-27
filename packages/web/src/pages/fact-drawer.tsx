@@ -1,6 +1,7 @@
 /**
  * One fact, in a drawer beside the list: what it claims, where it comes from, who checked it, what
- * happened to it, and the one change a person makes here, Redact, behind a confirmation.
+ * happened to it, and what a person does to it here: correct its words, say they checked it, or
+ * redact it, which is asked about first.
  */
 import type {
   ApiConfirmation,
@@ -9,18 +10,18 @@ import type {
   FactDetail,
   FactHistoryEntry,
 } from "@uketsugi/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState, type RefObject } from "react";
-import { factQuery, redactFact, refreshFacts } from "../api.ts";
+import { confirmFact, correctFact, factQuery, redactFact, refreshFacts } from "../api.ts";
 import { SeenByMark } from "../by-project.tsx";
 import { Detail, Details, Lead, Section, SideDrawer } from "../drawer.tsx";
-import { useSession } from "../shell.tsx";
+import { useChange } from "../shell.tsx";
 import {
   Ago,
   Button,
+  ChangeDialog,
   CitationMark,
-  ConfirmDialog,
   ErrorPanel,
   FlagMarks,
   QueryState,
@@ -140,44 +141,22 @@ const ON_DISK =
   "A copy can stay behind on disk: the database’s own files can still hold the text for a while, and so can a backup, even one made after the redaction. Uketsugi does not remove those copies.";
 
 /**
- * The one change a person makes here. `live` is the fact this one was merged into, if it was: a
- * redaction takes this fact's text and leaves that fact's, which says the same.
+ * Redacts the fact. `live` is the fact this one was merged into, if it was: a redaction takes this
+ * fact's text and leaves that fact's, which says the same.
  */
 function Redact(props: { id: string; live: string | null; after: RefObject<HTMLElement | null> }) {
   const { id, live, after } = props;
-  const session = useSession();
-  const client = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const done = useRef(false);
-  const redact = useMutation({
-    mutationFn: () => redactFact(id, session.csrf),
-    onSuccess: async () => {
-      done.current = true;
-      setOpen(false);
-      await refreshFacts(client);
-    },
-  });
-  const change = (next: boolean) => {
-    if (next) redact.reset();
-    setOpen(next);
-  };
+  const redact = useChange((csrf) => redactFact(id, csrf), refreshFacts);
   return (
-    <ConfirmDialog
-      open={open}
-      onOpenChange={change}
+    <ChangeDialog
+      mutation={redact}
       trigger={<Button tone="danger" />}
       triggerText="Redact…"
       title="Redact this fact?"
-      failure={redact.isError ? <ErrorPanel error={redact.error} /> : null}
       keep="Keep the fact"
-      change={{
-        text: "Redact the fact",
-        tone: "destroy",
-        disabled: redact.isPending,
-        onClick: () => redact.mutate(),
-      }}
+      text="Redact the fact"
       // Once the fact is redacted its button is gone, so the focus goes to the top of the drawer.
-      finalFocus={() => (done.current ? after.current : true)}
+      finalFocus={() => (redact.isSuccess ? after.current : true)}
     >
       Agents stop receiving its text, and it is gone at once from the dashboard, from search and
       from any export made from now on. This cannot be undone.
@@ -191,7 +170,87 @@ function Redact(props: { id: string; live: string | null; after: RefObject<HTMLE
           the same and keeps its text: redact that fact as well if the claim itself should go.
         </span>
       )}
-    </ConfirmDialog>
+    </ChangeDialog>
+  );
+}
+
+/** The fact's words in a form, for the person to put right. Sending them unchanged changes nothing. */
+function Correct({ fact }: { fact: ApiFact }) {
+  const [editing, setEditing] = useState(false);
+  const [claim, setClaim] = useState(fact.claim ?? "");
+  const [detail, setDetail] = useState(fact.detail ?? "");
+  const correct = useChange(
+    (csrf) => correctFact(fact.id, { claim, detail: detail === "" ? null : detail }, csrf),
+    refreshFacts,
+  );
+  if (!editing) {
+    return (
+      <Button
+        onClick={() => {
+          setClaim(fact.claim ?? "");
+          setDetail(fact.detail ?? "");
+          correct.reset();
+          setEditing(true);
+        }}
+      >
+        Correct…
+      </Button>
+    );
+  }
+  return (
+    <form
+      className="space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        correct.mutate(undefined, { onSuccess: () => setEditing(false) });
+      }}
+    >
+      <label className="block font-medium" htmlFor="correct-claim">
+        Claim
+      </label>
+      <textarea
+        id="correct-claim"
+        value={claim}
+        onChange={(event) => setClaim(event.target.value)}
+        rows={3}
+        className="w-full rounded-md border border-line-strong bg-surface p-2"
+      />
+      <label className="block font-medium" htmlFor="correct-detail">
+        Detail
+      </label>
+      <textarea
+        id="correct-detail"
+        value={detail}
+        onChange={(event) => setDetail(event.target.value)}
+        rows={4}
+        className="w-full rounded-md border border-line-strong bg-surface p-2"
+      />
+      <p className="text-ink-muted">
+        Agents are given these words from now on, under your name, and the history says you changed
+        them. Uketsugi keeps no copy of the words they replace, and other people’s confirmations of
+        the fact are dropped. {ON_DISK}
+      </p>
+      {correct.isError ? <ErrorPanel error={correct.error} /> : null}
+      <div className="flex gap-2">
+        <Button tone="primary" type="submit" disabled={correct.isPending || claim.trim() === ""}>
+          Save the correction
+        </Button>
+        <Button onClick={() => setEditing(false)}>Leave it as it is</Button>
+      </div>
+    </form>
+  );
+}
+
+/** Says the person has checked the fact against what it cites: the check a model's fact waits for. */
+function Confirm({ fact }: { fact: ApiFact }) {
+  const confirm = useChange((csrf) => confirmFact(fact.id, csrf), refreshFacts);
+  return (
+    <>
+      <Button disabled={confirm.isPending} onClick={() => confirm.mutate()}>
+        I have checked this fact
+      </Button>
+      {confirm.isError ? <ErrorPanel error={confirm.error} /> : null}
+    </>
   );
 }
 
@@ -287,8 +346,16 @@ function FactShown({ detail }: { detail: FactDetail }) {
       <Checks confirmations={confirmations} />
       <Connections fact={fact} />
       <History entries={history} />
-      {fact.redacted || !fact.own ? null : (
-        <Redact id={fact.id} live={fact.superseded_by} after={top} />
+      {fact.redacted ? null : (
+        <div className="flex flex-wrap gap-2">
+          {fact.superseded_by === null &&
+          fact.status === "unconfirmed" &&
+          (fact.from_session !== null || !fact.own) ? (
+            <Confirm fact={fact} />
+          ) : null}
+          {fact.superseded_by === null && fact.own ? <Correct fact={fact} /> : null}
+          {fact.own ? <Redact id={fact.id} live={fact.superseded_by} after={top} /> : null}
+        </div>
       )}
     </>
   );

@@ -4,6 +4,7 @@ import { behindOf } from "./chain.ts";
 import { actorColumns, scoped, uuidsOf, type Db } from "./codec.ts";
 import { SqlDirectory, SqlProjects } from "./directory.ts";
 import { SqlFacts, SqlUnitFacts } from "./facts.ts";
+import { forgetProject } from "./forget.ts";
 import { SqlJobs } from "./jobs.ts";
 import { SqlReview, SqlUnitReview } from "./review.ts";
 import { SqlSearch } from "./search.ts";
@@ -176,6 +177,9 @@ function unitOver(trx: Db, target: UnitTarget, heads: Heads): Unit {
     },
     choice: async (project) => choices.choice(orgId, await person(), project),
     choose: async (project, treatment) => choices.choose(orgId, await person(), project, treatment),
+    async forgetProject(project) {
+      return forgetProject(trx, target, await person(), project);
+    },
     async move(move) {
       const other = move.from === audienceId ? move.to : move.from;
       if (other === audienceId || (move.from !== audienceId && move.to !== audienceId))

@@ -55,7 +55,7 @@ async function naming() {
 describe("Projects", () => {
   mockApi();
 
-  it("lists the person's projects, says which they have not chosen for, and offers no choice for a named one", async () => {
+  it("lists the person's projects, says which they have not chosen for, and offers no choice for a named one, only its deletion", async () => {
     open("/projects");
     const table = within(await screen.findByRole("table", { name: /Your projects/ }));
     const [, repository, named] = table.getAllByRole("row");
@@ -65,7 +65,11 @@ describe("Projects", () => {
     ).toBeTruthy();
     expect(within(named as HTMLElement).getByText("Q4 expenses (me/q4-expenses)")).toBeTruthy();
     expect(within(named as HTMLElement).getByText("yours alone")).toBeTruthy();
-    expect(within(named as HTMLElement).queryByRole("button")).toBeNull();
+    expect(
+      within(named as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Delete me/q4-expenses…"]);
     expect(await violations()).toEqual([]);
   });
 

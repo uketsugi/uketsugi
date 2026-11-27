@@ -7,15 +7,21 @@
  * Two kinds of route are narrower than that. What reaches every person's data or administers
  * the server (a snapshot of the store, people and their credentials, a sign-in code for the
  * operator) answers only a caller on this machine that sends the host's own secret, which no
- * harness is given. What only a person may do (choose how a project is treated, redact a fact,
- * undo a merge, make a named project) takes a signed-in browser, never a token.
+ * harness is given. What only a person may do (choose how a project is treated, redact, correct or confirm a
+ * fact, close a task, remove a session's note, delete a project, undo a merge, make a named
+ * project) takes a signed-in browser, never a token.
  */
 import { getConnInfo } from "@hono/node-server/conninfo";
 import {
   SIGN_IN_PATH,
   type ApiRequests,
   type DashboardSession,
+  type FactConfirmation,
+  type FactCorrection,
   type HostProof,
+  type NewProjectRequest,
+  type ProjectChoiceRequest,
+  type ProjectNamed,
   type SignInCode,
   type TokenReplaced,
 } from "@uketsugi/contracts";
@@ -23,7 +29,11 @@ import {
   activityReport,
   checkModel,
   chooseTreatment,
+  closeTask,
+  confirmFact,
+  correctFact,
   createNamedProject,
+  deleteProject,
   exportMarkdown,
   factDetail,
   invitePerson,
@@ -32,7 +42,9 @@ import {
   listProjects,
   listRulings,
   listTasks,
+  projectContents,
   redactFact,
+  removeNote,
   replaceTokens,
   revertRuling,
   revokeToken,
@@ -40,6 +52,7 @@ import {
   validateRequest,
   type App,
   type AppPorts,
+  type Caller,
 } from "@uketsugi/core";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -96,6 +109,26 @@ export function body<N extends keyof ApiRequests>(name: N) {
   return validator("json", (sent) => validateRequest(name, "body", sent));
 }
 
+/**
+ * One use case for the person the request is signed in as, given the id its path names and what
+ * the request sent (its JSON body or its query, already checked against its schema).
+ */
+const onRequest =
+  <S, R>(
+    from: "json" | "query" | null,
+    use: (caller: Caller, id: string, sent: S) => Promise<R>,
+    status: 200 | 201 = 200,
+  ) =>
+  async (c: Context<AuthEnv>) => {
+    const sent: unknown =
+      from === null ? undefined : from === "json" ? await c.req.json() : c.req.query();
+    return c.json(await use(c.get("caller"), c.req.param("id") ?? "", sent as S), status);
+  };
+
+/** The same for a use case that needs nothing but the record the path names. */
+const onRecord = <R>(use: (caller: Caller, id: string) => Promise<R>) =>
+  onRequest(null, (caller, id) => use(caller, id));
+
 /** A caller on this machine, by the address the connection comes from. */
 const onThisMachine = ipRestriction(getConnInfo, { allowList: [...LOOPBACK_ADDRESSES] });
 
@@ -128,17 +161,61 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
   const signedIn: MiddlewareHandler<AuthEnv> = (c, next) =>
     signIn.loginOf(c) === null ? Promise.resolve(failed(c, personOnly())) : next();
   const inPerson = every(signedIn, signIn.cookieAuth);
-  api.post("/projects/choice", inPerson, body("ProjectChoiceRequest"), async (c) =>
-    c.json(await chooseTreatment(ports, c.get("caller"), c.req.valid("json"))),
+  api.post(
+    "/projects/choice",
+    inPerson,
+    body("ProjectChoiceRequest"),
+    onRequest("json", (caller, _id, said: ProjectChoiceRequest) =>
+      chooseTreatment(ports, caller, said),
+    ),
   );
-  api.post("/projects", inPerson, body("NewProjectRequest"), async (c) =>
-    c.json(await createNamedProject(ports, c.get("caller"), c.req.valid("json")), 201),
+  api.post(
+    "/projects",
+    inPerson,
+    body("NewProjectRequest"),
+    onRequest(
+      "json",
+      (caller, _id, said: NewProjectRequest) => createNamedProject(ports, caller, said),
+      201,
+    ),
   );
-  api.post("/facts/:id/redact", inPerson, async (c) =>
-    c.json(await redactFact(ports, c.get("caller"), { id: c.req.param("id") })),
+  api.post(
+    "/facts/:id/redact",
+    inPerson,
+    onRecord((caller, id) => redactFact(ports, caller, { id })),
   );
-  api.post("/rulings/:id/revert", inPerson, async (c) =>
-    c.json(await revertRuling(ports, c.get("caller"), c.req.param("id"))),
+  api.post(
+    "/facts/:id/correct",
+    inPerson,
+    body("FactCorrection"),
+    onRequest("json", (caller, id, said: FactCorrection) => correctFact(ports, caller, id, said)),
+  );
+  api.post(
+    "/facts/:id/confirm",
+    inPerson,
+    body("FactConfirmation"),
+    onRequest("json", (caller, id, said: FactConfirmation) => confirmFact(ports, caller, id, said)),
+  );
+  api.post(
+    "/tasks/:id/close",
+    inPerson,
+    onRecord((caller, id) => closeTask(ports, caller, id)),
+  );
+  api.delete(
+    "/sessions/:id/note",
+    inPerson,
+    onRecord((caller, id) => removeNote(ports, caller, id)),
+  );
+  api.delete(
+    "/projects",
+    inPerson,
+    body("ProjectNamed"),
+    onRequest("json", (caller, _id, said: ProjectNamed) => deleteProject(ports, caller, said)),
+  );
+  api.post(
+    "/rulings/:id/revert",
+    inPerson,
+    onRecord((caller, id) => revertRuling(ports, caller, id)),
   );
 }
 
@@ -226,6 +303,11 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
     c.json(await activityReport(ports, c.get("caller"), c.req.valid("query"))),
   );
   api.get("/projects", async (c) => c.json(await listProjects(ports, c.get("caller"))));
+  api.get(
+    "/projects/contents",
+    query("ProjectNamed"),
+    onRequest("query", (caller, _id, said: ProjectNamed) => projectContents(ports, caller, said)),
+  );
   api.get("/export", query("ExportParams"), async (c) => {
     const files = await exportMarkdown(ports, c.get("caller"), c.req.valid("query").project);
     c.header("Content-Type", "text/markdown; charset=utf-8");

@@ -1,14 +1,16 @@
 /**
  * One task, in a drawer beside the list: what is to be done, who published it and who holds it,
- * every note left on it and what happened to it, oldest first. A person reads here and changes
- * nothing: agents take, note, hand over and finish tasks.
+ * every note left on it and what happened to it, oldest first. Agents take, note, hand over and
+ * finish tasks; a person closes a stale task of theirs (one they published or their agent holds),
+ * behind a confirmation. The server says "you" of the reader.
  */
 import type { ApiTask, TaskDetail, TaskEvent, TaskNote } from "@uketsugi/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { taskQuery } from "../api.ts";
+import { closeTask, taskQuery } from "../api.ts";
 import { SeenByMark } from "../by-project.tsx";
+import { useChange } from "../shell.tsx";
 import { Detail, Details, Lead, Section, SideDrawer } from "../drawer.tsx";
-import { Ago, inWords, QueryState, sentence, TaskStateMark } from "../ui.tsx";
+import { Ago, Button, ChangeDialog, inWords, QueryState, sentence, TaskStateMark } from "../ui.tsx";
 
 /** Someone and the client their agent worked from: "Lee via claude-code". */
 function from(who: string, client: string | undefined): string {
@@ -86,6 +88,32 @@ function History({ events }: { events: TaskEvent[] }) {
   );
 }
 
+/** Marks the task done, whoever holds it. Agents stop being offered it and the brief stops listing it. */
+function Close({ task }: { task: ApiTask }) {
+  const close = useChange(
+    (csrf) => closeTask(task.id, csrf),
+    (client) => client.invalidateQueries({ queryKey: ["tasks"] }),
+  );
+  return (
+    <ChangeDialog
+      mutation={close}
+      trigger={<Button />}
+      triggerText="Close task…"
+      title="Close this task?"
+      keep="Leave it open"
+      text="Close the task"
+    >
+      It is marked done, and its history says you closed it. No agent is offered it again, and the
+      next session’s brief no longer lists it.
+      {task.holder === undefined ? null : (
+        <span className="mt-2 block">
+          An agent holds it now: its lease is ended, and that agent’s next update is refused.
+        </span>
+      )}
+    </ChangeDialog>
+  );
+}
+
 function TaskBody({ id }: { id: string }) {
   const detail = useQuery(taskQuery(id));
   return (
@@ -131,6 +159,9 @@ function TaskShown({ detail }: { detail: TaskDetail }) {
       </Details>
       <Notes notes={notes} />
       <History events={history} />
+      {task.state === "done" || !(task.publisher === "you" || task.holder === "you") ? null : (
+        <Close task={task} />
+      )}
     </>
   );
 }

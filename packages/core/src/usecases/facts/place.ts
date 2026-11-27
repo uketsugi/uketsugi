@@ -5,7 +5,7 @@
  * second step: a correction that changes whether others can check a fact is written while the
  * fact is in the person's own audience, before it is shared or after it has come home.
  */
-import { eventBy, eventOf, type CallContext } from "../../context.ts";
+import { eventBy, eventOf, type Acting } from "../../context.ts";
 import type { EventKind, Fact, FlagKind, Task } from "../../domain.ts";
 import { citedBy } from "../../facts/citations.ts";
 import { isLive, type LiveFact } from "../../facts/duplicates.ts";
@@ -188,7 +188,7 @@ export async function settle(
 /** Clears the fact's open flags of these kinds, and logs it when there were any. */
 export async function clearFlagsLogged(
   unit: UnitWrites,
-  ctx: Pick<CallContext, "caller" | "session">,
+  ctx: Acting,
   fact: Fact,
   kinds: readonly FlagKind[],
 ): Promise<void> {
@@ -209,7 +209,7 @@ const CLEARED_BY_A_CORRECTION: readonly FlagKind[] = ["possible_contradiction"];
 async function rewrite(
   ports: MovePorts,
   unit: UnitWrites,
-  ctx: Pick<CallContext, "caller" | "session">,
+  ctx: Acting,
   fact: Fact,
   correction: Correction,
   at: Date,
@@ -222,7 +222,7 @@ async function rewrite(
   await unit.append(eventOf(ctx, "FactRewritten", fact.id, hashes));
   // What it was said to contradict was its old wording, which is gone.
   await clearFlagsLogged(unit, ctx, fact, CLEARED_BY_A_CORRECTION);
-  await flagCiting(ports, unit, ctx.session.id, fact.id);
+  await flagCiting(ports, unit, ctx.session?.id ?? null, fact.id);
   const embed = vector === null || (vector === "kept" && !fact.embedded);
   await enqueueFollowUps(ports, unit, fact.id, { embed, at });
 }
@@ -236,7 +236,7 @@ async function rewrite(
 async function correctWhereItBelongs(
   ports: MovePorts,
   place: Place,
-  ctx: Pick<CallContext, "caller" | "session">,
+  ctx: Acting,
   held: { writes: UnitWrites; fact: LiveFact },
   correction: Correction,
 ): Promise<UnitWrites> {
@@ -269,7 +269,7 @@ async function correctWhereItBelongs(
  */
 export async function onFact(
   ports: Pick<CorePorts, "store" | "ids" | "embedder">,
-  ctx: Pick<CallContext, "caller" | "session">,
+  ctx: Acting,
   write: { before: LiveFact; correction: Correction | null; at: Date },
   also: (unit: UnitWrites, fact: LiveFact) => Promise<void> = () => Promise.resolve(),
 ): Promise<boolean> {

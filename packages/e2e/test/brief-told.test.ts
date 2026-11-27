@@ -89,4 +89,31 @@ describeUseCases("the person's words lead the brief", (w) => {
     const first = await server.another("search_facts", { query: "release notes" });
     expect(first.brief?.facts[0]?.id).toBe(told.id);
   });
+
+  test("a fact the previous session published that only the person vouched for is marked though newer facts fill the standing list", async () => {
+    const server = serverWith(w, undefined);
+    const told = await server.call("publish_fact", {
+      claim: "Never rename the ledger table",
+      citations: [{ kind: "person", who: "the user", quote: "never rename the ledger table" }],
+    });
+    // Another conversation of the person's publishes more newer facts than the brief's list of
+    // standing facts reads, and this one is heard from last: the told fact is read apart.
+    for (let n = 0; n < 70; n += 1) {
+      await server.by("other-harness")("publish_fact", {
+        claim: `Handler ${n} validates its input before it writes ${"x".repeat(80)}`,
+        citations: [`irc/handler${n}.go:1-9`],
+      });
+    }
+    w.clock.advance(1_000);
+    await server.call("search_facts", { query: "ledger" });
+    w.clock.advance(1_000);
+    const next = await server.another("search_facts", { query: "ledger" });
+    const published = next.brief?.last_session?.published ?? [];
+    expect(published.find((entry) => entry.id === told.id)?.cites).toBe("cites your person");
+    expect(published.filter((entry) => entry.cites !== undefined)).toHaveLength(1);
+    const line = next.text
+      ?.split("\n")
+      .find((entry) => entry.startsWith("- ") && entry.includes(told.id));
+    expect(line).toMatch(/\(cites your person\)$/);
+  });
 });

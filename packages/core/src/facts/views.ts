@@ -216,7 +216,11 @@ export function renderPublish(result: PublishFactResult): string {
     (fact) =>
       `similar: ${fact.id} · ${fact.claim} (confirm that fact with update_fact if it says the same)`,
   );
-  return [head, ...writtenLines(result, result.citations, similar)].join("\n");
+  const lost =
+    result.lost_confirmation === true
+      ? ["was confirmed; the citation added made it unconfirmed again"]
+      : [];
+  return [head, ...lost, ...writtenLines(result, result.citations, similar)].join("\n");
 }
 
 export function renderUpdate(result: UpdateFactResult): string {

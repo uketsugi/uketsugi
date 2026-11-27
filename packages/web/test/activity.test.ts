@@ -3,15 +3,8 @@ import { API_CSRF_HEADER } from "@uketsugi/contracts";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
-import {
-  activity,
-  CLAIM,
-  idempotency,
-  readByModel,
-  retries,
-  rulings,
-  session,
-} from "./fixtures.ts";
+import { CLAIM, idempotency, retries, rulings, session } from "./fixtures.ts";
+import { activity, readByModel } from "./activity-fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
 
 /** The cells of each body row of a table, as text. */
@@ -28,6 +21,10 @@ function rows(table: HTMLElement): (string | null)[][] {
 
 const clients = () => screen.findByRole("table", { name: /^Sessions by client since / });
 const recent = () => screen.findByRole("table", { name: "Recent rulings, newest first" });
+
+/** The "N units ago" a cell says, which the test cannot know by the clock. */
+const ago = (cell: string | null | undefined) =>
+  /Failed or refused (.+ ago): /.exec(cell ?? "")?.[1] ?? "no time";
 
 describe("Activity", () => {
   mockApi();
@@ -138,7 +135,7 @@ describe("Activity", () => {
     });
     const [cells = []] = rows(table);
     expect(cells[3]).toBe("not yet");
-    expect(cells[6]).toBe(`Failed or refused: ${reason}`);
+    expect(cells[6]).toBe(`Failed or refused ${ago(cells[6])}: ${reason}`);
     expect(await violations()).toEqual([]);
   });
 

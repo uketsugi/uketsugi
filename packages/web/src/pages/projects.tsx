@@ -2,18 +2,26 @@
  * Projects: the projects the person's agents work in, and who sees what the person publishes in
  * each. On a server with other people the person chooses here, per project, to share it or keep
  * it private, and can change their mind. Nobody else makes the choice, and no agent can. Below
- * the list a person makes a named project, for work that no origin remote names.
+ * the list a person makes a named project, for work that no origin remote names. A person also
+ * deletes a project of theirs here, after being shown what goes.
  */
 import type { ApiProject, ProjectChoice, ProjectChoiceRequest } from "@uketsugi/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTable } from "@tanstack/react-table";
 import { createContext, use, useState } from "react";
-import { chooseTreatment, projectsQuery, refreshFacts } from "../api.ts";
-import { Page, useSession } from "../shell.tsx";
+import {
+  chooseTreatment,
+  deleteProject,
+  projectContentsQuery,
+  projectsQuery,
+  refreshFacts,
+} from "../api.ts";
+import { Page, useChange, useSession } from "../shell.tsx";
 import { columnsFor, DataTable, features } from "../table.tsx";
 import {
   Button,
   Card,
+  ChangeDialog,
   ConfirmDialog,
   count,
   Empty,
@@ -73,6 +81,50 @@ function AskFirst({ project, to }: { project: ApiProject; to: Treatment }) {
   );
 }
 
+/** What deleting the project takes, read when the question is opened, and what of other people's stays. */
+function Contents({ project }: { project: string }) {
+  const contents = useQuery(projectContentsQuery(project));
+  return (
+    <QueryState query={contents} what="what the project holds">
+      {(held) => (
+        <span className="mt-2 block">
+          This deletes {count(held.facts, "fact")}, {count(held.tasks, "task")} and{" "}
+          {count(held.sessions, "session")} of yours here, with the notes the sessions left, and
+          what the server’s log holds of them.
+          {held.others_facts + held.others_tasks === 0
+            ? ""
+            : ` ${count(held.others_facts, "fact")} and ${count(held.others_tasks, "task")} of other people’s stay.`}
+        </span>
+      )}
+    </QueryState>
+  );
+}
+
+/** Deletes everything of the person's in one project, asked about first and shown what goes. */
+function Delete({ project }: { project: ApiProject }) {
+  const deleted = useChange(
+    (csrf) => deleteProject(project.key, csrf),
+    (kept) => Promise.all([refreshFacts(kept), kept.invalidateQueries({ queryKey: ["tasks"] })]),
+  );
+  return (
+    <ChangeDialog
+      mutation={deleted}
+      trigger={<Button size="sm" tone="danger" aria-label={`Delete ${project.key}…`} />}
+      triggerText="Delete…"
+      title="Delete this project?"
+      keep="Keep the project"
+      text="Delete the project"
+    >
+      <span className="block font-mono break-all">{project.key}</span>
+      <Contents project={project.key} />
+      <span className="mt-2 block">
+        This cannot be undone. A copy can stay behind in the database’s own files and in a backup,
+        which Uketsugi does not remove. An agent that works here again starts the project afresh.
+      </span>
+    </ChangeDialog>
+  );
+}
+
 function TreatmentCell({ project }: { project: ApiProject }) {
   const { treatment } = project;
   return (
@@ -128,6 +180,11 @@ const columns = column.columns([
     id: "choice",
     header: "Change",
     cell: ({ row }) => <ChoiceCell project={row.original} />,
+  }),
+  column.display({
+    id: "delete",
+    header: "Delete",
+    cell: ({ row }) => <Delete project={row.original} />,
   }),
 ]);
 

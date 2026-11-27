@@ -11,6 +11,7 @@ import { setupServer } from "msw/node";
 import { createElement } from "react";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { App } from "../src/app.tsx";
+import { activity } from "./activity-fixtures.ts";
 import * as fixtures from "./fixtures.ts";
 
 /** The language the real page declares; a test's document has none of its own. */
@@ -32,7 +33,7 @@ export const api = setupServer(
   answer(`/api/facts/${fixtures.retries.id}`, fixtures.retriesDetail),
   answer("/api/tasks", fixtures.tasks),
   answer(`/api/tasks/${fixtures.handedOff.id}`, fixtures.handedOffDetail),
-  answer("/api/activity", fixtures.activity),
+  answer("/api/activity", activity),
   answer("/api/rulings", fixtures.rulings),
 );
 

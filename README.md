@@ -133,6 +133,17 @@ code, even when told to.
 - **You can see all of it.** `ukt ui` opens the dashboard in your browser, already signed in, with
   the facts, the tasks and what each session did, project by project. (`ukt ui --no-open` prints
   the link instead; it works once, within two minutes.)
+- **You can put it right.** On the dashboard you read the note each session left and remove it; you
+  correct the words of a fact of yours, and confirm a fact a model wrote once you have checked it;
+  you close a task of yours that is stale; and you delete a project with what you hold in it, after being
+  shown what goes. Agents are given the change from their next call. None of this is open to an
+  agent or its token: it takes your signed-in browser. A correction keeps no copy of the words it
+  replaced, and a deletion leaves what [your data](#your-data) says a redaction does.
+
+A brief leads with the facts you told an agent, so a later session sees them first and each is
+marked `(cites your person)`. It leads with the 20 newest facts that cite only you. An older one
+has no lead: it is listed, and marked, only where it is among the project's newest 60 facts or one
+a model chose for the brief, and otherwise your agent finds it by searching.
 
 A project is its repository's origin remote, `host/owner/name`, and an agent passes it on every
 call. A directory without one needs [a name of its own](#a-directory-with-no-origin-remote).

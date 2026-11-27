@@ -4,7 +4,6 @@ import {
   PROMPT_DESCRIPTIONS,
   TOOL_NAMES,
   TOKEN_ENV,
-  type ActivityReport,
   type ApiError,
   type ApiFact,
   type ApiTask,
@@ -331,49 +330,6 @@ export const handedOffDetail: TaskDetail = {
       at: "2026-11-13T08:40:00Z",
     },
   ],
-};
-
-export const activity: ActivityReport = {
-  since: "2026-11-06T00:00:00Z",
-  clients: [
-    {
-      client: "claude-code",
-      version: "2.1.0",
-      sessions: 12,
-      searched: 9,
-      published: 7,
-      refused: 1,
-    },
-    { client: "antigravity", version: null, sessions: 30, searched: 28, published: 25, refused: 0 },
-  ],
-  recent: [
-    {
-      session: "s-7f2c",
-      client: "claude-code",
-      version: "2.1.0",
-      project: PROJECT,
-      first_call_at: "2026-11-13T09:00:00Z",
-      last_call_at: "2026-11-13T09:20:00Z",
-      last_search_at: "2026-11-13T09:01:00Z",
-      last_publish_at: null,
-      refused_calls: 2,
-      digest: null,
-    },
-  ],
-};
-
-/** A session a language model read once it was over, and what the reading cost. */
-export const readByModel: ActivityReport["recent"][number] = {
-  session: "s-41ab",
-  client: "claude-code",
-  version: "2.1.0",
-  project: PROJECT,
-  first_call_at: "2026-11-13T10:00:00Z",
-  last_call_at: "2026-11-13T10:40:00Z",
-  last_search_at: "2026-11-13T10:01:00Z",
-  last_publish_at: null,
-  refused_calls: 0,
-  digest: { at: "2026-11-13T10:41:00Z", input_tokens: 4210, output_tokens: 380 },
 };
 
 export const rulings: RulingList = {

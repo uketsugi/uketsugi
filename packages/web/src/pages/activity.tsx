@@ -4,13 +4,22 @@
  * column it earned: it searched, it published, it had a call refused for a missing project.
  */
 import type { ActivityClient, ActivityReport, ActivitySession } from "@uketsugi/contracts";
-import { useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
 import { useTable } from "@tanstack/react-table";
-import { activityQuery } from "../api.ts";
-import { Page } from "../shell.tsx";
+import { useQuery } from "@tanstack/react-query";
+import { activityQuery, removeNote } from "../api.ts";
+import { Page, useChange } from "../shell.tsx";
 import { columnsFor, DataTable, features } from "../table.tsx";
-import { Ago, buttonClass, Card, Empty, FILTER_LINK, QueryState } from "../ui.tsx";
+import {
+  Ago,
+  Button,
+  buttonClass,
+  Card,
+  ChangeDialog,
+  Empty,
+  FILTER_LINK,
+  QueryState,
+} from "../ui.tsx";
 import { Rulings } from "./rulings.tsx";
 
 const route = getRouteApi("/activity");
@@ -65,10 +74,18 @@ const readColumns = readColumn.columns([
   }),
   readColumn.accessor((row) => row.digest.input_tokens, { id: "in", header: "Tokens in" }),
   readColumn.accessor((row) => row.digest.output_tokens, { id: "out", header: "Tokens out" }),
-  readColumn.accessor((row) => row.digest.failure?.reason ?? "", {
+  readColumn.display({
     id: "provider",
     header: "Provider",
-    cell: (cell) => (cell.getValue() === "" ? "" : `Failed or refused: ${cell.getValue()}`),
+    cell: ({ row }) => {
+      const failure = row.original.digest.failure;
+      if (failure === null || failure === undefined) return "";
+      return (
+        <>
+          Failed or refused <Ago at={failure.at} />: {failure.reason}
+        </>
+      );
+    },
   }),
 ]);
 
@@ -90,6 +107,54 @@ function ReadByModel({ sessions }: { sessions: ActivitySession[] }) {
         again, and is given up after twelve hours: the provider's words are shown beside it.
       </p>
       <DataTable table={table} caption="Your recent sessions a language model read" />
+    </Card>
+  );
+}
+
+/** Removes the note one session left, asked about first. */
+function RemoveNote({ session }: { session: string }) {
+  const removed = useChange(
+    (csrf) => removeNote(session, csrf),
+    (client) => client.invalidateQueries({ queryKey: ["activity"] }),
+  );
+  return (
+    <ChangeDialog
+      mutation={removed}
+      trigger={<Button size="sm" tone="danger" aria-label={`Remove the note of ${session}…`} />}
+      triggerText="Remove note…"
+      title="Remove this note?"
+      keep="Keep the note"
+      text="Remove the note"
+    >
+      The note, and what this session said that a language model has not read yet, are deleted. The
+      next brief says the session left no note. Facts a model already wrote from it stay: open them
+      on the Facts page to correct or redact them.
+    </ChangeDialog>
+  );
+}
+
+/** What the person's recent sessions left as their notes, which the next session's brief tells of. */
+function Notes({ sessions }: { sessions: ActivitySession[] }) {
+  const noted = sessions.filter((session) => session.note !== null);
+  if (noted.length === 0) return null;
+  return (
+    <Card label="Notes your sessions left">
+      <h2 className="px-4 pt-4 font-semibold">Notes your sessions left</h2>
+      <p className="px-4 pb-2 text-ink-muted">
+        A session’s note is its agent’s last message. The brief your next session in the project
+        starts with tells of it. Only you see it.
+      </p>
+      <ul className="divide-y divide-line">
+        {noted.map(({ session, project, note }) => (
+          <li key={session} className="space-y-1.5 p-4">
+            <p className="text-ink-muted">
+              {session} · {project ?? "no project"} · {note === null ? null : <Ago at={note.at} />}
+            </p>
+            <p className="break-words whitespace-pre-wrap">{note?.text}</p>
+            <RemoveNote session={session} />
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }
@@ -127,6 +192,7 @@ export function ActivityPage() {
           {(data) => <Clients report={data} />}
         </QueryState>
       </Card>
+      {activity.data === undefined ? null : <Notes sessions={activity.data.recent} />}
       {activity.data === undefined ? null : <ReadByModel sessions={activity.data.recent} />}
       <Rulings />
     </Page>

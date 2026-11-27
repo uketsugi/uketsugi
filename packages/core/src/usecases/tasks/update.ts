@@ -1,11 +1,11 @@
-import type { UpdateTaskInput, UpdateTaskResult } from "@uketsugi/contracts";
-import type { Task, TaskState } from "../../domain.ts";
-import { invalidInput } from "../../failure.ts";
+import type { TaskClosed, UpdateTaskInput, UpdateTaskResult } from "@uketsugi/contracts";
+import type { Caller, Task, TaskState } from "../../domain.ts";
+import { forbidden, invalidInput, notFound } from "../../failure.ts";
 import type { UnitWrites } from "../../store-port.ts";
 import { decideUpdate, type UpdateAsk, type UpdateRefusal } from "../../tasks/lease.ts";
-import type { CallContext, Outcome } from "../../context.ts";
+import { idOf, type CallContext, type Outcome } from "../../context.ts";
 import type { CorePorts } from "../../ports.ts";
-import { asPerson } from "../../sharing.ts";
+import { asPerson, holderOfTask, requireSharing } from "../../sharing.ts";
 import {
   conflict,
   leaseEnd,
@@ -111,4 +111,40 @@ export async function updateTask(
   if (done.refused === "held") throw leaseHeld(view, "update_task");
   if (done.refused !== undefined) throw conflict(done.refused, view, input.version);
   return { task: view, changed: done.changed };
+}
+
+/**
+ * A person closes a task of theirs (one they published, or their agent holds) on the dashboard: it is done, whoever holds its lease, and the lease is
+ * freed. The log's entry names the person and no session. Closing a task that is done changes
+ * nothing.
+ */
+export async function closeTask(
+  ports: Pick<CorePorts, "store" | "clock">,
+  caller: Caller,
+  id: string,
+): Promise<TaskClosed> {
+  const scope = { orgId: caller.orgId, audienceIds: caller.visibleAudienceIds };
+  const seen = await ports.store.tasks.get(scope, idOf(id));
+  if (seen === null) throw notFound("listed task", id);
+  const at = ports.clock.now();
+  const changed = await asPerson(ports, { caller, project: seen.project, at }, async (place) => {
+    const held = await holderOfTask(place, seen.id);
+    if (held === null) throw notFound("listed task", id);
+    const { writes, task } = held;
+    requireSharing(place, writes, `Task ${task.id}`);
+    if (task.publisher !== caller.principalId && task.lease?.holder !== caller.principalId) {
+      throw forbidden(
+        `Task ${task.id} is another person's.`,
+        "Only the person who published a task, or whose agent holds it, closes it from the dashboard.",
+      );
+    }
+    if (task.state === "done") return false;
+    const done = await writes.tasks.change(task.id, task.version, { state: "done", lease: null });
+    if (done === null) throw new Error(`task ${task.id} changed under the unit that locked it`);
+    await writes.append(
+      taskEvent({ caller, session: null }, done, { kind: "TaskDone", payload: {} }),
+    );
+    return true;
+  });
+  return { id: seen.id, changed };
 }

@@ -1,9 +1,16 @@
 import type { FlagKind, UpdateFactInput, UpdateFactResult } from "@uketsugi/contracts";
-import { eventOf, personActor, scopeOf, type CallContext, type Outcome } from "../../context.ts";
+import {
+  eventOf,
+  personActor,
+  scopeOf,
+  type Acting,
+  type CallContext,
+  type Outcome,
+} from "../../context.ts";
 import type { Fact } from "../../domain.ts";
 import { citationView, parseCitations } from "../../facts/citations.ts";
 import type { LiveFact } from "../../facts/duplicates.ts";
-import { forbidden, invalidInput, notFound, unsupported } from "../../failure.ts";
+import { invalidInput, notFound, unsupported } from "../../failure.ts";
 import type { CorePorts } from "../../ports.ts";
 import { scanFields, type Replacement } from "../../scan/scanner.ts";
 import type { UnitWrites } from "../../store-port.ts";
@@ -13,6 +20,8 @@ import {
   classCitations,
   correctionOf,
   liveFactOf,
+  requireAuthor,
+  reworded,
   scanCitations,
   type Correction,
 } from "./write.ts";
@@ -43,15 +52,12 @@ async function correction(
   fact: LiveFact,
   input: UpdateFactInput,
 ): Promise<{ correction: Correction; replaced: Replacement[] }> {
-  if (fact.author !== ctx.caller.principalId) {
-    throw forbidden(
-      `Fact ${fact.id} is another person's, so its text cannot be changed here.`,
-      "Confirm it or flag it with update_fact, or publish what you found as a new fact.",
-    );
-  }
-  const text = scanFields({ claim: input.claim, detail: input.detail });
-  const claim = text.fields.claim ?? fact.claim;
-  const detail = input.detail === undefined ? fact.detail : text.fields.detail;
+  requireAuthor(
+    ctx.caller,
+    fact,
+    "Confirm it or flag it with update_fact, or publish what you found as a new fact.",
+  );
+  const { claim, detail, replaced } = reworded(fact, input);
   const sent =
     input.citations === undefined
       ? null
@@ -63,7 +69,7 @@ async function correction(
   const next = { claim, detail, question: fact.question, citations };
   return {
     correction: await correctionOf(ports, fact, next),
-    replaced: [...text.replaced, ...(sent?.replaced ?? [])],
+    replaced: [...replaced, ...(sent?.replaced ?? [])],
   };
 }
 
@@ -72,8 +78,8 @@ async function correction(
  * unless a model wrote the fact: its person is then the first to check it, and that confirms it.
  * Either way it is newer than any doubt about the fact's source, which it clears.
  */
-async function confirm(
-  ctx: CallContext,
+export async function confirm(
+  ctx: Acting,
   unit: UnitWrites,
   fact: Fact,
   check: { checked: string | null; sourceVersion: string | null },

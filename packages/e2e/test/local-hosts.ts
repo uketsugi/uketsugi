@@ -72,9 +72,15 @@ async function browserWith(url: string, status: number, setCookie: string | null
       headers: { cookie, ...JSON_BODY, [API_CSRF_HEADER]: session.csrf },
       body: JSON.stringify(body),
     });
+  const del = (path: string, body?: unknown) =>
+    fetch(`${url}${path}`, {
+      method: "DELETE",
+      headers: { cookie, ...JSON_BODY, [API_CSRF_HEADER]: session.csrf, origin: url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
   const choose = (project: string, treatment: string) =>
     post("/api/projects/choice", { project, treatment });
-  return { status, session, get, post, choose };
+  return { status, session, get, post, del, choose };
 }
 
 /** A browser signed in to the dashboard at `url` with a person's own dashboard key. */

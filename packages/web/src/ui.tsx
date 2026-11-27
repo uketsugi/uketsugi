@@ -196,7 +196,7 @@ const DIALOG = {
     "fixed top-1/2 left-1/2 w-[28rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 space-y-4 rounded-lg border border-line bg-surface p-5 shadow-xl",
 } as const;
 
-interface ConfirmDialogProps {
+export interface ConfirmDialogProps {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   /** The button that opens the dialog, and what it says. */
@@ -241,6 +241,53 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+  );
+}
+
+/** What a change that asks first needs of the mutation that makes it. */
+interface Mutation {
+  mutate(variables: void, options: { onSuccess: () => void }): void;
+  reset(): void;
+  readonly isError: boolean;
+  readonly isPending: boolean;
+  readonly error: unknown;
+}
+
+interface ChangeDialogProps {
+  readonly mutation: Mutation;
+  readonly trigger: ReactElement;
+  readonly triggerText: ReactNode;
+  readonly title: string;
+  /** What the change does, said before it is made. */
+  readonly children: ReactNode;
+  readonly keep: string;
+  /** The words of the button that makes the change. */
+  readonly text: string;
+  readonly finalFocus?: ConfirmDialogProps["finalFocus"];
+}
+
+/**
+ * A change that cannot be undone, asked about before it is made: the dialog opens, shows why the
+ * last try failed, and closes itself when the mutation succeeds.
+ */
+export function ChangeDialog({ mutation, text, ...rest }: ChangeDialogProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <ConfirmDialog
+      {...rest}
+      open={open}
+      onOpenChange={(next) => {
+        if (next) mutation.reset();
+        setOpen(next);
+      }}
+      failure={mutation.isError ? <ErrorPanel error={mutation.error} /> : null}
+      change={{
+        text,
+        tone: "destroy",
+        disabled: mutation.isPending,
+        onClick: () => mutation.mutate(undefined, { onSuccess: () => setOpen(false) }),
+      }}
+    />
   );
 }
 

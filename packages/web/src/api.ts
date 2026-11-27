@@ -12,15 +12,21 @@ import {
   type CapabilityDescriptor,
   type ConnectInfo,
   type DashboardSession,
+  type FactConfirmed,
+  type FactCorrected,
   type FactDetail,
   type FactPage,
   type NewProjectRequest,
+  type NoteRemoved,
   type ProjectChoice,
   type ProjectChoiceRequest,
+  type ProjectContents,
+  type ProjectDeleted,
   type ProjectList,
   type RedactResult,
   type RevertResult,
   type RulingList,
+  type TaskClosed,
   type TaskDetail,
   type TaskListParams,
   type TaskPage,
@@ -199,6 +205,63 @@ export function redactFact(id: string, csrf: string): Promise<RedactResult> {
     `/api/facts/${encodeURIComponent(id)}/redact`,
     {},
     { method: "POST", csrf },
+  );
+}
+
+/** Replaces the claim, and with `detail` the detail, of one of the person's own facts. */
+export function correctFact(
+  id: string,
+  words: { claim: string; detail?: string | null },
+  csrf: string,
+): Promise<FactCorrected> {
+  return request<FactCorrected>(
+    `/api/facts/${encodeURIComponent(id)}/correct`,
+    {},
+    { method: "POST", csrf, body: words },
+  );
+}
+
+/** Says the person has checked a fact. */
+export function confirmFact(id: string, csrf: string): Promise<FactConfirmed> {
+  return request<FactConfirmed>(
+    `/api/facts/${encodeURIComponent(id)}/confirm`,
+    {},
+    { method: "POST", csrf, body: {} },
+  );
+}
+
+/** Closes a task: it is done, whoever holds it. */
+export function closeTask(id: string, csrf: string): Promise<TaskClosed> {
+  return request<TaskClosed>(
+    `/api/tasks/${encodeURIComponent(id)}/close`,
+    {},
+    { method: "POST", csrf },
+  );
+}
+
+/** Removes the note a session left, by the session's display id. */
+export function removeNote(session: string, csrf: string): Promise<NoteRemoved> {
+  return request<NoteRemoved>(
+    `/api/sessions/${encodeURIComponent(session)}/note`,
+    {},
+    { method: "DELETE", csrf },
+  );
+}
+
+/** What deleting a project takes, asked when the person opens the question. */
+export function projectContentsQuery(project: string) {
+  return queryOptions({
+    queryKey: ["projects", "contents", project],
+    queryFn: () => request<ProjectContents>("/api/projects/contents", { project }),
+    gcTime: 0,
+  });
+}
+
+export function deleteProject(project: string, csrf: string): Promise<ProjectDeleted> {
+  return request<ProjectDeleted>(
+    "/api/projects",
+    {},
+    { method: "DELETE", csrf, body: { project } },
   );
 }
 

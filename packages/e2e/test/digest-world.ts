@@ -87,6 +87,9 @@ export function serverWith(w: World, runner: ModelRunner | undefined) {
     { ...CLIENT, conversationId: `${conversation.id}-next` },
     project,
   );
+  /** A conversation of another harness of the same person's, in the same project. */
+  const by = (client: string): ToolCaller =>
+    toolCaller(app, w.owner, { ...CLIENT, name: client, conversationId: `${client}-1` }, project);
   /** What the agent last said, as its harness's hook sends it when a turn ends. */
   const note = (text: string) => app.noteSession(w.owner, conversation, text);
   /** One side of a turn, as a hook sends it where the person turned on sending each turn. */
@@ -110,6 +113,7 @@ export function serverWith(w: World, runner: ModelRunner | undefined) {
     ports: served,
     call,
     another,
+    by,
     note,
     turn,
     end,

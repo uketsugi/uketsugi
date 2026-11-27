@@ -225,6 +225,19 @@ export interface UnitWrites {
   enqueue(job: JobDraft): Promise<void>;
 }
 
+/** What deleting a project took from a person. */
+export interface ForgottenProject {
+  readonly facts: number;
+  readonly tasks: number;
+  readonly sessions: number;
+}
+
+/** What a person holds in a project, and what of other people's they see there. */
+export interface ProjectHoldings extends ForgottenProject {
+  readonly othersFacts: number;
+  readonly othersTasks: number;
+}
+
 /** One state unit: the writes in the audience it was opened on, and what reaches beyond it. */
 export interface Unit extends UnitWrites {
   /**
@@ -249,6 +262,13 @@ export interface Unit extends UnitWrites {
    * `from` does not hold is left out.
    */
   move(move: Move): Promise<{ facts: string[]; tasks: string[] }>;
+  /**
+   * Deletes what the person holds in a project in the unit's own audience, and nothing else:
+   * their facts and tasks there, with everything that hangs off them and what any log holds about
+   * them, their sessions there and their choice for it; the project's own record goes when
+   * nothing of anybody's names it. Their records in the shared audience are brought home first.
+   */
+  forgetProject(project: string): Promise<ForgottenProject>;
 }
 
 /** A page of facts for the dashboard and the export, newest first. Stubs are among them: a caller that shows only text leaves them out. */
@@ -420,6 +440,8 @@ export interface SessionsRepo {
   setBriefed(orgId: string, id: string, at: Date | null): Promise<void>;
   /** Sets the session's note; the note it had is replaced. */
   setNote(orgId: string, id: string, note: SessionNote): Promise<void>;
+  /** Takes the turns the session keeps for the model step to read, and then its note. */
+  clearNote(orgId: string, id: string): Promise<void>;
   /** The person's session in a project with the most recent call. */
   latest(orgId: string, principalId: string, project: string): Promise<Session | null>;
   /**
@@ -497,6 +519,8 @@ export interface SessionsRepo {
 
 /** An organization's projects, and each person's choice for the ones they work in. */
 export interface ProjectsRepo {
+  /** What the person holds in a project (what `forgetProject` would take) and what of other people's the scope shows there. */
+  holdings(scope: ReadScope, person: string, project: string): Promise<ProjectHoldings>;
   find(orgId: string, key: string): Promise<Project | null>;
   /** The project with this key, created if it does not exist yet. */
   ensure(orgId: string, ref: ProjectRef): Promise<Project>;

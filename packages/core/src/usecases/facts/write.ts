@@ -21,10 +21,10 @@ import {
   mapCitationText,
 } from "../../facts/citations.ts";
 import type { LiveFact } from "../../facts/duplicates.ts";
-import { invalidInput, type ToolFailure } from "../../failure.ts";
+import { forbidden, invalidInput, notFound, type ToolFailure } from "../../failure.ts";
 import { claimHashOf, contentHashOf } from "../../hash.ts";
 import type { CorePorts, ModelVector } from "../../ports.ts";
-import { scanText, type Replacement } from "../../scan/scanner.ts";
+import { scanFields, scanText, type Replacement } from "../../scan/scanner.ts";
 import type { UnitWrites, VectorChange } from "../../store-port.ts";
 import { extractIdentifiers } from "../../text/analyze.ts";
 
@@ -196,6 +196,44 @@ export async function liveFactOf(
   const head = (await liveHeads(ports, scopeOf(ctx.caller), [fact])).get(fact.id);
   if (head !== undefined) throw refusals.replaced(fact, head);
   return { ...fact, claim: fact.claim };
+}
+
+/** The fact a person names on the dashboard, wherever it is, as their scope shows it; they are told if it is not there. */
+export async function visibleFact(
+  ports: Pick<CorePorts, "store">,
+  caller: Caller,
+  id: string,
+): Promise<Fact> {
+  const fact = await ports.store.facts.get(scopeOf(caller), idOf(id));
+  if (fact === null) throw notFound("listed fact", id);
+  return fact;
+}
+
+/** Refuses a person who did not write the fact: its words are its author's to change. */
+export function requireAuthor(
+  caller: Caller,
+  fact: Pick<Fact, "id" | "author">,
+  next: string,
+): void {
+  if (fact.author !== caller.principalId) {
+    throw forbidden(`Fact ${fact.id} is another person's.`, next);
+  }
+}
+
+/**
+ * A fact's claim and detail as a call words them, scanned like any write: what the call names
+ * replaces the fact's, what it leaves out stays. `replaced` is what the scan took out.
+ */
+export function reworded(
+  fact: Pick<LiveFact, "claim" | "detail">,
+  input: { readonly claim?: string; readonly detail?: string | null },
+) {
+  const text = scanFields({ claim: input.claim, detail: input.detail });
+  return {
+    claim: text.fields.claim ?? fact.claim,
+    detail: input.detail === undefined ? fact.detail : text.fields.detail,
+    replaced: text.replaced,
+  };
 }
 
 /** A correction as it is prepared before its unit opens: the fact's new content, and what becomes of its vector. */

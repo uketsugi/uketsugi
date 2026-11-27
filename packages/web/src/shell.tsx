@@ -5,7 +5,7 @@
  */
 import { Input } from "@base-ui/react/input";
 import type { CapabilityDescriptor, DashboardSession } from "@uketsugi/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import { cx } from "class-variance-authority";
 import { CircleAlert, CircleCheck } from "lucide-react";
@@ -28,6 +28,22 @@ export function useSession(): DashboardSession {
   const session = use(SessionContext);
   if (session === null) throw new Error("a page was rendered outside the sign-in gate");
   return session;
+}
+
+/**
+ * A change only the signed-in person makes: it is sent with their CSRF value, and what it changes
+ * is asked for again once it has been made.
+ */
+export function useChange<V = void>(
+  send: (csrf: string, variables: V) => Promise<unknown>,
+  refresh: (client: QueryClient) => Promise<unknown>,
+) {
+  const { csrf } = useSession();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (variables: V) => send(csrf, variables),
+    onSuccess: () => refresh(client),
+  });
 }
 
 const NAV = [

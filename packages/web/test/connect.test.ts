@@ -3,13 +3,13 @@ import { BLOCK_START, type CapabilityDescriptor, type ConnectInfo } from "@ukets
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  activity,
   capabilities,
   connect,
   connectWithToken,
   hostedCapabilities,
   hostedWords,
 } from "./fixtures.ts";
+import { activity } from "./activity-fixtures.ts";
 import { answer, api, mockApi, open, violations } from "./support.ts";
 
 /** What an edition whose harnesses sign in themselves says: nothing of a token, and why there is none. */

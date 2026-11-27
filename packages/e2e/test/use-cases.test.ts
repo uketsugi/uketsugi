@@ -35,15 +35,32 @@ describeUseCases("the write use cases", (w) => {
   test("the same claim published again with a citation the fact lacks keeps that citation", async () => {
     const first = await publish("Handlers are retried on the event id");
     await w.plain("update_fact", { id: first.id, confirm: { checked: "read the handler" } });
+    // Somebody else's check is what confirms a fact: stand it in as that.
+    const at = clock.now();
+    const own = { orgId: w.owner.orgId, audienceId: w.owner.privateAudienceId, at };
+    await w.store.unit(own, (unit) => unit.facts.setStatus(first.id, "confirmed"));
+    expect(await factOf(first.id)).toMatchObject({ status: "confirmed" });
     const again = await publish("handlers are retried on the EVENT id", "src/other.ts:3");
-    expect(again).toMatchObject({ id: first.id, created: false, status: "unconfirmed" });
+    // It was confirmed and is not now: the result says so, for the agent to check it again.
+    expect(again).toMatchObject({
+      id: first.id,
+      created: false,
+      status: "unconfirmed",
+      lost_confirmation: true,
+    });
     expect(again.citations).toHaveLength(2);
     expect((await factOf(first.id)).citations).toHaveLength(2);
     expect((await eventsOf(first.id)).at(-1)).toMatchObject({ kind: "FactRewritten" });
-    // The same two again bring nothing, and change nothing.
+    // The same two again bring nothing, change nothing and say nothing of a confirmation.
     const events = (await eventsOf(first.id)).length;
-    await publish("Handlers are retried on the event id", "src/other.ts:3");
+    const repeat = await publish("Handlers are retried on the event id", "src/other.ts:3");
     expect(await eventsOf(first.id)).toHaveLength(events);
+    expect(repeat).not.toHaveProperty("lost_confirmation");
+    // A fact that was not confirmed has nothing to lose by a new citation.
+    const plain = await publish("The queue drains before the deploy", "src/drain.ts:1");
+    const more = await publish("the queue drains before the deploy", "src/drain.ts:9");
+    expect(more).toMatchObject({ id: plain.id, status: "unconfirmed" });
+    expect(more).not.toHaveProperty("lost_confirmation");
   });
 
   test("one claim published in two projects is two facts", async () => {

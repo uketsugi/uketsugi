@@ -15,13 +15,19 @@
  * | GET    | `/api/facts`              | cookie or token    | `FactListParams`       | `FactPage`             |
  * | GET    | `/api/facts/:id`          | cookie or token    | none                   | `FactDetail`           |
  * | POST   | `/api/facts/:id/redact`   | cookie             | none                   | `RedactResult`         |
+ * | POST   | `/api/facts/:id/correct`  | cookie             | `FactCorrection`       | `FactCorrected`        |
+ * | POST   | `/api/facts/:id/confirm`  | cookie             | `FactConfirmation`     | `FactConfirmed`        |
  * | GET    | `/api/tasks`              | cookie or token    | `TaskListParams`       | `TaskPage`             |
  * | GET    | `/api/tasks/:id`          | cookie or token    | none                   | `TaskDetail`           |
+ * | POST   | `/api/tasks/:id/close`    | cookie             | none                   | `TaskClosed`           |
  * | GET    | `/api/rulings`            | cookie or token    | none                   | `RulingList`           |
  * | POST   | `/api/rulings/:id/revert` | cookie             | none                   | `RevertResult`         |
  * | GET    | `/api/activity`           | cookie or token    | `ActivityParams`       | `ActivityReport`       |
+ * | DELETE | `/api/sessions/:s/note`   | cookie             | none                   | `NoteRemoved`          |
  * | GET    | `/api/projects`           | cookie or token    | none                   | `ProjectList`          |
  * | POST   | `/api/projects`           | cookie             | `NewProjectRequest`    | `ApiProject`           |
+ * | DELETE | `/api/projects`           | cookie             | `ProjectNamed`         | `ProjectDeleted`       |
+ * | GET    | `/api/projects/contents`  | cookie or token    | `ProjectNamed`         | `ProjectContents`      |
  * | POST   | `/api/projects/choice`    | cookie             | `ProjectChoiceRequest` | `ProjectChoice`        |
  * | GET    | `/api/export`             | cookie or token    | `ExportParams`         | `text/markdown`        |
  * | POST   | `/api/hooks/claude-code`  | cookie or token    | `ClaudeCodeHook`       | `ClaudeCodeHookOutput` |
@@ -40,7 +46,8 @@
  * - **cookie**: a person's dashboard session. It is opened by what no harness holds: the person's
  *   own dashboard key, typed into the sign-in page (`POST /sign-in`), or on the host a one-time
  *   link (`ukt ui`). What only a person may do takes it and never a token: choosing how a project
- *   is treated, redacting a fact, undoing a merge, making a named project.
+ *   is treated, redacting, correcting or confirming a fact, closing a task, removing a session's
+ *   note, deleting a project, undoing a merge, making a named project.
  * - **host**: the host's own secret, kept in its data directory and printed by no verb, sent as a
  *   bearer by `ukt` from the loopback address. It is whoever runs the server: `ukt ui` gets a
  *   sign-in link with it, `ukt backup` a snapshot of the whole store while a server runs, and

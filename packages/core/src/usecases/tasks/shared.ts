@@ -1,6 +1,6 @@
 /** What the four task tools share: finding a task, proving and granting a lease, events, views and refusals. */
 import type { Task as TaskView } from "@uketsugi/contracts";
-import { eventOf, idOf, namesFor, scopeOf, type CallContext } from "../../context.ts";
+import { eventOf, idOf, namesFor, scopeOf, type Acting, type CallContext } from "../../context.ts";
 import type { Caller, EventDraft, EventPayloads, Session, Task, TaskNote } from "../../domain.ts";
 import { notFound, ToolFailure } from "../../failure.ts";
 import { sha256Hex, toHex } from "../../hash.ts";
@@ -73,7 +73,7 @@ export type TaskChange = {
  * An event about a task as it stands after the change. The payload says which version the change
  * made; which session it came from is the event's own to say.
  */
-export function taskEvent(ctx: CallContext, task: Task, change: TaskChange): EventDraft {
+export function taskEvent(ctx: Acting, task: Task, change: TaskChange): EventDraft {
   return eventOf(ctx, change.kind, task.id, { version: task.version, ...change.payload });
 }
 

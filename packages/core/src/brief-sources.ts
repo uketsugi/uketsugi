@@ -143,6 +143,8 @@ export async function briefSources(
   const isStanding = (view: FactView): boolean => standing.some((fact) => fact.id === view.id);
   const viewOf = (fact: LiveFact): FactView[] => views.filter((view) => view.id === fact.id);
   const byModel = (view: FactView): boolean => view.from_session !== undefined;
+  /** Every fact the brief lists, in whichever part of it, is marked by the one set of facts that cite the person. */
+  const listed = (view: FactView): BriefFact => briefFact(view, cited);
   return {
     ...viewer,
     project,
@@ -155,14 +157,14 @@ export async function briefSources(
         ? null
         : {
             session: previous,
-            published: left.filter((view) => !byModel(view)).map((view) => briefFact(view, cited)),
-            digested: left.filter(byModel).map((view) => briefFact(view, cited)),
+            published: left.filter((view) => !byModel(view)).map(listed),
+            digested: left.filter(byModel).map(listed),
           },
     facts: chosenFirst(
       byStanding(standing, views.filter(isStanding), caller.principalId, now),
       picks,
-    ).map((view) => briefFact(view, cited)),
-    told: told.flatMap(viewOf).map((view) => briefFact(view, cited)),
+    ).map(listed),
+    told: told.flatMap(viewOf).map(listed),
     factCount,
   };
 }

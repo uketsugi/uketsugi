@@ -424,6 +424,10 @@
             "private_because": {
               "$ref": "#/$defs/privateBecause",
               "description": "With `audience: private`, when the fact is the caller's own."
+            },
+            "lost_confirmation": {
+              "type": "boolean",
+              "description": "True when the fact was confirmed and the citation this publish added made it unconfirmed again: check it once more."
             }
           },
           "required": ["id", "status", "created", "citations"]
@@ -797,6 +801,48 @@
         },
         "required": ["name"],
         "additionalProperties": false
+      },
+      "FactCorrection": {
+        "type": "object",
+        "description": "`POST /api/facts/:id/correct`: the person's own words for their fact, which replace its claim and detail.",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "detail": {
+            "type": ["string", "null"],
+            "maxLength": 20000,
+            "description": "Left out, the fact's detail stays; null takes it away."
+          }
+        },
+        "required": ["claim"],
+        "additionalProperties": false
+      },
+      "FactConfirmation": {
+        "type": "object",
+        "description": "`POST /api/facts/:id/confirm`: the person has checked the fact.",
+        "properties": {
+          "checked": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "What they checked it against."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProjectNamed": {
+        "type": "object",
+        "description": "`GET /api/projects/contents` query and `DELETE /api/projects` body: one of the person's projects, by its canonical key.",
+        "properties": {
+          "project": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": ["project"],
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -932,7 +978,9 @@
                 "properties": {
                   "sign_in": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "The paragraphs of the sign-in page, each a way in."
                   },
                   "key_form": {
@@ -977,7 +1025,9 @@
                 "properties": {
                   "sign_in": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "The paragraphs of the sign-in page, each a way in."
                   },
                   "key_form": {
@@ -1386,6 +1436,110 @@
           }
         },
         "required": ["model", "answers", "input_tokens", "output_tokens"]
+      },
+      "FactCorrected": {
+        "type": "object",
+        "description": "`POST /api/facts/:id/correct`: whether the words changed, and what the scan took out of them.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "redacted": {
+            "$ref": "#/$defs/redacted"
+          }
+        },
+        "required": ["id", "changed"]
+      },
+      "FactConfirmed": {
+        "type": "object",
+        "description": "`POST /api/facts/:id/confirm`: the fact's status now.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/status"
+          }
+        },
+        "required": ["id", "status"]
+      },
+      "TaskClosed": {
+        "type": "object",
+        "description": "`POST /api/tasks/:id/close`: the task is done; `changed` is false when it already was.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "changed"]
+      },
+      "NoteRemoved": {
+        "type": "object",
+        "description": "`DELETE /api/sessions/:session/note`: the session's note and its captured turns are gone.",
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": ["session"]
+      },
+      "ProjectContents": {
+        "type": "object",
+        "description": "`GET /api/projects/contents`: what deleting the project takes, and what of other people's stays.",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "facts": {
+            "type": "integer",
+            "description": "The person's facts there: live, earlier wordings merged away and redacted stubs."
+          },
+          "tasks": {
+            "type": "integer",
+            "description": "The tasks they published there."
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "Their sessions there, each with its note."
+          },
+          "others_facts": {
+            "type": "integer",
+            "description": "Other people's facts in the project, which stay. Counted among those the person can see."
+          },
+          "others_tasks": {
+            "type": "integer",
+            "description": "Other people's tasks in the project, which stay."
+          }
+        },
+        "required": ["project", "facts", "tasks", "sessions", "others_facts", "others_tasks"]
+      },
+      "ProjectDeleted": {
+        "type": "object",
+        "description": "`DELETE /api/projects`: what went.",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "facts": {
+            "type": "integer",
+            "description": "How many facts."
+          },
+          "tasks": {
+            "type": "integer",
+            "description": "How many tasks."
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "How many sessions."
+          }
+        },
+        "required": ["project", "facts", "tasks", "sessions"]
       }
     }
   },
@@ -2246,6 +2400,24 @@
             }
           },
           "required": ["at", "input_tokens", "output_tokens"]
+        },
+        "note": {
+          "type": ["object", "null"],
+          "description": "What the session left as its note, kept private to the person; null when it left none or it was removed.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "final": {
+              "type": "boolean",
+              "description": "Whether it was the session's last word."
+            },
+            "at": {
+              "type": "string",
+              "description": "ISO 8601, UTC."
+            }
+          },
+          "required": ["text", "final", "at"]
         }
       },
       "required": [
@@ -2258,7 +2430,8 @@
         "last_search_at",
         "last_publish_at",
         "refused_calls",
-        "digest"
+        "digest",
+        "note"
       ]
     },
     "apiProject": {

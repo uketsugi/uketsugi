@@ -26,6 +26,15 @@ export interface CallContext {
 }
 
 /**
+ * Who an act is by, for the events it writes: a tool call's caller in the call's session, or a
+ * person on the dashboard, who acts in none.
+ */
+export interface Acting {
+  readonly caller: Caller;
+  readonly session: Pick<Session, "id"> | null;
+}
+
+/**
  * A tool's result before the pipeline adds what every result carries. A use case names what is
  * incomplete in its answer only when something is.
  */
@@ -152,15 +161,15 @@ export function eventBy<K extends EventKind>(
   return { kind, subject, actor: by.actor, session: by.session, payload };
 }
 
-/** An event by the caller of a tool call, in the call's session. */
+/** An event by the caller of a tool call, in the call's session if it has one. */
 export function eventOf<K extends EventKind>(
-  ctx: Pick<CallContext, "caller" | "session">,
+  ctx: Acting,
   kind: K,
   subject: string,
   payload: EventPayloads[K],
 ): EventDraft {
   return eventBy(
-    { actor: personActor(ctx.caller), session: ctx.session.id },
+    { actor: personActor(ctx.caller), session: ctx.session?.id ?? null },
     kind,
     subject,
     payload,

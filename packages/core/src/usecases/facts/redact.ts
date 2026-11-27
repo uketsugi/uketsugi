@@ -1,11 +1,11 @@
-import { eventBy, idOf, personActor, scopeOf } from "../../context.ts";
+import { eventBy, personActor } from "../../context.ts";
 import type { Caller } from "../../domain.ts";
 import { giveBackOf } from "../../facts/rulings.ts";
-import { forbidden, notFound } from "../../failure.ts";
+import { notFound } from "../../failure.ts";
 import type { CorePorts } from "../../ports.ts";
 import { onHeldFacts } from "../../sharing.ts";
 import { settle } from "./place.ts";
-import { flagCiting } from "./write.ts";
+import { flagCiting, requireAuthor, visibleFact } from "./write.ts";
 
 /**
  * A person's redaction of their own fact (flow F9): one unit takes its text out of every structure
@@ -23,15 +23,8 @@ export async function redactFact(
   caller: Caller,
   input: { readonly id: string },
 ): Promise<{ id: string; redacted: true }> {
-  const scope = scopeOf(caller);
-  const fact = await ports.store.facts.get(scope, idOf(input.id));
-  if (fact === null) throw notFound("listed fact", input.id);
-  if (fact.author !== caller.principalId) {
-    throw forbidden(
-      `Fact ${fact.id} is another person's.`,
-      "Only its author can redact it; flag it if it should not stand.",
-    );
-  }
+  const fact = await visibleFact(ports, caller, input.id);
+  requireAuthor(caller, fact, "Only its author can redact it; flag it if it should not stand.");
   const by = { actor: personActor(caller), session: null };
   const who = { caller, project: fact.project, at: ports.clock.now() };
   await onHeldFacts(ports, who, [fact.id], async (found, place) => {

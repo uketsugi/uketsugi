@@ -8,11 +8,14 @@ import type {
   PersonProject,
   PrincipalSeed,
   Project,
+  ProjectHoldings,
   ProjectRef,
   ProjectsRepo,
+  ReadScope,
   Treatment,
 } from "@uketsugi/core";
 import type { Selectable } from "kysely";
+import { holdingsIn } from "./forget.ts";
 import { inByteOrder, Repo, toBytes, uuidsOf, type Db } from "./codec.ts";
 import type { Database } from "./schema.ts";
 import { didSomething } from "./sessions.ts";
@@ -281,6 +284,10 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
 
 /** An organization's projects, each known by its key, and each person's choice for theirs. */
 export class SqlProjects extends Repo implements ProjectsRepo {
+  holdings(scope: ReadScope, person: string, project: string): Promise<ProjectHoldings> {
+    return holdingsIn(this.db, scope, person, project);
+  }
+
   private of(orgId: string) {
     return this.db
       .selectFrom("projects")

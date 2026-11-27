@@ -175,6 +175,11 @@ export class SqlSessions extends Repo implements SessionsRepo {
     await this.one(orgId, id).set(noteColumns(note)).execute();
   }
 
+  async clearNote(orgId: string, id: string): Promise<void> {
+    await this.deleteTurns(this.db, orgId, id).execute();
+    await this.one(orgId, id).set(noteColumns(null)).execute();
+  }
+
   async activity(orgId: string, principalId: string, since: Date): Promise<ActivityRow[]> {
     return this.db
       .selectFrom("sessions")

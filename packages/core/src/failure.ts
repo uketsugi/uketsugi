@@ -99,6 +99,16 @@ const NOT_FOUND = {
     meaning: "The id is wrong, or the task is no longer shared with you.",
     next: "Open the task from the list.",
   },
+  "listed project": {
+    what: (id: string) => `"${id}" is not one of your projects.`,
+    meaning: "The name is wrong, or the project was deleted already.",
+    next: "Choose one of your projects from the list.",
+  },
+  "listed session": {
+    what: (id: string) => `No session ${id} is among your recent sessions.`,
+    meaning: "The id is wrong, or the session is older than the list shows.",
+    next: "Open Activity and remove the note from the session's own entry.",
+  },
   "listed ruling": {
     what: (id: string) => `No ruling ${id} is visible here.`,
     meaning: "The id is wrong, or the ruling is in an audience you cannot see.",

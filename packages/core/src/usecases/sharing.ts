@@ -100,6 +100,12 @@ async function reconcile(
   return { facts: back.facts + gone.facts, tasks: back.tasks + gone.tasks };
 }
 
+/** Brings everything the person shared in a project home to their own audience, as keeping it private does. */
+export async function bringHome(ports: MovePorts, place: Place, project: string): Promise<void> {
+  const shared = await place.shared();
+  if (shared !== null) await reconcile(ports, { ...place, treatment: "private" }, shared, project);
+}
+
 /**
  * Records a person's choice for a project and moves their records to match it, in one unit: a
  * choice whose moves fail is not recorded. Choosing what is already chosen moves whatever is not

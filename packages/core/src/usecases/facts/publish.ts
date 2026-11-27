@@ -179,21 +179,30 @@ export function writeFact(
 /**
  * A claim published again is the fact already stored, and a citation it did not have yet is a
  * second source for it: the fact takes it, as a correction by its author, which is why the fact
- * is unconfirmed again. A repeat that brings nothing new changes nothing.
+ * is unconfirmed again; a fact that was confirmed says that it lost that. A repeat that brings nothing new changes nothing.
  */
 async function withNewCitations(
   ports: CorePorts,
   ctx: CallContext,
   fact: Fact,
   offered: readonly ClassedCitation[],
-): Promise<{ status: Fact["status"]; citations: readonly ClassedCitation[] }> {
-  const same = { status: fact.status, citations: fact.citations };
+): Promise<{
+  status: Fact["status"];
+  citations: readonly ClassedCitation[];
+  lostConfirmation: boolean;
+}> {
+  const same = { status: fact.status, citations: fact.citations, lostConfirmation: false };
   if (!isLive(fact)) return same;
   const { citations, taken } = takeCitations(fact.citations, { citations: offered }, new Set());
   if (taken.length === 0) return same;
   const correction = await correctionOf(ports, fact, { ...fact, citations });
   const changed = await onFact(ports, ctx, { before: fact, correction, at: ports.clock.now() });
-  return { status: changed ? "unconfirmed" : fact.status, citations };
+  const status = changed ? "unconfirmed" : fact.status;
+  return {
+    status,
+    citations,
+    lostConfirmation: fact.status === "confirmed" && status !== "confirmed",
+  };
 }
 
 /**
@@ -231,7 +240,7 @@ export async function publishFact(
 
   const fact = stored.fact;
   const held = stored.created
-    ? { status: fact.status, citations: fact.citations }
+    ? { status: fact.status, citations: fact.citations, lostConfirmation: false }
     : await withNewCitations(ports, ctx, fact, citations);
   const similar = near.filter((other) => other.id !== fact.id).slice(0, SIMILAR_LIMIT);
   return {
@@ -239,6 +248,7 @@ export async function publishFact(
     status: held.status,
     created: stored.created,
     citations: held.citations.map((entry) => citationView(entry, ctx.project.key)),
+    ...(held.lostConfirmation ? { lost_confirmation: true as const } : {}),
     ...(similar.length === 0
       ? {}
       : { similar: similar.map((other) => ({ id: other.id, claim: other.claim })) }),

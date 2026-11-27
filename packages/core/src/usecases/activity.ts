@@ -1,17 +1,23 @@
 /**
  * Activity, as the dashboard reads it: per client name and version, how many of the person's
  * sessions searched, published and were refused for a missing project, and their recent sessions,
- * each with what the model step spent on it where it read one. It is read from the directory, and
+ * each with the note it left and what the model step spent on it where it read one. It is read from the directory, and
  * only the person's own part of it: nobody sees another person's sessions. Nothing here reads a
  * fact's text.
  */
-import type { ActivityParams, ActivityReport, ActivitySession } from "@uketsugi/contracts";
+import type {
+  ActivityParams,
+  ActivityReport,
+  ActivitySession,
+  NoteRemoved,
+} from "@uketsugi/contracts";
 import type { Caller, Session } from "../domain.ts";
+import { notFound } from "../failure.ts";
 import type { CorePorts } from "../ports.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How many of the person's sessions "recent sessions" lists. */
-const RECENT_SESSIONS = 20;
+export const RECENT_SESSIONS = 20;
 
 function sessionRow(session: Session): ActivitySession {
   const { digestedAt, modelTokens, digestFailure } = session;
@@ -28,6 +34,14 @@ function sessionRow(session: Session): ActivitySession {
     last_search_at: session.lastSearchAt?.toISOString() ?? null,
     last_publish_at: session.lastPublishAt?.toISOString() ?? null,
     refused_calls: session.refusedCalls,
+    note:
+      session.note === null
+        ? null
+        : {
+            text: session.note.text,
+            final: session.note.final,
+            at: session.note.at.toISOString(),
+          },
     digest: unread
       ? null
       : {
@@ -69,4 +83,23 @@ export async function activityReport(
     })),
     recent: recent.map(sessionRow),
   };
+}
+
+/**
+ * Removes the note of one of the person's recent sessions, the ones Activity lists, by its display
+ * id, with the turns kept for the model step. A session is one person's. What a model already
+ * wrote from the note stays as the facts it wrote, which the person corrects or redacts as any
+ * other fact.
+ */
+export async function removeNote(
+  ports: Pick<CorePorts, "store">,
+  caller: Caller,
+  displayId: string,
+): Promise<NoteRemoved> {
+  const { sessions } = ports.store;
+  const recent = await sessions.recent(caller.orgId, caller.principalId, RECENT_SESSIONS);
+  const session = recent.find((entry) => entry.displayId === displayId);
+  if (session === undefined) throw notFound("listed session", displayId);
+  await sessions.clearNote(caller.orgId, session.id);
+  return { session: session.displayId };
 }
