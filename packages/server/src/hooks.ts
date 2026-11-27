@@ -19,16 +19,25 @@
  * server with none, a prompt that arrives is dropped where it lands.
  *
  * The project is this session's own word on where it is: the origin remote of the directory it
- * started in, which the script reads and sends in a header, since it cannot write into JSON.
+ * started in, which the script reads and sends in a header, since it cannot write into JSON. A
+ * directory with no origin that names a project is a project of its own: the script sends the
+ * machine's name and the directory, and `hookProject` makes the project's name of them.
  */
 import type { ClaudeCodeHook, ClaudeCodeHookOutput } from "@uketsugi/contracts";
 import { BLOCK_TEXT } from "@uketsugi/contracts";
-import type { App, Caller } from "@uketsugi/core";
+import { hookProject, type App, type Caller } from "@uketsugi/core";
 import { CLAUDE_CODE } from "./connect.ts";
 import type { ToolUses } from "./tool-uses.ts";
 
 /** The header the script names the session's project in: the directory's origin remote. */
 export const ORIGIN_HEADER = "x-uketsugi-origin";
+/**
+ * The headers the script names the folder in: this machine's name (`uname -n`) and the directory
+ * the session started in. Each is sent with every byte as `%xx`, which is how any directory,
+ * newlines and non-ASCII characters included, travels in a header and in curl's settings.
+ */
+export const MACHINE_HEADER = "x-uketsugi-machine";
+export const DIRECTORY_HEADER = "x-uketsugi-directory";
 /**
  * The header the script says in that its person turned on sending each turn: the plugin's
  * `capture` option as Claude Code hands it to a hook.
@@ -43,6 +52,9 @@ export function isOn(option: string | undefined): boolean {
 /** What the script sent beside the hook's own input. */
 export interface HookHeaders {
   readonly origin: string | undefined;
+  /** The machine and directory as the headers hold them, percent-encoded. */
+  readonly machine: string | undefined;
+  readonly directory: string | undefined;
   /** Whether the person turned on sending each turn's request and final answer. */
   readonly capture: boolean;
 }
@@ -54,20 +66,30 @@ export interface HookDeps {
   readonly onError: (error: unknown) => void;
 }
 
+/** What a header sent by the script says, or undefined where it is not what the script sends. */
+function decoded(value: string | undefined): string | undefined {
+  try {
+    return value === undefined ? undefined : decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Answers one hook of Claude Code's, for the person its token belongs to. */
 export async function answerClaudeCode(
   { app, toolUses, onError }: HookDeps,
   caller: Caller,
   hook: ClaudeCodeHook,
-  { origin, capture }: HookHeaders,
+  { origin, machine, directory, capture }: HookHeaders,
 ): Promise<ClaudeCodeHookOutput> {
-  const conversation = { client: CLAUDE_CODE, id: hook.session_id, project: origin };
+  const project = hookProject(origin, decoded(machine), decoded(directory));
+  const conversation = { client: CLAUDE_CODE, id: hook.session_id, project };
   switch (hook.hook_event_name) {
     case "SessionStart": {
       const client = { name: CLAUDE_CODE, version: null, conversationId: hook.session_id };
       // The block is what has the agent use memory at all: a brief that cannot be made is
       // reported and left out, and the session starts with the block alone.
-      const brief = await app.beginSession(caller, client, origin).catch((error: unknown) => {
+      const brief = await app.beginSession(caller, client, project).catch((error: unknown) => {
         onError(error);
         return null;
       });

@@ -74,7 +74,14 @@ import { capabilityDescriptor, connectInfo, withoutToken } from "./connect.ts";
 import { signsIn } from "./dashboard-words.ts";
 import { errorHandler, failed, noSnapshot, notFound, personOnly, unauthorized } from "./errors.ts";
 import { LOOPBACK_ADDRESSES, reachedAt } from "./guard.ts";
-import { answerClaudeCode, CAPTURE_HEADER, isOn, ORIGIN_HEADER } from "./hooks.ts";
+import {
+  answerClaudeCode,
+  CAPTURE_HEADER,
+  DIRECTORY_HEADER,
+  isOn,
+  MACHINE_HEADER,
+  ORIGIN_HEADER,
+} from "./hooks.ts";
 import { pluginsFrom } from "./plugins.ts";
 import type { ToolUses } from "./tool-uses.ts";
 
@@ -322,6 +329,8 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   api.post("/hooks/claude-code", body("ClaudeCodeHook"), async (c) => {
     const sent = {
       origin: c.req.header(ORIGIN_HEADER),
+      machine: c.req.header(MACHINE_HEADER),
+      directory: c.req.header(DIRECTORY_HEADER),
       capture: isOn(c.req.header(CAPTURE_HEADER)),
     };
     return c.json(await answerClaudeCode(deps, c.get("caller"), c.req.valid("json"), sent));

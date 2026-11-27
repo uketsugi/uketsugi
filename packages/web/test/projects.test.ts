@@ -73,6 +73,27 @@ describe("Projects", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("lists a folder with no origin under its machine and its path, yours alone", async () => {
+    const folder: ApiProject = {
+      key: "file://box/home/ann/Work Dir",
+      kind: "path",
+      name: null,
+      facts: 3,
+      treatment: "private",
+      chosen: true,
+    };
+    api.use(answer("/api/projects", { ...projects, projects: [folder] }));
+    open("/projects");
+    const table = within(await screen.findByRole("table", { name: /Your projects/ }));
+    const row = within(table.getAllByRole("row")[1] as HTMLElement);
+    expect(row.getByText("box")).toBeTruthy();
+    expect(row.getByText("/home/ann/Work Dir")).toBeTruthy();
+    expect(row.getByText("yours alone")).toBeTruthy();
+    expect(row.queryByText(/file:\/\//)).toBeNull();
+    expect(row.getByRole("button", { name: `Delete ${folder.key}…` })).toBeTruthy();
+    expect(await violations()).toEqual([]);
+  });
+
   it("shares a project only after saying what that shows to everyone, and reports what moved", async () => {
     const sent: { body: unknown; csrf: string | null }[] = [];
     api.use(

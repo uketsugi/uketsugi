@@ -77,12 +77,15 @@ export const TREATMENTS = ["private", "shared"] as const;
  */
 export type Treatment = (typeof TREATMENTS)[number];
 
-export const PROJECT_KINDS = ["repository", "named"] as const;
+export const PROJECT_KINDS = ["repository", "named", "path"] as const;
 
 /** A project as a call names it: its kind and its canonical key. */
 export interface ProjectRef {
   readonly kind: (typeof PROJECT_KINDS)[number];
-  /** `host/owner/name` for a repository; `<owner>/<slug>` for a named project. Lower case. */
+  /**
+   * `host/owner/name` for a repository; `<owner>/<slug>` for a named project;
+   * `file://<machine>/<path>` for a folder with no origin. Lower case, but for a path.
+   */
   readonly key: string;
 }
 

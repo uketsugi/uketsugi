@@ -2458,11 +2458,11 @@
       "properties": {
         "key": {
           "type": "string",
-          "description": "`host/owner/name` for a repository; `<owner>/<slug>` for a named project."
+          "description": "`host/owner/name` for a repository; `<owner>/<slug>` for a named project; `file://<machine>/<path>` for a folder with no origin."
         },
         "kind": {
           "type": "string",
-          "enum": ["repository", "named"]
+          "enum": ["repository", "named", "path"]
         },
         "name": {
           "type": ["string", "null"],

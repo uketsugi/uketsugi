@@ -137,7 +137,7 @@ function TreatmentCell({ project }: { project: ApiProject }) {
 function ChoiceCell({ project }: { project: ApiProject }) {
   const { sharing, pending, choose } = use(Choosing);
   if (!sharing) return null;
-  if (project.kind === "named") return <span className="text-ink-muted">yours alone</span>;
+  if (project.kind !== "repository") return <span className="text-ink-muted">yours alone</span>;
   if (project.treatment === "shared") return <AskFirst project={project} to="private" />;
   return (
     <span className="flex flex-wrap gap-2">
@@ -156,19 +156,32 @@ function ChoiceCell({ project }: { project: ApiProject }) {
   );
 }
 
+/** A folder's key, `file://<machine>/<path>`, as its machine and its path. */
+function Name({ project }: { project: ApiProject }) {
+  if (project.kind === "path") {
+    const folder = project.key.slice("file://".length);
+    const at = folder.indexOf("/");
+    return (
+      <span className="flex flex-col break-all">
+        <span className="text-ink-muted">{folder.slice(0, at)}</span>
+        <span className="font-mono">{folder.slice(at)}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="break-all">
+      {project.name === null ? project.key : `${project.name} (${project.key})`}
+    </span>
+  );
+}
+
 const column = columnsFor<ApiProject>();
 
 const columns = column.columns([
   column.display({
     id: "project",
     header: "Project",
-    cell: ({ row }) => (
-      <span className="break-all">
-        {row.original.name === null
-          ? row.original.key
-          : `${row.original.name} (${row.original.key})`}
-      </span>
-    ),
+    cell: ({ row }) => <Name project={row.original} />,
   }),
   column.accessor("facts", { header: "Facts you can see" }),
   column.display({

@@ -119,6 +119,24 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       expect(await projects.choice(...of(carol), here)).toBeNull();
     });
 
+    test("a folder's project is stored with its own kind, and each person's choice for it is their own", async () => {
+      const { projects } = store;
+      const folder = { kind: "path" as const, key: "file://box/home/ann/Work Dir" };
+      expect(await projects.ensure(alice.orgId, folder)).toEqual({ orgId: alice.orgId, ...folder });
+      await projects.choose(alice.orgId, alice.principalId, folder.key, "private");
+      const folders = async (who: Caller) =>
+        (await projects.listOf(who.orgId, who.principalId)).filter(({ kind }) => kind === "path");
+      expect(await folders(alice)).toMatchObject([
+        { key: folder.key, kind: "path", choice: "private" },
+      ]);
+      expect(await folders(carol)).toEqual([]);
+      expect(await projects.choice(carol.orgId, carol.principalId, folder.key)).toBeNull();
+      const elsewhere = { kind: "path" as const, key: "file://other/home/ann/Work Dir" };
+      await projects.ensure(alice.orgId, elsewhere);
+      expect(await projects.find(alice.orgId, elsewhere.key)).toMatchObject(elsewhere);
+      expect(await projects.choice(alice.orgId, alice.principalId, elsewhere.key)).toBeNull();
+    });
+
     test("a move takes a fact with its chain and all that hangs off it, a task with its notes, and leaves the log", async () => {
       const own = targetOf(alice, clock.now());
       const [old, live, task, ruling] = [ids.uuid(), ids.uuid(), ids.uuid(), ids.uuid()];

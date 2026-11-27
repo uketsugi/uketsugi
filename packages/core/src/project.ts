@@ -7,6 +7,8 @@ import { canShare, standing } from "./sharing.ts";
 
 const REPOSITORY = /^[a-z0-9._-]+\.[a-z0-9._-]+(\/[a-z0-9._-]+){2}$/;
 const NAMED = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
+/** `file://<machine>/<absolute path>`: the machine has no space, the path at least one part. */
+const PATH_PROJECT = /^file:\/\/([^/\s]+)(\/[\s\S]*)$/i;
 
 /**
  * The project a call names, in its canonical spelling, or null when the text is not one.
@@ -16,6 +18,11 @@ const NAMED = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
  * case, with or without `.git` or a trailing slash, so two clones of one origin name one project.
  * A named project is `<owner>/<slug>`: lower case, digits and hyphens. This is the spelling rule
  * the recording experiments ran with; a wider rule needs a recording run.
+ *
+ * A folder with no origin is `file://<machine>/<absolute path>`: the machine lower-cased, the path
+ * exactly as given but for repeated and trailing slashes. It is read before the rules above, so a
+ * file URL whose host has a dot and whose path has two parts (`file://box.local/work/api`) is a
+ * folder and not the repository `box.local/work/api` it once read as.
  */
 export function parseProject(input: unknown): ProjectRef | null {
   if (typeof input !== "string") return null;
@@ -24,6 +31,8 @@ export function parseProject(input: unknown): ProjectRef | null {
     .replace(/^[`'"]+|[`'"]+$/g, "")
     .trim();
   if (NAMED.test(trimmed)) return { kind: "named", key: trimmed };
+  const folder = PATH_PROJECT.exec(trimmed);
+  if (folder !== null) return pathProject(folder[1] ?? "", folder[2] ?? "");
   const key = trimmed
     .replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "") // scheme
     .replace(/^[^@/]+@/, "") // user@
@@ -33,6 +42,27 @@ export function parseProject(input: unknown): ProjectRef | null {
     .replace(/\.git$/i, "")
     .toLowerCase();
   return REPOSITORY.test(key) ? { kind: "repository", key } : null;
+}
+
+function pathProject(machine: string, directory: string): ProjectRef | null {
+  const path = directory.replace(/\/{2,}/g, "/").replace(/\/$/, "");
+  return path === "" ? null : { kind: "path", key: `file://${machine.toLowerCase()}${path}` };
+}
+
+/**
+ * What a hook names as its session's project, as text for `parseProject`: its origin when that
+ * names a project, otherwise the folder it started in, from the machine's name and that
+ * directory. Undefined when it names neither. The agent's own `file://` text for the folder is
+ * read by the same rule, so both give one key.
+ */
+export function hookProject(
+  origin: string | undefined,
+  machine: string | undefined,
+  directory: string | undefined,
+): string | undefined {
+  if (parseProject(origin) !== null) return origin;
+  if (!machine || !directory?.startsWith("/")) return undefined;
+  return `file://${machine}${directory}`;
 }
 
 /**
@@ -56,10 +86,11 @@ const PERSONAL_OWNER = "me";
 
 /**
  * Whether a project is one person's own and cannot be shared. Every named project is: a person
- * makes one as `me/<slug>`, a name that is each person's own, and none has a wider owner yet.
+ * makes one as `me/<slug>`, a name that is each person's own. So is a folder's, which only its
+ * person's machine can name. Only a repository's origin is every contributor's.
  */
 export function isPersonal(project: ProjectRef): boolean {
-  return project.kind === "named";
+  return project.kind !== "repository";
 }
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** The most named projects a refusal lists. */
@@ -69,7 +100,8 @@ type ProjectPorts = Pick<CorePorts, "store" | "clock">;
 
 /**
  * The project's record, or null when a named project is unknown to the caller. A repository
- * exists once it is named. A named project is its maker's own: one another person made reads as
+ * exists once it is named, and so does a folder's: the first call makes it, private and the
+ * caller's own, as each caller's call makes theirs. A named project is its maker's own: one another person made reads as
  * unknown, exactly as one nobody made. Nothing is asked: a project met for the first time is used
  * here and kept private, and on a server with several people it stays private until its person
  * chooses to share it.
@@ -81,6 +113,14 @@ export async function resolveProject(
 ): Promise<Project | null> {
   const { projects } = ports.store;
   if (ref.kind === "repository") return projects.ensure(caller.orgId, ref);
+  if (ref.kind === "path") {
+    const folder = await projects.ensure(caller.orgId, ref);
+    const { orgId, principalId } = caller;
+    if ((await projects.choice(orgId, principalId, ref.key)) === null) {
+      await projects.choose(orgId, principalId, ref.key, "private");
+    }
+    return folder;
+  }
   const made = await projects.choice(caller.orgId, caller.principalId, ref.key);
   return made === null ? null : projects.find(caller.orgId, ref.key);
 }

@@ -132,8 +132,8 @@ export async function chooseTreatment(
   const { treatment } = input;
   if (treatment === "shared" && isPersonal(project)) {
     throw unsupported(
-      `${project.key} is a named project of your own, and its name is each person's own.`,
-      "Share a repository's project; a named project stays private.",
+      `${project.key} is a ${project.kind} project of your own, and its name is each person's own.`,
+      "Share a repository's project; a named project or a folder's stays private.",
     );
   }
   const who = { caller, project: project.key, at: ports.clock.now() };

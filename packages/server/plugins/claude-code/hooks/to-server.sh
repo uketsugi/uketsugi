@@ -1,6 +1,7 @@
 #!/bin/sh
 # Sends what Claude Code hands a hook on to the uketsugi server, with the origin remote of the
-# directory the session started in. Two hooks name their event as the first argument: the start
+# directory the session started in, and the machine's name and that directory, which name the
+# project where there is no origin. Two hooks name their event as the first argument: the start
 # of a session, whose answer alone is printed, as the hook's output, and a prompt, which is sent
 # only where its person turned that on.
 #
@@ -28,6 +29,13 @@ if [ "${1:-}" = UserPromptSubmit ] && [ -z "$capture" ]; then exit 0; fi
 origin=$(git -C "${CLAUDE_PROJECT_DIR:-.}" remote get-url origin 2>/dev/null |
   sed -e 's#^\([A-Za-z+.-]*://\)[^/@]*@#\1#' | tr -d '"\\\r\n')
 
+# This machine's name and the directory the session started in name its project where the
+# directory has no origin. Each is sent with every byte as %xx: a directory can hold a quote, a
+# backslash, a newline or any character, and a header and curl's settings hold none of those.
+encode() { printf %s "$1" | od -An -v -tx1 | tr -d '\n' | sed 's/ /%/g'; }
+machine=$(encode "$(uname -n 2>/dev/null)")
+directory=$(encode "${CLAUDE_PROJECT_DIR:-}")
+
 # curl reads the token and the remote from a file descriptor, never from its command line, where
 # every user of the machine could read them. It reads no settings file of the person's (-q).
 answer=$(
@@ -36,6 +44,8 @@ answer=$(
 $authorization
 header = "Content-Type: application/json"
 header = "X-Uketsugi-Origin: $origin"
+header = "X-Uketsugi-Machine: $machine"
+header = "X-Uketsugi-Directory: $directory"
 header = "X-Uketsugi-Capture: $capture"
 EOF
 )

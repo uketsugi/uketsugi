@@ -1510,10 +1510,10 @@ export interface ProjectList {
  */
 export interface ApiProject {
   /**
-   * `host/owner/name` for a repository; `<owner>/<slug>` for a named project.
+   * `host/owner/name` for a repository; `<owner>/<slug>` for a named project; `file://<machine>/<path>` for a folder with no origin.
    */
   key: string;
-  kind: "repository" | "named";
+  kind: "repository" | "named" | "path";
   /**
    * A named project's display name.
    */

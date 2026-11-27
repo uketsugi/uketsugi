@@ -11,6 +11,7 @@ import { DIGEST_FAILURE_0003 } from "./migrations/0003_digest_failure.ts";
 import { UNREAD_0004 } from "./migrations/0004_unread.ts";
 import { EMBEDDING_MODEL_0005 } from "./migrations/0005_embedding_model.ts";
 import { PERSON_REMOVED_0006 } from "./migrations/0006_person_removed.ts";
+import { PATH_PROJECTS_0007 } from "./migrations/0007_path_projects.ts";
 
 /**
  * Every migration, by the name it is recorded under. `0001_init.3` is the schema 0.1.0 released:
@@ -23,6 +24,7 @@ export const MIGRATIONS: Record<string, Migration> = {
   "0004_unread": UNREAD_0004,
   "0005_embedding_model": EMBEDDING_MODEL_0005,
   "0006_person_removed": PERSON_REMOVED_0006,
+  "0007_path_projects": PATH_PROJECTS_0007,
 };
 
 /**

@@ -242,10 +242,19 @@ printf '{"token":"%s"}' "$(ukt token)" | claude plugin configure uketsugi@uketsu
 
 ### A directory with no origin remote
 
-An agent names its project by the repository's origin remote. In a directory that is not a
-repository, or a repository with no origin, it has no name to give and gets no memory. For work
-there, make a project name on the dashboard's Projects page. The page then shows a line to put in
-that directory's instruction file (`CLAUDE.md` for Claude Code), such as:
+An agent names its project by the repository's origin remote. A directory with no origin remote,
+or one whose origin is a path on the same machine, is a project of its own, named by this machine's
+name and the directory a session started in: `file://<machine>/<absolute path>`, such as
+`file://laptop/home/ann/notes`. With the Claude Code plugin, a session there starts with its brief
+and leaves its note in that project, and you do nothing: the project appears on Projects, under its
+machine and its path, once it is used. It is yours alone and cannot be shared. Two machines, or two
+people, have separate projects for one path. A session started in a subfolder is a different
+project from one started in its parent.
+
+An agent without the plugin, or one that is not told what to pass, is still refused in such a
+directory. For work there you can also make a project name on the dashboard's Projects page. The
+page then shows a line to put in that directory's instruction file (`CLAUDE.md` for Claude Code),
+such as:
 
 ```
 The uketsugi project for this directory is `me/harbour-notes`.

@@ -42,7 +42,7 @@ export {
   RevokedTokenError,
 } from "./identity.ts";
 export { newSession, SESSION_IDLE_MS, type ClientInfo } from "./sessions.ts";
-export { createNamedProject, listProjects } from "./project.ts";
+export { createNamedProject, hookProject, listProjects } from "./project.ts";
 export { listRulings, revertRuling } from "./facts/rulings.ts";
 export { isUuid } from "./facts/citations.ts";
 export { activityReport, removeNote } from "./usecases/activity.ts";
