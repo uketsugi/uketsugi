@@ -129,7 +129,7 @@ function TaskShown({ detail }: { detail: TaskDetail }) {
     <>
       <div className="flex flex-wrap gap-1.5">
         <TaskStateMark task={task} />
-        <SeenByMark audience={task.audience} />
+        <SeenByMark audience={task.audience} group={task.group} />
       </div>
       <Lead>{task.title}</Lead>
       {task.description === undefined ? null : (

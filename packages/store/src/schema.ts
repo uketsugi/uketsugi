@@ -17,7 +17,6 @@ import type {
   Status,
   TaskNote,
   TaskState,
-  Treatment,
 } from "@uketsugi/core";
 import type { ColumnType, Generated, GeneratedAlways } from "kysely";
 
@@ -31,6 +30,7 @@ export interface Database {
     displayName: string;
     subject: string;
     removedAt: Date | null;
+    administrator: boolean;
   };
   credentials: {
     orgId: string;
@@ -48,6 +48,17 @@ export interface Database {
     id: string;
     kind: (typeof AUDIENCE_KINDS)[number];
     ownerId: string | null;
+    name: string | null;
+  };
+  audienceMembers: { orgId: string; audienceId: string; principalId: string };
+  invitations: {
+    orgId: string;
+    id: string;
+    tokenHash: Bytes;
+    createdBy: string;
+    createdAt: Date;
+    expiresAt: Date;
+    usedAt: Date | null;
   };
   audienceHead: { orgId: string; audienceId: string; lastSeq: number };
   projects: {
@@ -59,7 +70,7 @@ export interface Database {
     orgId: string;
     principalId: string;
     project: string;
-    treatment: Treatment;
+    audienceId: string | null;
     displayName: string | null;
   };
   projectNames: {

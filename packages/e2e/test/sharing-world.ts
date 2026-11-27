@@ -17,7 +17,7 @@ import {
   type StoredEvent,
   type Treatment,
 } from "@uketsugi/core";
-import { toolCaller, type ToolCaller } from "@uketsugi/testkit";
+import { everyoneOf, toolCaller, type ToolCaller } from "@uketsugi/testkit";
 import { beforeAll } from "vitest";
 import { CLIENT, type World } from "./use-case-world.ts";
 
@@ -83,6 +83,6 @@ export function sharedWorld(w: World): Shared {
       const events = await now().ports.store.review.events(scope, audienceId, 0, 1000);
       return events.filter((event) => event.subject === subject);
     },
-    everyone: () => ({ orgId: now().ann.orgId, audienceIds: [now().ann.sharedAudienceId ?? ""] }),
+    everyone: () => ({ orgId: now().ann.orgId, audienceIds: [everyoneOf(now().ann) ?? ""] }),
   };
 }

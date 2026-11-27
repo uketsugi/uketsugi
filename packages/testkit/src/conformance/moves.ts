@@ -1,6 +1,6 @@
 import { replaceTokens, scopeOf, type Caller, type Store, type UnitTarget } from "@uketsugi/core";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { FakeClock, FakeIdGen } from "../fakes.ts";
+import { everyoneOf, FakeClock, FakeIdGen } from "../fakes.ts";
 import { content, event, person, PROJECT, targetOf, type StoreHarness } from "./support.ts";
 
 /**
@@ -48,7 +48,7 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
 
     test("a person is added whole or not at all: with their credentials, and the one shared audience each of the organization's people then sees", async () => {
       const { directory } = store;
-      expect(alice).toMatchObject({ sharedAudienceId: null, credentialId: null });
+      expect(alice).toMatchObject({ groups: [], credentialId: null });
       expect(alice.visibleAudienceIds).toEqual([alice.privateAudienceId]);
       const joining = (name: string) => {
         const seed = {
@@ -77,7 +77,7 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       expect((await directory.people(alice.orgId)).map((entry) => entry.id)).toEqual([
         alice.principalId,
       ]);
-      expect((await again("test:alice", alice.orgId)).sharedAudienceId).toBeNull();
+      expect((await again("test:alice", alice.orgId)).groups).toEqual([]);
       const { seed, credential } = joining("carol");
       await directory.addPerson(seed, ids.uuid(), [credential]);
       expect(await directory.credentials(alice.orgId, seed.principalId)).toMatchObject([
@@ -85,14 +85,17 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       ]);
       alice = await again("test:alice", alice.orgId);
       carol = await again("test:carol", alice.orgId);
-      shared = alice.sharedAudienceId ?? "";
+      shared = everyoneOf(alice) ?? "";
       // The next person joins the audience that is there, whatever id their invitation carried.
       await directory.addPerson(joining("dave").seed, ids.uuid(), []);
-      expect((await again("test:dave", alice.orgId)).sharedAudienceId).toBe(shared);
+      expect(everyoneOf(await again("test:dave", alice.orgId))).toBe(shared);
       expect(alice.visibleAudienceIds).toEqual([alice.privateAudienceId, shared]);
-      expect(carol).toMatchObject({ orgId: alice.orgId, sharedAudienceId: shared });
+      expect(carol).toMatchObject({
+        orgId: alice.orgId,
+        groups: [{ id: shared, name: "everyone" }],
+      });
       expect(carol.privateAudienceId).not.toBe(alice.privateAudienceId);
-      expect((await again("test:stranger", stranger.orgId)).sharedAudienceId).toBeNull();
+      expect((await again("test:stranger", stranger.orgId)).groups).toEqual([]);
       const people = await store.directory.people(alice.orgId);
       expect(people.map((entry) => entry.displayName)).toEqual(["test:alice", "carol", "dave"]);
       await store.directory.rename(alice.orgId, alice.principalId, "alice");
@@ -106,14 +109,14 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       await projects.ensure(alice.orgId, { kind: "named", key: named });
       const of = (who: Caller) => [who.orgId, who.principalId] as const;
       expect(await projects.choice(...of(alice), here)).toBeNull();
-      await projects.choose(...of(alice), here, "shared");
-      await projects.choose(...of(alice), named, "private", "Notes");
-      await projects.choose(...of(alice), named, "private");
-      expect(await projects.choice(...of(alice), here)).toBe("shared");
-      await projects.choose(...of(alice), here, "private");
+      await projects.choose(...of(alice), here, shared);
+      await projects.choose(...of(alice), named, null, "Notes");
+      await projects.choose(...of(alice), named, null);
+      expect(await projects.choice(...of(alice), here)).toEqual({ groupId: shared });
+      await projects.choose(...of(alice), here, null);
       expect(await projects.listOf(...of(alice))).toMatchObject([
-        { key: here, choice: "private", displayName: null },
-        { key: named, choice: "private", displayName: "Notes" },
+        { key: here, choice: { groupId: null }, displayName: null },
+        { key: named, choice: { groupId: null }, displayName: "Notes" },
       ]);
       expect(await projects.listOf(...of(carol))).toEqual([]);
       expect(await projects.choice(...of(carol), here)).toBeNull();
@@ -123,11 +126,11 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       const { projects } = store;
       const folder = { kind: "path" as const, key: "file://box/home/ann/Work Dir" };
       expect(await projects.ensure(alice.orgId, folder)).toEqual({ orgId: alice.orgId, ...folder });
-      await projects.choose(alice.orgId, alice.principalId, folder.key, "private");
+      await projects.choose(alice.orgId, alice.principalId, folder.key, null);
       const folders = async (who: Caller) =>
         (await projects.listOf(who.orgId, who.principalId)).filter(({ kind }) => kind === "path");
       expect(await folders(alice)).toMatchObject([
-        { key: folder.key, kind: "path", choice: "private" },
+        { key: folder.key, kind: "path", choice: { groupId: null } },
       ]);
       expect(await folders(carol)).toEqual([]);
       expect(await projects.choice(carol.orgId, carol.principalId, folder.key)).toBeNull();
@@ -238,14 +241,14 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       await expect(store.unit(onShared(), (unit) => unit.choice(PROJECT))).rejects.toThrow(refused);
       await expect(
         store.unit(asAlice(), (unit) => unit.on(carol.privateAudienceId)),
-      ).rejects.toThrow("a unit reaches no audience but its organization's shared one");
+      ).rejects.toThrow("a unit reaches no audience but its organization's groups");
       const elsewhere = { from: alice.privateAudienceId, to: carol.privateAudienceId };
       await expect(
         store.unit(asAlice(), (unit) => unit.move({ ...elsewhere, facts: [], tasks: [] })),
-      ).rejects.toThrow("a move runs to or from the shared audience the unit has reached");
+      ).rejects.toThrow("a move runs to or from a group the unit has reached");
       const toShared = { from: alice.privateAudienceId, to: shared, facts: [], tasks: [] };
       await expect(store.unit(asAlice(), (unit) => unit.move(toShared))).rejects.toThrow(
-        "a move runs to or from the shared audience the unit has reached",
+        "a move runs to or from a group the unit has reached",
       );
       expect(await logOf(carol.privateAudienceId)).toEqual([]);
     });
@@ -256,17 +259,17 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       const mine = [alice.orgId, alice.principalId, key] as const;
       await store.unit(asAlice(), async (unit) => {
         expect(await unit.choice(key)).toBeNull();
-        await unit.choose(key, "shared");
-        expect(await unit.choice(key)).toBe("shared");
+        await unit.choose(key, shared);
+        expect(await unit.choice(key)).toEqual({ groupId: shared });
       });
-      expect(await store.projects.choice(...mine)).toBe("shared");
+      expect(await store.projects.choice(...mine)).toEqual({ groupId: shared });
       expect(await store.projects.choice(carol.orgId, carol.principalId, key)).toBeNull();
       const failed = store.unit(asAlice(), async (unit) => {
-        await unit.choose(key, "private");
+        await unit.choose(key, null);
         throw new Error("the move that follows the choice failed");
       });
       await expect(failed).rejects.toThrow("the move that follows");
-      expect(await store.projects.choice(...mine)).toBe("shared");
+      expect(await store.projects.choice(...mine)).toEqual({ groupId: shared });
     });
 
     test("a record its source does not hold is left where it is", async () => {

@@ -1,25 +1,30 @@
 /**
  * Joining one project of a person's into another: what they hold in the first is the second's
  * from then on, and the first is their other name for it. It works in the person's own audience,
- * under their lock, and refuses while the shared audience holds anything of the first, which no
+ * under their lock, and refuses while a group of theirs holds anything of the first, which no
  * name of one person's could bring along.
  */
 import type { JoinedProject, UnitTarget } from "@uketsugi/core";
 import { sql } from "kysely";
 import type { Db } from "./codec.ts";
 
-/** How many facts and tasks the shared audience holds in a project, whoever wrote them. */
+/** How many facts and tasks a person's groups hold in a project, whoever wrote them. */
 export async function sharedRecords(
   db: Db,
   orgId: string,
-  sharedAudienceId: string,
+  person: string,
   project: string,
 ): Promise<number> {
-  const { rows } = await sql<{ records: string }>`select
+  const { rows } = await sql<{ records: string }>`with mine as (
+      select audience_id from audience_members
+      where org_id = ${orgId} and principal_id = ${person})
+    select
     (select count(*) from facts
-      where org_id = ${orgId} and audience_id = ${sharedAudienceId} and project = ${project}) +
+      where org_id = ${orgId} and audience_id in (select audience_id from mine)
+        and project = ${project}) +
     (select count(*) from tasks
-      where org_id = ${orgId} and audience_id = ${sharedAudienceId} and project = ${project})
+      where org_id = ${orgId} and audience_id in (select audience_id from mine)
+        and project = ${project})
     as records`.execute(db);
   return Number(rows[0]?.records ?? 0);
 }
@@ -48,9 +53,9 @@ export async function joinProject(
   await sql`with taken as (
       delete from project_choices
       where org_id = ${orgId} and principal_id = ${person} and project = ${from}
-      returning org_id, principal_id, treatment)
-    insert into project_choices (org_id, principal_id, project, treatment)
-    select org_id, principal_id, ${key}, treatment from taken
+      returning org_id, principal_id, audience_id)
+    insert into project_choices (org_id, principal_id, project, audience_id)
+    select org_id, principal_id, ${key}, audience_id from taken
     on conflict do nothing`.execute(db);
   // Names never chain: what meant `from` means `into`, and `from` is now a name too.
   await sql`update project_names set project = ${key}

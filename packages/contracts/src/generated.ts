@@ -90,6 +90,10 @@ export type PublishFactResult = Envelope & {
    */
   audience?: "private" | "shared";
   /**
+   * The group the fact is shared with, when it is shared with one other than `everyone`; `everyone` is not named.
+   */
+  group?: string;
+  /**
    * With `audience: private`, when the fact is the caller's own.
    */
   private_because?: "project" | "model_unchecked" | "no_source" | "cites_private" | "merged_word";
@@ -118,6 +122,10 @@ export type UpdateFactResult = Envelope & {
    * Who can see the fact as it now stands. Only on a server with several people.
    */
   audience?: "private" | "shared";
+  /**
+   * The group the fact is shared with, when it is shared with one other than `everyone`; `everyone` is not named.
+   */
+  group?: string;
   /**
    * With `audience: private`, when the fact is the caller's own.
    */
@@ -196,6 +204,10 @@ export type ApiTask = Task & {
   project: string;
   audience: Audience;
   /**
+   * The group it is shared with, when one other than `everyone`.
+   */
+  group?: string;
+  /**
    * When it was published. ISO 8601, UTC.
    */
   created_at: string;
@@ -233,6 +245,8 @@ export interface ContractTypes {
   NewProjectRequest?: NewProjectRequest;
   ClaudeCodeHook?: ClaudeCodeHook;
   ProjectChoiceRequest?: ProjectChoiceRequest;
+  GroupNamed?: GroupNamed;
+  GroupMember?: GroupMember;
   SignInRequest?: SignInRequest;
   InviteRequest?: InviteRequest;
   FactCorrection?: FactCorrection;
@@ -253,6 +267,9 @@ export interface ContractTypes {
   RevertResult?: RevertResult;
   ActivityReport?: ActivityReport;
   ProjectList?: ProjectList;
+  GroupList?: GroupList;
+  GroupChanged?: GroupChanged;
+  JoinLink?: JoinLink;
   ClaudeCodeHookOutput?: ClaudeCodeHookOutput;
   ProjectChoice?: ProjectChoice;
   PeopleList?: PeopleList;
@@ -871,9 +888,31 @@ export interface ProjectChoiceRequest {
    */
   project: string;
   /**
-   * `shared` shows what the person publishes there that others can check, and their tasks, to everyone on the server; `private` keeps all of it theirs and takes back what they shared.
+   * `shared` shows what the person publishes there that others can check, and their tasks, to the group named, `everyone` if none is; `private` keeps all of it theirs and takes back what they shared.
    */
   treatment: "private" | "shared";
+  /**
+   * With `shared`: the group of the person's to share with. Left out, `everyone`. A project shared with a group is made private before it is shared with another.
+   */
+  group?: string;
+}
+/**
+ * `POST /api/groups`: makes a group of the organization's people. Only the organization's administrator makes one.
+ */
+export interface GroupNamed {
+  /**
+   * What the group is called wherever a person reads who a project is shared with. Not `everyone`, which every organization has.
+   */
+  name: string;
+}
+/**
+ * `POST /api/groups/:name/members`: adds a person of the organization to a group.
+ */
+export interface GroupMember {
+  /**
+   * The person's id, as the group list gives it.
+   */
+  person: string;
 }
 /**
  * `POST /sign-in`: signs a browser in to the dashboard with the person's own key. A harness's token is refused here.
@@ -1224,6 +1263,10 @@ export interface ApiFact {
   id: string;
   project: string;
   audience: Audience;
+  /**
+   * The group it is shared with, when one other than `everyone`.
+   */
+  group?: string;
   claim: string | null;
   detail: string | null;
   question: string | null;
@@ -1549,6 +1592,64 @@ export interface ApiProject {
    * False while the person has made no choice: the project is private until they do.
    */
   chosen: boolean;
+  /**
+   * The group it is shared with, when one other than `everyone`.
+   */
+  group?: string;
+}
+/**
+ * `GET /api/groups`: the groups the person is in, and for the organization's administrator every group and every person.
+ */
+export interface GroupList {
+  groups: ApiGroup[];
+  /**
+   * The organization's people, for the administrator to add to a group; empty for anyone else.
+   */
+  people: ApiMember[];
+  /**
+   * Whether the person made the organization, and so makes groups and says who is in them.
+   */
+  administrator: boolean;
+}
+/**
+ * A group and who is in it.
+ *
+ * This interface was referenced by `ContractTypes`'s JSON-Schema
+ * via the `definition` "apiGroup".
+ */
+export interface ApiGroup {
+  name: string;
+  /**
+   * Whether the person is in it, and so may share a project with it.
+   */
+  mine: boolean;
+  members: ApiMember[];
+}
+/**
+ * A person of the organization, as a group lists them.
+ *
+ * This interface was referenced by `ContractTypes`'s JSON-Schema
+ * via the `definition` "apiMember".
+ */
+export interface ApiMember {
+  id: string;
+  name: string;
+}
+/**
+ * `POST /api/groups`, `POST /api/groups/:name/members` and `POST /api/groups/:name/members/:person/remove`: the group as it now stands.
+ */
+export interface GroupChanged {
+  group: ApiGroup;
+}
+/**
+ * `POST /api/join-links`, where the server signs people in through a provider: what the administrator sends to the person they invite. The link is shown once and used once.
+ */
+export interface JoinLink {
+  link: string;
+  /**
+   * ISO 8601, UTC.
+   */
+  expires_at: string;
 }
 /**
  * `POST /api/hooks/claude-code`: the hook's output, as Claude Code reads it. Empty for every event but `SessionStart`.
@@ -1568,6 +1669,10 @@ export interface ClaudeCodeHookOutput {
 export interface ProjectChoice {
   project: string;
   treatment: "private" | "shared";
+  /**
+   * The group the fact is shared with, when it is shared with one other than `everyone`; `everyone` is not named.
+   */
+  group?: string;
   /**
    * How many of the person's facts and tasks changed hands: to everyone when shared, back to the person when private.
    */
@@ -1841,6 +1946,8 @@ export interface ApiRequests {
   NewProjectRequest: NewProjectRequest;
   ClaudeCodeHook: ClaudeCodeHook;
   ProjectChoiceRequest: ProjectChoiceRequest;
+  GroupNamed: GroupNamed;
+  GroupMember: GroupMember;
   SignInRequest: SignInRequest;
   InviteRequest: InviteRequest;
   FactCorrection: FactCorrection;

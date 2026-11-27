@@ -16,7 +16,7 @@ const CALLER: Caller = {
   displayName: "you",
   credentialId: null,
   privateAudienceId: "audience",
-  sharedAudienceId: null,
+  groups: [],
   visibleAudienceIds: ["audience"],
 };
 const API = "github.com/acme/api";

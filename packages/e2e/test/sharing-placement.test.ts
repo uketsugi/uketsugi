@@ -20,7 +20,7 @@ import {
   type Embedder,
   type Store,
 } from "@uketsugi/core";
-import { FakeEmbedder, toolCaller } from "@uketsugi/testkit";
+import { everyoneOf, FakeEmbedder, toolCaller } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { CHECKABLE, sharedWorld, TESTIMONY } from "./sharing-world.ts";
 import { CLIENT, describeUseCases } from "./use-case-world.ts";
@@ -105,7 +105,7 @@ describeUseCases("where a record ends up when things race or fail", (w) => {
     const now = await s.seenBy(s.ann, first.id);
     expect(now).toMatchObject({ audienceId: s.ann.privateAudienceId });
     expect(await s.seenBy(s.bob, first.id)).toBeNull();
-    const sharedLog = await s.logged(s.ann.sharedAudienceId ?? "", first.id);
+    const sharedLog = await s.logged(everyoneOf(s.ann) ?? "", first.id);
     expect(sharedLog.map((event) => event.kind)).toEqual(["FactPublished", "FactWithdrawn"]);
     expect(JSON.stringify(sharedLog)).not.toContain(now?.contentHash);
     // The other way: a private fact that gains a source others can open is corrected, then shared,
@@ -116,8 +116,8 @@ describeUseCases("where a record ends up when things race or fail", (w) => {
     });
     const before = await s.seenBy(s.ann, word.id);
     await s.calls(s.ann, project)("update_fact", { id: word.id, citations: [CHECKABLE] });
-    expect((await s.seenBy(s.bob, word.id))?.audienceId).toBe(s.ann.sharedAudienceId);
-    const arrived = await s.logged(s.ann.sharedAudienceId ?? "", word.id);
+    expect((await s.seenBy(s.bob, word.id))?.audienceId).toBe(everyoneOf(s.ann));
+    const arrived = await s.logged(everyoneOf(s.ann) ?? "", word.id);
     expect(arrived.map((event) => event.kind)).toEqual(["FactShared"]);
     expect(JSON.stringify(arrived)).not.toContain(before?.contentHash);
   });
@@ -196,7 +196,7 @@ describeUseCases("where a record ends up when things race or fail", (w) => {
     expect(moved).toBe(true);
     expect(await s.seenBy(s.bob, fact.id)).toMatchObject({
       claim: null,
-      audienceId: s.ann.sharedAudienceId,
+      audienceId: everyoneOf(s.ann),
     });
   });
 
@@ -239,7 +239,7 @@ describeUseCases("where a record ends up when things race or fail", (w) => {
       // Every move is written in both logs for each fact of the chain: the merge is far behind.
       const entries = await s.ports.store.review.history(scopeOf(s.ann), first.id, 1000);
       expect(entries.length).toBeGreaterThanOrEqual(2 * moves);
-      expect((await s.seenBy(s.bob, second.id))?.audienceId).toBe(s.ann.sharedAudienceId);
+      expect((await s.seenBy(s.bob, second.id))?.audienceId).toBe(everyoneOf(s.ann));
       await redactFact(s.ports, s.ann, { id: first.id });
       expect(await kindsOf(second.id)).toEqual(["file"]);
       const exported = await exportMarkdown(s.ports, s.bob, project);
@@ -277,7 +277,7 @@ describeUseCases("where a record ends up when things race or fail", (w) => {
     await redactFact(s.ports, s.ann, { id: first.id });
     // The word is gone, so nothing in the chain is unshareable any more: it is where the choice says.
     const theirs = await s.seenBy(s.bob, second.id);
-    expect(theirs?.audienceId).toBe(s.ann.sharedAudienceId);
+    expect(theirs?.audienceId).toBe(everyoneOf(s.ann));
     expect(JSON.stringify(theirs)).not.toContain("REDACT-ME");
   });
 

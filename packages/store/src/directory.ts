@@ -3,24 +3,31 @@ import type {
   Credential,
   CredentialKind,
   DirectoryRepo,
+  Group,
+  GroupMembers,
+  InvitationRecord,
   NewCredential,
+  NewInvitation,
   Person,
-  PersonProject,
   PrincipalSeed,
-  Project,
-  ProjectHoldings,
-  ProjectRef,
-  ProjectsRepo,
-  ReadScope,
-  Treatment,
 } from "@uketsugi/core";
 import type { Selectable } from "kysely";
-import { holdingsIn } from "./forget.ts";
+import { insertCredential, endCredentials } from "./credentials.ts";
+import {
+  addMembers,
+  groupIdsOf,
+  lockHeads,
+  groupRows,
+  insertAudience,
+  joinEveryone,
+} from "./audiences.ts";
 import { inByteOrder, Repo, toBytes, uuidsOf, type Db } from "./codec.ts";
 import type { Database } from "./schema.ts";
-import { didSomething } from "./sessions.ts";
 
-type PrincipalRow = Pick<Selectable<Database["principals"]>, "orgId" | "id" | "displayName">;
+type PrincipalRow = Pick<
+  Selectable<Database["principals"]>,
+  "orgId" | "id" | "displayName" | "removedAt"
+>;
 
 /** How often a token's last use is written: a busy token costs one write a minute, not one a call. */
 const LAST_USE_STEP_MS = 60_000;
@@ -28,94 +35,81 @@ const LAST_USE_STEP_MS = 60_000;
 /** A principal with its private audience and that audience's head row, unless its subject is taken. */
 async function insertPrincipal(db: Db, seed: PrincipalSeed): Promise<void> {
   const { orgId, principalId, audienceId, subject } = seed;
+  // The first principal of an organization made it, and is its administrator.
+  const there = await db
+    .selectFrom("principals")
+    .select("id")
+    .where("orgId", "=", orgId)
+    .executeTakeFirst();
   const created = await db
     .insertInto("principals")
-    .values({ orgId, id: principalId, displayName: seed.displayName, subject })
+    .values({
+      orgId,
+      id: principalId,
+      displayName: seed.displayName,
+      subject,
+      administrator: there === undefined,
+    })
     .onConflict((conflict) => conflict.column("subject").doNothing())
     .returning("id")
     .executeTakeFirst();
   if (created === undefined) return;
-  await insertAudience(db, { orgId, id: audienceId, kind: "private", ownerId: principalId });
-}
-
-/**
- * An audience with its head row, which every unit on it locks, unless an audience it would
- * duplicate exists: an organization has one shared audience (`audiences_one_shared`).
- */
-async function insertAudience(db: Db, audience: Selectable<Database["audiences"]>): Promise<void> {
-  const created = await db
-    .insertInto("audiences")
-    .values(audience)
-    .onConflict((conflict) => conflict.doNothing())
-    .returning("id")
-    .executeTakeFirst();
-  if (created === undefined) return;
-  const { orgId, id: audienceId } = audience;
-  await db.insertInto("audienceHead").values({ orgId, audienceId, lastSeq: 0 }).execute();
-}
-
-async function insertCredential(db: Db, credential: NewCredential): Promise<void> {
-  const { orgId, id, principalId, kind, label, createdAt } = credential;
-  const tokenHash = toBytes(credential.tokenHash);
-  await db
-    .insertInto("credentials")
-    .values({ orgId, id, principalId, kind, label, createdAt, tokenHash })
-    .execute();
-}
-
-/** Ends a person's live credentials at `at`, of one kind or of every kind. Returns how many it ended. */
-async function endCredentials(
-  db: Db,
-  orgId: string,
-  principalId: string,
-  at: Date,
-  kind?: CredentialKind,
-): Promise<number> {
-  const live = db
-    .updateTable("credentials")
-    .where("principalId", "=", principalId)
-    .where("orgId", "=", orgId)
-    .where("revokedAt", "is", null)
-    .set({ revokedAt: at });
-  const ended = await (
-    kind === undefined ? live : live.where("kind", "=", kind)
-  ).executeTakeFirst();
-  return Number(ended.numUpdatedRows);
+  await insertAudience(db, {
+    orgId,
+    id: audienceId,
+    kind: "private",
+    ownerId: principalId,
+    name: null,
+  });
 }
 
 /** Principals, their credentials and their audiences. */
 export class SqlDirectory extends Repo implements DirectoryRepo {
   /**
    * The caller a principal is, signed in with a credential or with none. Their visible set is
-   * their own audience and, once the organization has one, the shared audience.
+   * their own audience and the groups they are a member of. A person who was removed is nobody.
    */
   private async personAs(
     principal: PrincipalRow | undefined,
     credentialId: string | null,
   ): Promise<Caller | null> {
-    if (principal === undefined) return null;
-    const audiences = await this.db
+    if (principal === undefined || principal.removedAt !== null) return null;
+    const own = await this.db
       .selectFrom("audiences")
-      .select(["id", "kind"])
+      .select("id")
       .where("orgId", "=", principal.orgId)
-      .where((eb) => eb.or([eb("ownerId", "=", principal.id), eb("kind", "=", "shared")]))
-      .execute();
-    const own = audiences.find((audience) => audience.kind === "private");
+      .where("kind", "=", "private")
+      .where("ownerId", "=", principal.id)
+      .executeTakeFirst();
     if (own === undefined) return null;
-    const shared = audiences.find((audience) => audience.kind === "shared")?.id ?? null;
+    const rows = await this.db
+      .selectFrom("audienceMembers as m")
+      .innerJoin("audiences as a", (join) =>
+        join.onRef("a.orgId", "=", "m.orgId").onRef("a.id", "=", "m.audienceId"),
+      )
+      .select(["a.id", "a.name"])
+      .where("m.orgId", "=", principal.orgId)
+      .where("m.principalId", "=", principal.id)
+      .orderBy("a.id")
+      .execute();
+    const groups = rows.flatMap((row) =>
+      row.name === null ? [] : [{ id: row.id, name: row.name }],
+    );
     return {
       orgId: principal.orgId,
       principalId: principal.id,
       displayName: principal.displayName,
       credentialId,
       privateAudienceId: own.id,
-      sharedAudienceId: shared,
-      visibleAudienceIds: shared === null ? [own.id] : [own.id, shared],
+      groups,
+      visibleAudienceIds: [own.id, ...groups.map((group) => group.id)],
     };
   }
 
   private principals() {
-    return this.db.selectFrom("principals").select(["orgId", "id", "displayName"]);
+    return this.db
+      .selectFrom("principals")
+      .select(["orgId", "id", "displayName", "removedAt", "administrator"]);
   }
 
   /** A credential's record. Its token's hash never leaves the store. */
@@ -160,14 +154,119 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
 
   async addPerson(
     seed: PrincipalSeed,
-    sharedAudienceId: string,
+    everyoneId: string,
     credentials: readonly NewCredential[],
   ): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
       await insertPrincipal(trx, seed);
-      const shared = { orgId: seed.orgId, id: sharedAudienceId, ownerId: null };
-      await insertAudience(trx, { ...shared, kind: "shared" });
+      await joinEveryone(trx, seed.orgId, everyoneId, seed.principalId);
       for (const credential of credentials) await insertCredential(trx, credential);
+    });
+  }
+
+  async groups(orgId: string): Promise<GroupMembers[]> {
+    const groups = await groupRows(this.db, orgId).orderBy(inByteOrder("name")).execute();
+    const members = await this.db
+      .selectFrom("audienceMembers as m")
+      .innerJoin("principals as p", (join) =>
+        join.onRef("p.orgId", "=", "m.orgId").onRef("p.id", "=", "m.principalId"),
+      )
+      .select(["m.audienceId", "p.id"])
+      .where("m.orgId", "=", orgId)
+      .where("p.removedAt", "is", null)
+      .orderBy("p.id")
+      .execute();
+    return groups.flatMap((group) =>
+      group.name === null
+        ? []
+        : [
+            {
+              id: group.id,
+              name: group.name,
+              members: members.filter((row) => row.audienceId === group.id).map((row) => row.id),
+            },
+          ],
+    );
+  }
+
+  createGroup(orgId: string, group: Group): Promise<boolean> {
+    return this.db.transaction().execute((trx) =>
+      insertAudience(trx, {
+        orgId,
+        id: group.id,
+        kind: "group",
+        ownerId: null,
+        name: group.name,
+      }),
+    );
+  }
+
+  addMember(orgId: string, groupId: string, principalId: string): Promise<void> {
+    return addMembers(this.db, orgId, groupId, principalId);
+  }
+
+  removeMember(orgId: string, groupId: string, principalId: string): Promise<void> {
+    return this.db.transaction().execute(async (trx) => {
+      await lockHeads(trx, orgId, [groupId]);
+      await trx
+        .deleteFrom("audienceMembers")
+        .where("orgId", "=", orgId)
+        .where("audienceId", "=", groupId)
+        .where("principalId", "=", principalId)
+        .execute();
+      // What the person chose to share with the group is theirs alone again.
+      await trx
+        .updateTable("projectChoices")
+        .set({ audienceId: null })
+        .where("orgId", "=", orgId)
+        .where("principalId", "=", principalId)
+        .where("audienceId", "=", groupId)
+        .execute();
+    });
+  }
+
+  async knownSubject(subject: string): Promise<{ orgId: string; removed: boolean } | null> {
+    const row = await this.principals().where("subject", "=", subject).executeTakeFirst();
+    return row === undefined ? null : { orgId: row.orgId, removed: row.removedAt !== null };
+  }
+
+  async addInvitation(invitation: NewInvitation): Promise<void> {
+    const { orgId, id, createdBy, createdAt, expiresAt } = invitation;
+    const tokenHash = toBytes(invitation.tokenHash);
+    await this.db
+      .insertInto("invitations")
+      .values({ orgId, id, tokenHash, createdBy, createdAt, expiresAt, usedAt: null })
+      .execute();
+  }
+
+  async invitation(tokenHash: string): Promise<InvitationRecord | null> {
+    const row = await this.db
+      .selectFrom("invitations")
+      .select(["orgId", "expiresAt", "usedAt"])
+      .where("tokenHash", "=", toBytes(tokenHash))
+      .executeTakeFirst();
+    return row ?? null;
+  }
+
+  async joinWithInvitation(
+    seed: PrincipalSeed,
+    everyoneId: string,
+    tokenHash: string,
+    at: Date,
+  ): Promise<boolean> {
+    return this.db.transaction().execute(async (trx) => {
+      const used = await trx
+        .updateTable("invitations")
+        .set({ usedAt: at })
+        .where("tokenHash", "=", toBytes(tokenHash))
+        .where("orgId", "=", seed.orgId)
+        .where("usedAt", "is", null)
+        .where("expiresAt", ">", at)
+        .executeTakeFirst();
+      if (used.numUpdatedRows === 0n) return false;
+      await insertPrincipal(trx, seed);
+      await joinEveryone(trx, seed.orgId, everyoneId, seed.principalId);
+      return true;
     });
   }
 
@@ -199,6 +298,13 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
         .where("removedAt", "is", null)
         .executeTakeFirst();
       if (gone.numUpdatedRows === 0n) return 0;
+      const groups = await groupIdsOf(trx, orgId, id);
+      await lockHeads(trx, orgId, groups);
+      await trx
+        .deleteFrom("audienceMembers")
+        .where("orgId", "=", orgId)
+        .where("principalId", "=", id)
+        .execute();
       return endCredentials(trx, orgId, id, at);
     });
   }
@@ -319,118 +425,5 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
       .where("id", "in", ids)
       .execute();
     return new Map(rows.map((row) => [row.id, row.displayName]));
-  }
-}
-
-/** An organization's projects, each known by its key, and each person's choice for theirs. */
-export class SqlProjects extends Repo implements ProjectsRepo {
-  holdings(scope: ReadScope, person: string, project: string): Promise<ProjectHoldings> {
-    return holdingsIn(this.db, scope, person, project);
-  }
-
-  private of(orgId: string) {
-    return this.db
-      .selectFrom("projects")
-      .select(["orgId", "key", "kind"])
-      .where("orgId", "=", orgId);
-  }
-
-  async find(orgId: string, key: string): Promise<Project | null> {
-    return (await this.of(orgId).where("key", "=", key).executeTakeFirst()) ?? null;
-  }
-
-  async ensure(orgId: string, ref: ProjectRef): Promise<Project> {
-    const known = await this.find(orgId, ref.key);
-    if (known !== null) return known;
-    await this.db
-      .insertInto("projects")
-      .values({ orgId, key: ref.key, kind: ref.kind })
-      .onConflict((conflict) => conflict.columns(["orgId", "key"]).doNothing())
-      .execute();
-    const stored = await this.find(orgId, ref.key);
-    if (stored === null) throw new Error(`the project ${ref.key} could not be created`);
-    return stored;
-  }
-
-  listOf(orgId: string, principalId: string): Promise<PersonProject[]> {
-    return this.db
-      .selectFrom("projects as p")
-      .leftJoin("projectChoices as c", (join) =>
-        join
-          .onRef("c.orgId", "=", "p.orgId")
-          .onRef("c.project", "=", "p.key")
-          .on("c.principalId", "=", principalId),
-      )
-      .select(["p.orgId", "p.key", "p.kind"])
-      .select(["c.treatment as choice", "c.displayName"])
-      .where("p.orgId", "=", orgId)
-      .where((eb) =>
-        eb.or([
-          eb("c.treatment", "is not", null),
-          eb.exists(
-            eb
-              .selectFrom("sessions as s")
-              .select("s.id")
-              .whereRef("s.orgId", "=", "p.orgId")
-              .whereRef("s.project", "=", "p.key")
-              .where("s.principalId", "=", principalId)
-              .where(didSomething("s")),
-          ),
-        ]),
-      )
-      .orderBy(inByteOrder("p.key"))
-      .execute();
-  }
-
-  async nameFor(orgId: string, principalId: string, name: string): Promise<string | null> {
-    const row = await this.db
-      .selectFrom("projectNames")
-      .select("project")
-      .where("orgId", "=", orgId)
-      .where("principalId", "=", principalId)
-      .where("name", "=", name)
-      .executeTakeFirst();
-    return row?.project ?? null;
-  }
-
-  async otherNames(orgId: string, principalId: string): Promise<Map<string, string[]>> {
-    const rows = await this.db
-      .selectFrom("projectNames")
-      .select(["project", "name"])
-      .where("orgId", "=", orgId)
-      .where("principalId", "=", principalId)
-      .orderBy(inByteOrder("name"))
-      .execute();
-    const names = new Map<string, string[]>();
-    for (const { project, name } of rows) names.set(project, [...(names.get(project) ?? []), name]);
-    return names;
-  }
-
-  async choice(orgId: string, principalId: string, project: string): Promise<Treatment | null> {
-    const row = await this.db
-      .selectFrom("projectChoices")
-      .select("treatment")
-      .where("orgId", "=", orgId)
-      .where("principalId", "=", principalId)
-      .where("project", "=", project)
-      .executeTakeFirst();
-    return row?.treatment ?? null;
-  }
-
-  async choose(
-    orgId: string,
-    principalId: string,
-    project: string,
-    treatment: Treatment,
-    displayName?: string,
-  ): Promise<void> {
-    const named = displayName === undefined ? {} : { displayName };
-    await this.db
-      .insertInto("projectChoices")
-      .values({ orgId, principalId, project, treatment, ...named })
-      .onConflict((conflict) =>
-        conflict.columns(["orgId", "principalId", "project"]).doUpdateSet({ treatment, ...named }),
-      )
-      .execute();
   }
 }

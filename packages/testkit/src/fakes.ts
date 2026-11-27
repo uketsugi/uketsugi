@@ -134,3 +134,10 @@ export class FakeRunner implements ModelRunner {
     return Promise.resolve({ output, inputTokens, outputTokens: 10 });
   }
 }
+
+/** The id of the group `everyone` among a caller's groups: what a store of one shared audience called the shared audience. Null while the organization has one person. */
+export function everyoneOf(caller: {
+  readonly groups: readonly { id: string; name: string }[];
+}): string | null {
+  return caller.groups.find((group) => group.name === "everyone")?.id ?? null;
+}

@@ -1,8 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { sql } from "kysely";
 import type { Move, Store, Unit, UnitTarget, UnitWrites } from "@uketsugi/core";
 import { behindOf } from "./chain.ts";
 import { actorColumns, scoped, uuidsOf, type Db } from "./codec.ts";
-import { SqlDirectory, SqlProjects } from "./directory.ts";
+import { groupIdsOf } from "./audiences.ts";
+import { SqlDirectory } from "./directory.ts";
+import { SqlProjects } from "./projects.ts";
 import { SqlFacts, SqlUnitFacts } from "./facts.ts";
 import { forgetProject } from "./forget.ts";
 import { joinProject, sharedRecords } from "./join.ts";
@@ -13,8 +16,10 @@ import { SqlSessions } from "./sessions.ts";
 import { SqlTasks, SqlUnitTasks } from "./tasks.ts";
 
 /**
- * The head rows a unit holds: its own audience's, and the shared audience's once it has reached
- * it. A head row is its audience's write lock and the sequence of its log.
+ * The head rows a unit holds: its own audience's first, and the groups' once it has reached them,
+ * in the order of the groups' ids: a unit that asks for one out of that order is refused, so that
+ * no two units wait for each other. A head row is its audience's write lock and the sequence of
+ * its log.
  */
 class Heads {
   private readonly trx: Db;
@@ -36,6 +41,9 @@ class Heads {
   /** Locks an audience's head: a second unit that wants it waits here until this one ends. */
   async lock(audienceId: string): Promise<void> {
     if (this.held.has(audienceId)) return;
+    const last = [...this.held.keys()].slice(1).at(-1);
+    if (last !== undefined && audienceId < last)
+      throw new Error("a unit takes the heads of groups in the order of their ids");
     const head = await this.head(audienceId).select("lastSeq").forUpdate().executeTakeFirst();
     if (head === undefined) throw new Error("a unit was opened on an audience that does not exist");
     this.held.set(audienceId, { stored: head.lastSeq, last: head.lastSeq });
@@ -139,7 +147,20 @@ function writesOn(trx: Db, target: UnitTarget, heads: Heads): UnitWrites {
 }
 
 const PERSONS_ONLY =
-  "only a unit opened on a person's own audience reads their choice or reaches the shared audience";
+  "only a unit opened on a person's own audience reads their choice or reaches a group";
+
+/** A unit reaches only the groups its person is a member of: a write racing a removal does not land in one. */
+async function requireMember(
+  trx: Db,
+  orgId: string,
+  groupId: string,
+  person: string,
+): Promise<void> {
+  const { rows } = await sql`select 1 from audience_members
+    where org_id = ${orgId} and audience_id = ${groupId} and principal_id = ${person}`.execute(trx);
+  if (rows.length === 0)
+    throw new Error("a unit reaches only the groups its person is a member of");
+}
 
 /** A unit over an open transaction that holds the head of the audience it was opened on. */
 function unitOver(trx: Db, target: UnitTarget, heads: Heads): Unit {
@@ -162,22 +183,37 @@ function unitOver(trx: Db, target: UnitTarget, heads: Heads): Unit {
   };
   const unit: Unit = {
     ...writesOn(trx, target, heads),
-    async on(sharedAudienceId) {
-      if (!heads.holds(sharedAudienceId)) {
-        await person();
-        const shared = await audiences()
+    async on(groupId) {
+      if (!heads.holds(groupId)) {
+        const owner = await person();
+        const group = await audiences()
           .select("id")
-          .where("id", "=", sharedAudienceId)
-          .where("kind", "=", "shared")
+          .where("id", "=", groupId)
+          .where("kind", "=", "group")
           .executeTakeFirst();
-        if (shared === undefined)
-          throw new Error("a unit reaches no audience but its organization's shared one");
-        await heads.lock(sharedAudienceId);
+        if (group === undefined)
+          throw new Error("a unit reaches no audience but its organization's groups");
+        await heads.lock(groupId);
+        // Read once the head is held: a removal takes the head too, so it is either done by now, and
+        // seen here, or waits for this unit.
+        await requireMember(trx, orgId, groupId, owner);
       }
-      return writesOn(trx, { ...target, audienceId: sharedAudienceId }, heads);
+      return writesOn(trx, { ...target, audienceId: groupId }, heads);
+    },
+    async audienceOf(kind, id) {
+      const [wanted] = uuidsOf([id]);
+      if (wanted === undefined) return null;
+      const owner = await person();
+      const table = sql.table(kind === "fact" ? "facts" : "tasks");
+      const { rows } = await sql<{ audienceId: string }>`select audience_id as "audienceId"
+        from ${table} where org_id = ${orgId} and id = ${wanted}
+        and (audience_id = ${audienceId} or audience_id in (
+          select audience_id from audience_members
+          where org_id = ${orgId} and principal_id = ${owner}))`.execute(trx);
+      return rows[0]?.audienceId ?? null;
     },
     choice: async (project) => choices.choice(orgId, await person(), project),
-    choose: async (project, treatment) => choices.choose(orgId, await person(), project, treatment),
+    choose: async (project, groupId) => choices.choose(orgId, await person(), project, groupId),
     async forgetProject(project) {
       return forgetProject(trx, target, await person(), project);
     },
@@ -186,17 +222,17 @@ function unitOver(trx: Db, target: UnitTarget, heads: Heads): Unit {
       if (other === audienceId || (move.from !== audienceId && move.to !== audienceId))
         throw new Error("a move runs between the unit's audience and one other audience");
       if (!heads.holds(other))
-        throw new Error("a move runs to or from the shared audience the unit has reached");
+        throw new Error("a move runs to or from a group the unit has reached");
       return moveRecords(trx, orgId, move);
     },
     async joinProject(from, into) {
-      const shared = await audiences().select("id").where("kind", "=", "shared").executeTakeFirst();
-      if (shared !== undefined) {
-        await unit.on(shared.id);
-        const records = await sharedRecords(trx, orgId, shared.id, from);
-        if (records > 0) return { shared: records };
-      }
-      return joinProject(trx, target, await person(), from, into);
+      const owner = await person();
+      // The person's groups, their heads taken in order: nothing is written into them meanwhile.
+      const groups = await groupIdsOf(trx, orgId, owner);
+      for (const group of groups) await unit.on(group);
+      const records = await sharedRecords(trx, orgId, owner, from);
+      if (records > 0) return { shared: records };
+      return joinProject(trx, target, owner, from, into);
     },
   };
   return unit;

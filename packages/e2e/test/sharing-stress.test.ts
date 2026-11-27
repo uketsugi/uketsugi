@@ -24,7 +24,7 @@ import {
   type CorePorts,
   type Fact,
 } from "@uketsugi/core";
-import { toolCaller, type ToolCaller } from "@uketsugi/testkit";
+import { everyoneOf, toolCaller, type ToolCaller } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { sharedWorld, type Shared } from "./sharing-world.ts";
 import { CLIENT, describeUseCases, type World } from "./use-case-world.ts";
@@ -246,7 +246,7 @@ async function everyFact(run: Run, audienceIds: string[]): Promise<Fact[]> {
  */
 function misplaced(me: Person, treatment: string | undefined, every: readonly Fact[]): string[] {
   const found: string[] = [];
-  const sharedId = me.who.sharedAudienceId ?? "";
+  const sharedId = everyoneOf(me.who) ?? "";
   const byId = new Map(every.map((fact) => [fact.id, fact]));
   const headOf = (fact: Fact): Fact => {
     let at = fact;
@@ -281,7 +281,7 @@ function misplaced(me: Person, treatment: string | undefined, every: readonly Fa
 }
 
 async function misplacedTasks(run: Run, me: Person, treatment: string | undefined) {
-  const sharedId = me.who.sharedAudienceId ?? "";
+  const sharedId = everyoneOf(me.who) ?? "";
   const scope = { orgId: me.who.orgId, audienceIds: [me.who.privateAudienceId, sharedId] };
   const query = { project: PROJECT, person: me.who.principalId, limit: 2000 };
   const tasks = await run.ports.store.tasks.list(scope, query);
@@ -354,7 +354,7 @@ describeUseCases("two people, their agents, their own hands and the worker at on
     await Promise.all([working, jobs(w, run, () => done)]);
 
     // At rest.
-    const sharedId = s.ann.sharedAudienceId ?? "";
+    const sharedId = everyoneOf(s.ann) ?? "";
     const every = await everyFact(run, [
       s.ann.privateAudienceId,
       s.bob.privateAudienceId,

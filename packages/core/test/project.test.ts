@@ -160,7 +160,7 @@ describe("the project a hook names", () => {
 /** A store's projects held in a map: all `resolveProject` asks of it. */
 function projectsOf() {
   const known = new Map<string, Project>();
-  const choices = new Map<string, "private" | "shared">();
+  const choices = new Map<string, { groupId: string | null }>();
   const store = {
     projects: {
       ensure: (_org: string, ref: ProjectRef) => {
@@ -171,8 +171,8 @@ function projectsOf() {
       find: (_org: string, key: string) => Promise.resolve(known.get(key) ?? null),
       choice: (_org: string, who: string, key: string) =>
         Promise.resolve(choices.get(`${who}|${key}`) ?? null),
-      choose: (_org: string, who: string, key: string, treatment: "private" | "shared") => {
-        choices.set(`${who}|${key}`, treatment);
+      choose: (_org: string, who: string, key: string, groupId: string | null) => {
+        choices.set(`${who}|${key}`, { groupId });
         return Promise.resolve();
       },
       listOf: () => Promise.resolve([]),
@@ -188,9 +188,9 @@ describe("resolving a path project", () => {
     const { ports, choices } = projectsOf();
     const ref: ProjectRef = { kind: "path", key: "file://box/x" };
     expect(await resolveProject(ports, person("ann"), ref)).toMatchObject(ref);
-    expect(choices.get("ann|file://box/x")).toBe("private");
+    expect(choices.get("ann|file://box/x")).toEqual({ groupId: null });
     expect(choices.has("bo|file://box/x")).toBe(false);
     await resolveProject(ports, person("bo"), ref);
-    expect(choices.get("bo|file://box/x")).toBe("private");
+    expect(choices.get("bo|file://box/x")).toEqual({ groupId: null });
   });
 });

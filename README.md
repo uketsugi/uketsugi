@@ -432,6 +432,16 @@ the server and ends every credential of theirs: what they shared stays under the
 private to them stays and nobody can reach it. Once you are the only person left, the harnesses on
 the server's own machine need no token again.
 
+**Groups.** Everyone on the server is in the group `everyone`, and a project is shared with `everyone`
+unless its person picks another group. The person who made the organization (on your own server,
+you) makes other groups on the dashboard's Groups page and says who is in them. Each person shares
+a project with one group they are in, and only that group's members see it: the others in the
+organization see none of its facts, tasks or search results. A person taken out of a group sees none
+of its projects from then on, and what they published there stays under their name. On a server
+where people sign in through a provider, the same page makes an invitation link that puts the person
+who opens it, once, into the organization; the provider's own list of who may sign in still decides
+who may use the service.
+
 **Who needs a token.** A server that listens only on its own machine takes its one person's
 harnesses there by their address alone, and `ukt setup`, `ukt doctor` and the Connect page say
 whether it does. From the first person you add, every harness sends a token, yours included, and

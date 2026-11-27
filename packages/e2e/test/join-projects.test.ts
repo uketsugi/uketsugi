@@ -216,8 +216,10 @@ describeUseCases("joining a project on a server of two people", (w) => {
   });
 
   describe("the person's choice for the old project", () => {
-    const choiceOf = (project: string) =>
-      s.ports.store.projects.choice(s.ann.orgId, s.ann.principalId, project);
+    const choiceOf = async (project: string) => {
+      const choice = await s.ports.store.projects.choice(s.ann.orgId, s.ann.principalId, project);
+      return choice === null ? null : choice.groupId === null ? "private" : "shared";
+    };
     /** A project of Ann's with a session, an empty choice for it of `treatment` where given. */
     async function used(old: string, treatment?: "private" | "shared") {
       await s.calls(s.ann, old)("search_facts", { query: "anything" });

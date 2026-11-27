@@ -12,6 +12,7 @@ import {
   redactFact,
   revertRuling,
 } from "@uketsugi/core";
+import { everyoneOf } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { CHECKABLE, sharedWorld, TESTIMONY } from "./sharing-world.ts";
 import { describeUseCases } from "./use-case-world.ts";
@@ -53,7 +54,7 @@ describeUseCases("sharing a project between two people", (w) => {
     const step = await ann("publish_task", { title: "Read retry.ts first", tracked: true });
     expect(cited.text).toContain(`project: ${P(1)} · used here, shared`);
     expect(cited.brief).toBeUndefined();
-    const shared = s.ann.sharedAudienceId;
+    const shared = everyoneOf(s.ann);
     expect((await s.seenBy(s.ann, early.id))?.audienceId).toBe(shared);
     expect((await s.seenBy(s.ann, cited.id))?.audienceId).toBe(shared);
     expect((await s.seenBy(s.ann, word.id))?.audienceId).toBe(s.ann.privateAudienceId);
@@ -103,7 +104,7 @@ describeUseCases("sharing a project between two people", (w) => {
       citations: [{ kind: "fact", fact: fact.id }, "src/sign.ts:4"],
     });
     expect(built.citations.map((citation) => citation.class)).toEqual(["checkable", "checkable"]);
-    expect((await s.seenBy(s.ann, built.id))?.audienceId).toBe(s.ann.sharedAudienceId);
+    expect((await s.seenBy(s.ann, built.id))?.audienceId).toBe(everyoneOf(s.ann));
     const claimed = await bob("claim_task", { id: task.task.id });
     await bob("update_task", {
       id: task.task.id,
@@ -177,7 +178,7 @@ describeUseCases("sharing a project between two people", (w) => {
       "FactRewritten",
       "FactPublished",
     ]);
-    const inShared = await s.logged(s.ann.sharedAudienceId ?? "", fact.id);
+    const inShared = await s.logged(everyoneOf(s.ann) ?? "", fact.id);
     expect(inShared.map((event) => [event.kind, event.payload])).toEqual([["FactShared", {}]]);
     const inPrivate = await s.logged(s.ann.privateAudienceId, fact.id);
     expect(inPrivate.at(-1)).toMatchObject({ kind: "FactShared", payload: { left: true } });
@@ -189,7 +190,7 @@ describeUseCases("sharing a project between two people", (w) => {
         .flatMap((event) => Object.keys(event.payload))
         .filter((key) => /hash|before|after/i.test(key));
     expect(hashes(await s.logged(s.ann.privateAudienceId, fact.id))).toEqual([]);
-    expect(hashes(await s.logged(s.ann.sharedAudienceId ?? "", fact.id))).toEqual([]);
+    expect(hashes(await s.logged(everyoneOf(s.ann) ?? "", fact.id))).toEqual([]);
     expect(await kinds(s.bob, fact.id)).toEqual(["FactRedacted", "FactShared"]);
   });
 
@@ -208,7 +209,7 @@ describeUseCases("sharing a project between two people", (w) => {
     expect((await s.seenBy(s.ann, first.id))?.supersededBy).toBe(second.id);
     w.clock.advance(60_000);
     expect((await s.choose(s.ann, P(5), "shared")).moved.facts).toBe(1);
-    const shared = s.ann.sharedAudienceId;
+    const shared = everyoneOf(s.ann);
     expect((await s.seenBy(s.bob, first.id))?.audienceId).toBe(shared);
     expect((await s.seenBy(s.bob, second.id))?.audienceId).toBe(shared);
 
@@ -270,7 +271,7 @@ describeUseCases("sharing a project between two people", (w) => {
     });
     expect((await s.choose(s.ann, P(7), "shared")).moved.facts).toBe(2);
     const where = async (id: string) => (await s.seenBy(s.ann, id))?.audienceId;
-    const [own, shared] = [s.ann.privateAudienceId, s.ann.sharedAudienceId];
+    const [own, shared] = [s.ann.privateAudienceId, everyoneOf(s.ann)];
     expect(
       await Promise.all([word, onWord, source, onSource].map((fact) => where(fact.id))),
     ).toEqual([own, own, shared, shared]);
@@ -323,7 +324,7 @@ describeUseCases("a host with one person", (w) => {
     expect(published.text).toContain("used here, private");
     expect(published.brief?.notice).toBeUndefined();
     expect(published.text).not.toContain("has not chosen");
-    expect(w.owner).toMatchObject({ sharedAudienceId: null });
+    expect(w.owner).toMatchObject({ groups: [] });
     expect((await w.factOf(published.id)).audienceId).toBe(w.owner.privateAudienceId);
     expect(await listProjects(w.portsWith(null), w.owner)).toMatchObject({ sharing: false });
     const { chooseTreatment } = await import("@uketsugi/core");

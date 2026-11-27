@@ -16,6 +16,11 @@ import {
   type FactCorrected,
   type FactDetail,
   type FactPage,
+  type GroupChanged,
+  type GroupList,
+  type GroupMember,
+  type GroupNamed,
+  type JoinLink,
   type NewProjectRequest,
   type NoteRemoved,
   type ProjectChoice,
@@ -136,6 +141,11 @@ export const connectQuery = queryOptions({
   queryKey: ["connect"],
   queryFn: () => request<ConnectInfo>("/api/connect"),
   staleTime: Infinity,
+});
+
+export const groupsQuery = queryOptions({
+  queryKey: ["groups"],
+  queryFn: () => request<GroupList>("/api/groups"),
 });
 
 export const projectsQuery = queryOptions({
@@ -296,6 +306,36 @@ export function chooseTreatment(
   csrf: string,
 ): Promise<ProjectChoice> {
   return request<ProjectChoice>("/api/projects/choice", {}, { method: "POST", csrf, body: choice });
+}
+
+/** Makes a group of the organization's people: its administrator's alone. */
+export function makeGroup(group: GroupNamed, csrf: string): Promise<GroupChanged> {
+  return request<GroupChanged>("/api/groups", {}, { method: "POST", csrf, body: group });
+}
+
+/** Adds a person to a group. */
+export function addToGroup(
+  group: string,
+  member: GroupMember,
+  csrf: string,
+): Promise<GroupChanged> {
+  const path = `/api/groups/${encodeURIComponent(group)}/members`;
+  return request<GroupChanged>(path, {}, { method: "POST", csrf, body: member });
+}
+
+/** Takes a person out of a group; out of `everyone` is out of the organization. */
+export function removeFromGroup(
+  group: string,
+  person: string,
+  csrf: string,
+): Promise<GroupChanged> {
+  const path = `/api/groups/${encodeURIComponent(group)}/members/${encodeURIComponent(person)}/remove`;
+  return request<GroupChanged>(path, {}, { method: "POST", csrf });
+}
+
+/** Makes an invitation link to the person's organization, where the server signs people in through a provider. */
+export function makeJoinLink(csrf: string): Promise<JoinLink> {
+  return request<JoinLink>("/api/join-links", {}, { method: "POST", csrf });
 }
 
 /** Joins one of the person's projects into another: it cannot be undone. */

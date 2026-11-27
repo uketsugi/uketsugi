@@ -53,7 +53,7 @@ function FactCell({ fact }: { fact: ApiFact }) {
         {count === 1 ? "1 citation" : `${count} citations`} · by {fact.author}
         {fact.from_session === null ? "" : `, written by a model from session ${fact.from_session}`}
         {project === undefined ? ` · ${fact.project}` : ""}
-        <SeenByMark audience={fact.audience} />
+        <SeenByMark audience={fact.audience} group={fact.group} />
         <FlagMarks flags={fact.flags} />
       </p>
     </div>

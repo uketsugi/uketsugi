@@ -82,6 +82,12 @@ export interface Edition {
    * routes. A route that does not answer lets the request fall through to them.
    */
   readonly routes?: (host: EditionHost) => Hono;
+  /**
+   * Where a person joins the organization of whoever invited them: the address that carries an
+   * invitation's secret. An edition that signs people in itself has it, and its dashboard offers the
+   * administrator the link (`POST /api/join-links`); left out, there is no such route.
+   */
+  readonly joinLink?: (secret: string) => string;
 }
 
 /** The open edition. */

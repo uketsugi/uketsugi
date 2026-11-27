@@ -7,7 +7,6 @@ import {
   JOB_KINDS,
   PROJECT_KINDS,
   RULING_DECISIONS,
-  TREATMENTS,
 } from "@uketsugi/core";
 import { sql } from "kysely";
 import ts from "typescript";
@@ -29,7 +28,6 @@ const CODED: Record<string, readonly string[]> = {
   "audiences.kind": AUDIENCE_KINDS,
   "credentials.kind": CREDENTIAL_KINDS,
   "projects.kind": PROJECT_KINDS,
-  "project_choices.treatment": TREATMENTS,
   "facts.status": declared("status", "enum"),
   "flags.kind": declared("flagKind", "enum"),
   "events.kind": EVENT_KINDS,

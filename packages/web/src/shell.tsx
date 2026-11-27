@@ -59,6 +59,7 @@ const NAV = [
     heading: "This install",
     pages: [
       { to: "/projects", name: "Projects" },
+      { to: "/groups", name: "Groups" },
       { to: "/connect", name: "Connect" },
     ],
   },

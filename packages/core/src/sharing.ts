@@ -1,24 +1,35 @@
 /**
  * Where a person's records live on a server with several people. Each person has a private
- * audience, and the server has one shared audience that everyone reads. A person chooses per
- * project whether to share it; until they do, it is private. In a shared project, what the person
- * publishes that nothing holds back (`heldBack`: a fact others can check, and a task that is not a
- * step of their own plan) is in the shared audience, and everything else is theirs alone. A call writes to
- * a shared record only from a project its person shares, so nothing of a person who keeps a
- * project private reaches anyone else. A host with one person has no shared audience: nothing is
- * asked there, and everything is private.
+ * audience, and belongs to groups, each an audience its members read. A person chooses per
+ * project whether to share it, and with which group; until they do, it is private. In a shared
+ * project, what the person publishes that nothing holds back (`heldBack`: a fact others can
+ * check, and a task that is not a step of their own plan) is in the group's audience, and
+ * everything else is theirs alone. A call writes to a record of a group only from a project its
+ * person shares with that group, so nothing of a person who keeps a project private reaches
+ * anyone else. A host with one person has no group: nothing is asked there, and everything is
+ * private.
  *
  * All of it is decided under one lock. A person's write opens its unit on their own audience
  * (`asPerson`), whose head row every write of theirs and every choice of theirs takes first; the
- * choice is read inside that unit, and the shared audience is reached from it. So where a record
- * lands, and every move of it, follows the choice as it stands at that moment, in one transaction.
+ * choice is read inside that unit, and the group is reached from it. So where a record lands,
+ * and every move of it, follows the choice as it stands at that moment, in one transaction.
  */
 import type { PrivateBecause } from "@uketsugi/contracts";
 import { personActor, scopeOf } from "./context.ts";
-import type { Actor, Caller, ClassedCitation, Fact, Task, Treatment } from "./domain.ts";
+import {
+  EVERYONE,
+  type Actor,
+  type Caller,
+  type Choice,
+  type ClassedCitation,
+  type Fact,
+  type Group,
+  type Task,
+  type Treatment,
+} from "./domain.ts";
 import { citedBy } from "./facts/citations.ts";
 import { isLive } from "./facts/duplicates.ts";
-import { forbidden } from "./failure.ts";
+import { forbidden, unsupported } from "./failure.ts";
 import type { CorePorts } from "./ports.ts";
 import type { Unit, UnitWrites } from "./store-port.ts";
 
@@ -27,28 +38,37 @@ import type { Unit, UnitWrites } from "./store-port.ts";
  * asked and everything is private. The one place that asks.
  */
 export function canShare(caller: Caller): boolean {
-  return caller.sharedAudienceId !== null;
+  return caller.groups.length > 0;
 }
 
-/** Who can see a record the reader can see: everyone on the server, or the reader alone. */
+/** The group of the reader that holds a record the reader can see; none for their own. */
+export function groupOf(reader: Caller, record: { readonly audienceId: string }): Group | null {
+  return reader.groups.find((group) => group.id === record.audienceId) ?? null;
+}
+
+/** Who can see a record the reader can see: a group of theirs, or the reader alone. */
 export function audienceOf(
   reader: Caller,
   record: { readonly audienceId: string },
 ): "private" | "shared" {
-  return record.audienceId === reader.sharedAudienceId ? "shared" : "private";
+  return groupOf(reader, record) === null ? "private" : "shared";
 }
 
 /** How a person treats a project, and whether that is their choice or the standing default. */
 export interface Standing {
   readonly treatment: Treatment;
+  /** The group the project is shared with: set exactly when `treatment` is `shared`. */
+  readonly group: Group | null;
   /** False while the person could choose and has not: the project is private until they do. */
   readonly chosen: boolean;
 }
 
 /** What a person's stored choice for a project means. Where there is nobody to share with, nothing is to be chosen. */
-export function standing(caller: Caller, choice: Treatment | null): Standing {
-  if (!canShare(caller)) return { treatment: "private", chosen: true };
-  return { treatment: choice ?? "private", chosen: choice !== null };
+export function standing(caller: Caller, choice: Choice | null): Standing {
+  if (!canShare(caller)) return { treatment: "private", group: null, chosen: true };
+  // A choice of a group the person has left is no longer one: the project is private again.
+  const group = caller.groups.find((member) => member.id === choice?.groupId) ?? null;
+  return { treatment: group === null ? "private" : "shared", group, chosen: choice !== null };
 }
 
 /**
@@ -77,13 +97,20 @@ export interface Place {
   /** The project the write is in, and how the person treats it now. It cannot change before the unit ends. */
   readonly project: string;
   readonly treatment: Treatment;
+  /** The group the person shares the project with, as their choice stands in the unit; null when it is private. */
+  readonly group: Group | null;
   /** The unit, open on the person's own audience. */
   readonly own: Unit;
   /**
-   * The shared audience's writes, whose head is locked the first time they are asked for; null
-   * on a host with one person.
+   * The writes of the group the project is shared with, whose head is locked the first time they
+   * are asked for; null while the project is private.
    */
   shared(): Promise<UnitWrites | null>;
+  /**
+   * The writes of a group of the person's, whose head is locked the first time. Heads are taken
+   * in the order of the groups' ids, which is how no two units wait for each other's.
+   */
+  reach(groupId: string): Promise<UnitWrites>;
 }
 
 /** Whose write, in which project, at what instant, and who a move it makes is logged as (the person, by default). */
@@ -107,12 +134,33 @@ export function asPerson<T>(
   const { caller, project, at, by = personActor(who.caller) } = who;
   const target = { orgId: caller.orgId, audienceId: caller.privateAudienceId, at };
   return ports.store.unit(target, async (own) => {
-    const sharedId = caller.sharedAudienceId;
-    const treatment = sharedId === null ? "private" : ((await own.choice(project)) ?? "private");
-    let reached: Promise<UnitWrites> | undefined;
+    const { group, treatment } = standing(
+      caller,
+      canShare(caller) ? await own.choice(project) : null,
+    );
+    const reached = new Map<string, Promise<UnitWrites>>();
+    const reach = (groupId: string): Promise<UnitWrites> => {
+      if (!caller.groups.some((member) => member.id === groupId))
+        return Promise.reject(new Error("a unit reaches only the groups of its person"));
+      const held = reached.get(groupId);
+      if (held !== undefined) return held;
+      // Heads are taken in the order of the groups' ids; what a call needs is therefore reached
+      // together, first (`holdFacts`), and a group asked for later than a larger one is refused.
+      if ([...reached.keys()].some((taken) => taken > groupId)) {
+        return Promise.reject(
+          unsupported(
+            "This call would write into two of your groups at once, in an order the server cannot take.",
+            "Share the project that holds the fact you cite with the same group, or cite a fact of the group this project is shared with.",
+          ),
+        );
+      }
+      const writes = own.on(groupId);
+      reached.set(groupId, writes);
+      return writes;
+    };
     const shared = (): Promise<UnitWrites | null> =>
-      sharedId === null ? Promise.resolve(null) : (reached ??= own.on(sharedId));
-    return work({ caller, by, at, project, treatment, own, shared });
+      group === null ? Promise.resolve(null) : reach(group.id);
+    return work({ caller, by, at, project, treatment, group, own, shared, reach });
   });
 }
 
@@ -125,24 +173,58 @@ export async function sharedIfSharing(
   project: string = place.project,
 ): Promise<UnitWrites | null> {
   if (!canShare(place.caller)) return null;
-  const treatment = project === place.project ? place.treatment : await place.own.choice(project);
-  return treatment === "shared" ? place.shared() : null;
+  if (project === place.project) return place.treatment === "shared" ? place.shared() : null;
+  const { group } = standing(place.caller, await place.own.choice(project));
+  return group === null ? null : place.reach(group.id);
 }
 
 /**
- * Where a record the caller may see is now: in their own audience, or else in the shared one,
- * whose head is taken only then. `read` finds the record in an audience's writes. Null when
- * neither holds it.
+ * Takes the heads of all of the person's groups, in the order of their ids, and returns their
+ * writes in that order. What a move changes the place of can be a fact of another project, in
+ * another group of theirs, so a unit that may move records has them all before it reads any.
+ */
+export async function reachAll(place: Place): Promise<UnitWrites[]> {
+  const found: UnitWrites[] = [];
+  for (const group of [...place.caller.groups].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    found.push(await place.reach(group.id));
+  }
+  return found;
+}
+
+/**
+ * Takes the heads of every group a write needs before it reads anything: the group its project is
+ * shared with and the group that holds each fact it names, in the order of the groups' ids, which
+ * is the order the store needs. A write that cites a fact of another group of the person's then
+ * succeeds whichever group has the smaller id.
+ */
+export async function holdFacts(place: Place, ids: readonly string[]): Promise<void> {
+  if (!canShare(place.caller)) return;
+  const wanted = new Set<string>(place.group === null ? [] : [place.group.id]);
+  for (const id of ids) {
+    const held = await place.own.audienceOf("fact", id);
+    if (held !== null && held !== place.own.audienceId) wanted.add(held);
+  }
+  for (const group of [...wanted].sort()) await place.reach(group);
+}
+
+/**
+ * Where a record the caller may see is now: in their own audience, or else in the group that
+ * holds it, whose head is taken only then. `read` finds the record in an audience's writes. Null
+ * when neither holds it.
  */
 async function holderOf<T>(
   place: Place,
+  kind: "fact" | "task",
+  id: string,
   read: (writes: UnitWrites) => Promise<T | null>,
 ): Promise<{ writes: UnitWrites; record: T } | null> {
   const mine = await read(place.own);
   if (mine !== null) return { writes: place.own, record: mine };
-  const shared = await place.shared();
-  const theirs = shared === null ? null : await read(shared);
-  return shared === null || theirs === null ? null : { writes: shared, record: theirs };
+  const audienceId = await place.own.audienceOf(kind, id);
+  if (audienceId === null || audienceId === place.own.audienceId) return null;
+  const writes = await place.reach(audienceId);
+  const theirs = await read(writes);
+  return theirs === null ? null : { writes, record: theirs };
 }
 
 /** Where a fact the caller may see is now, and the writes of the audience that holds it. */
@@ -152,7 +234,7 @@ export interface HeldFact {
 }
 
 export async function holderOfFact(place: Place, id: string): Promise<HeldFact | null> {
-  const held = await holderOf(place, (writes) => writes.facts.get(id));
+  const held = await holderOf(place, "fact", id, (writes) => writes.facts.get(id));
   return held === null ? null : { writes: held.writes, fact: held.record };
 }
 
@@ -161,7 +243,7 @@ export async function holderOfTask(
   place: Place,
   id: string,
 ): Promise<{ writes: UnitWrites; task: Task } | null> {
-  const held = await holderOf(place, (writes) => writes.tasks.get(id));
+  const held = await holderOf(place, "task", id, (writes) => writes.tasks.get(id));
   return held === null ? null : { writes: held.writes, task: held.record };
 }
 
@@ -180,7 +262,7 @@ export function onHeldFacts<T>(
   work: (held: ReadonlyMap<string, HeldFact>, place: Place) => Promise<T>,
 ): Promise<T> {
   return asPerson(ports, who, async (place) => {
-    await place.shared();
+    await reachAll(place);
     const held = new Map<string, HeldFact>();
     for (const id of ids) {
       const found = await holderOfFact(place, id);
@@ -292,11 +374,17 @@ export async function seenBy(
   ports: Pick<CorePorts, "store">,
   reader: Caller,
   id: string,
-): Promise<{ audience?: "private" | "shared"; private_because?: PrivateBecause }> {
+): Promise<{
+  audience?: "private" | "shared";
+  group?: string;
+  private_because?: PrivateBecause;
+}> {
   if (!canShare(reader)) return {};
   const fact = await ports.store.facts.get(scopeOf(reader), id);
   if (fact === null) return {};
-  if (audienceOf(reader, fact) === "shared") return { audience: "shared" };
+  const group = groupOf(reader, fact);
+  // `everyone` is the group a server always had, and is not named.
+  if (group !== null) return { audience: "shared", ...namedGroup(group) };
   const because = await privateBecause(ports, reader, fact);
   return { audience: "private", ...(because === null ? {} : { private_because: because }) };
 }
@@ -311,9 +399,21 @@ export async function taskLanding(place: Place, tracked: boolean): Promise<UnitW
  * confirmation, a flag, a claim and a note are all text or a name that everyone would see.
  */
 export function requireSharing(place: Place, writes: UnitWrites, record: string): void {
-  if (writes === place.own || place.treatment === "shared") return;
+  if (writes === place.own || writes.audienceId === place.group?.id) return;
+  const holder = place.caller.groups.find((group) => group.id === writes.audienceId);
+  const sharedWith = place.group === null ? null : sharedWithWords(place.group);
   throw forbidden(
-    `${record} is shared with everyone on this server, and this project is private for your person.`,
-    "Read it freely. To confirm, flag, claim or note what others shared here, your person first shares the project on the dashboard's Projects page; an agent cannot make that choice.",
+    `${record} is shared with ${holder === undefined ? "others" : sharedWithWords(holder)}, and this project is ${sharedWith === null ? "private for your person" : `shared with ${sharedWith}, not with them`}.`,
+    `Read it freely. To confirm, flag, claim or note what others shared here, your person first shares the project${place.group === null || holder === undefined ? "" : ` with ${sharedWithWords(holder)}`} on the dashboard's Projects page; an agent cannot make that choice.`,
   );
+}
+
+/** The name a result or a page gives a group: none for `everyone`, which is what a server always said. */
+export function namedGroup(group: Group | null): { group?: string } {
+  return group === null || group.name === EVERYONE ? {} : { group: group.name };
+}
+
+/** Who a group is, as a sentence says it: `everyone` is what a server with one shared audience always said. */
+export function sharedWithWords(group: Group): string {
+  return group.name === EVERYONE ? "everyone on this server" : `the group ${group.name}`;
 }

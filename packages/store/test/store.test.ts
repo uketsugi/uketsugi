@@ -2,6 +2,7 @@ import type { Store } from "@uketsugi/core";
 import {
   createTestDatabase,
   describeModelStepConformance,
+  describeGroupConformance,
   describeMoveConformance,
   describeStoreConformance,
   describeTaskStoreConformance,
@@ -15,6 +16,7 @@ import { sampleOwner } from "./support/sample.ts";
 
 describeStoreConformance("embedded PostgreSQL", { open: () => openEmbeddedStore() });
 describeMoveConformance("embedded PostgreSQL", { open: () => openEmbeddedStore() });
+describeGroupConformance("embedded PostgreSQL", { open: () => openEmbeddedStore() });
 
 /** A store on a database of its own, which goes when the store closes. */
 async function openOnServer(): Promise<Store & { readonly database: string }> {
@@ -35,6 +37,7 @@ describe.runIf(TEST_POSTGRES_URL !== "")("on a server", () => {
   const harness = { open: () => openOnServer() };
   describeStoreConformance("PostgreSQL server", harness);
   describeMoveConformance("PostgreSQL server", harness);
+  describeGroupConformance("PostgreSQL server", harness);
   describeTaskStoreConformance("PostgreSQL server", harness);
   describeModelStepConformance("PostgreSQL server", harness);
 

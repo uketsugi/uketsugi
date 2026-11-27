@@ -41,6 +41,15 @@ export {
   revokeToken,
   RevokedTokenError,
 } from "./identity.ts";
+export {
+  acceptInvitation,
+  addToGroup,
+  INVITATION_DAYS,
+  listGroups,
+  makeGroup,
+  makeInvitation,
+  removeFromGroup,
+} from "./groups.ts";
 export { newSession, SESSION_IDLE_MS, type ClientInfo } from "./sessions.ts";
 export { createNamedProject, hookProject, listProjects } from "./project.ts";
 export { listRulings, revertRuling } from "./facts/rulings.ts";

@@ -11,6 +11,7 @@ import {
   type ConnectInfo,
   type DashboardSession,
   type FactDetail,
+  type GroupList,
   type ProjectList,
   type RulingList,
   type TaskDetail,
@@ -389,4 +390,20 @@ export const unknownKey: ApiError = {
     next: "Paste the dashboard key you were given with your invitation, whole.",
     retry: false,
   },
+};
+
+/** The groups of a server with two people: the one every organization has. */
+export const groups: GroupList = {
+  groups: [
+    {
+      name: "everyone",
+      mine: true,
+      members: [
+        { id: "0197a000-0000-7000-8000-000000000001", name: "Ann" },
+        { id: "0197a000-0000-7000-8000-000000000002", name: "Bo" },
+      ],
+    },
+  ],
+  people: [],
+  administrator: false,
 };

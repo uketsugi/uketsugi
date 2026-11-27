@@ -30,6 +30,12 @@
  * | GET    | `/api/projects/contents`  | cookie or token    | `ProjectNamed`         | `ProjectContents`      |
  * | POST   | `/api/projects/choice`    | cookie             | `ProjectChoiceRequest` | `ProjectChoice`        |
  * | POST   | `/api/projects/join`      | cookie             | `ProjectJoin`          | `ProjectJoined`        |
+ * | GET    | `/api/groups`             | cookie or token    | none                   | `GroupList`            |
+ * | POST   | `/api/groups`             | cookie             | `GroupNamed`           | `GroupChanged`         |
+ * | POST   | `/api/groups/:name/members` | cookie           | `GroupMember`          | `GroupChanged`         |
+ * | POST   | `/api/groups/:name/members/:person/remove` | cookie | none              | `GroupChanged`         |
+ * | POST   | `/api/join-links`         | cookie             | none                   | `JoinLink`             |
+ *   (only on a server whose edition signs people in itself)
  * | GET    | `/api/export`             | cookie or token    | `ExportParams`         | `text/markdown`        |
  * | POST   | `/api/hooks/claude-code`  | cookie or token    | `ClaudeCodeHook`       | `ClaudeCodeHookOutput` |
  * | GET    | `/api/host-proof`         | nobody, loopback   | `HostProofParams`      | `HostProof`            |

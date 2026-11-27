@@ -16,7 +16,7 @@ import type {
 import { nameOf } from "../context.ts";
 import type { Caller, Session, Task, TaskLease, TaskNote } from "../domain.ts";
 import { footer, headOf } from "../render.ts";
-import { audienceOf } from "../sharing.ts";
+import { audienceOf, groupOf, namedGroup } from "../sharing.ts";
 import type { TaskStep } from "../store-port.ts";
 import { leaseStanding } from "./lease.ts";
 
@@ -104,6 +104,7 @@ export function apiTask(
     ...taskView(task, note, viewer, shown.whole),
     project: task.project,
     audience: audienceOf(shown.reader, task),
+    ...namedGroup(groupOf(shown.reader, task)),
     created_at: task.createdAt.toISOString(),
   };
 }

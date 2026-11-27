@@ -320,7 +320,7 @@ function FactShown({ detail }: { detail: FactDetail }) {
     <>
       <div ref={top} tabIndex={-1} className="flex flex-wrap gap-1.5 outline-none">
         <StatusMark fact={fact} />
-        <SeenByMark audience={fact.audience} />
+        <SeenByMark audience={fact.audience} group={fact.group} />
         <TrustMark trust={fact.trust} />
         <FlagMarks flags={fact.flags} />
       </div>

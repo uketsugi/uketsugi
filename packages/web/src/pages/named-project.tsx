@@ -4,13 +4,12 @@
  * directory it works in and from nowhere else, so every named project the person has is shown
  * with the line that goes in that file.
  */
-import { Input } from "@base-ui/react/input";
 import type { ApiProject } from "@uketsugi/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { createProject, projectsQuery } from "../api.ts";
 import { useSession } from "../shell.tsx";
-import { Button, Card, CodeBlock, ErrorPanel, INLINE_CODE } from "../ui.tsx";
+import { Button, Card, CodeBlock, ErrorPanel, INLINE_CODE, submitOnce, TextBox } from "../ui.tsx";
 
 const TITLE = "A project for a directory with no origin remote";
 /** The most characters a slug may have: the contract's limit on `NewProjectRequest.slug`. */
@@ -41,20 +40,16 @@ function Make() {
       return client.invalidateQueries({ queryKey: projectsQuery.queryKey });
     },
   });
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    // A second Enter while the first is on its way would be refused: the project exists by then.
-    if (!make.isPending) make.mutate();
-  };
+  // A second Enter while the first is on its way would be refused: the project exists by then.
   return (
-    <form onSubmit={submit} className="space-y-2">
+    <form onSubmit={submitOnce(make.isPending, make.mutate)} className="space-y-2">
       <label htmlFor="slug" className="block font-medium">
         Slug
       </label>
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex min-w-0 items-center gap-1 font-mono">
           <span aria-hidden>me/</span>
-          <Input
+          <TextBox
             id="slug"
             required
             maxLength={SLUG_LENGTH}
@@ -63,8 +58,8 @@ function Make() {
             spellCheck={false}
             aria-describedby="slug-rule"
             value={slug}
-            onChange={(event) => setSlug(event.target.value)}
-            className="h-8 w-56 max-w-full min-w-0 rounded-md border border-line-strong bg-surface px-3"
+            onText={setSlug}
+            width="w-56 min-w-0"
           />
         </span>
         <Button type="submit" tone="primary" disabled={make.isPending}>
@@ -79,13 +74,13 @@ function Make() {
       <label htmlFor="project-name" className="block font-medium">
         Display name (optional)
       </label>
-      <Input
+      <TextBox
         id="project-name"
         maxLength={NAME_LENGTH}
         autoComplete="off"
         value={name}
-        onChange={(event) => setName(event.target.value)}
-        className="h-8 w-80 max-w-full rounded-md border border-line-strong bg-surface px-3"
+        onText={setName}
+        width="w-80"
       />
       <p role="status" className="empty:hidden">
         {make.isSuccess

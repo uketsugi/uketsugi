@@ -14,6 +14,7 @@ import { createContext, use, useState } from "react";
 import {
   chooseTreatment,
   deleteProject,
+  groupsQuery,
   joinProject,
   projectContentsQuery,
   projectsQuery,
@@ -37,36 +38,58 @@ import { NamedProjects } from "./named-project.tsx";
 
 type Treatment = ProjectChoiceRequest["treatment"];
 
+/** Who a group is, as a sentence says it: `everyone` is every person on the server. */
+const withWhom = (group: string | undefined): string =>
+  group === undefined || group === "everyone" ? "everyone on this server" : `the group ${group}`;
+
 /** What each choice does, said before it is made. */
-const ASK: Record<Treatment, { title: string; body: string; confirm: string }> = {
-  shared: {
-    title: "Share this project?",
-    body: "Your facts here with a citation that can be looked up, and your tasks that are not steps of a plan, become visible to everyone on this server, under your name. That includes the ones you have already published. A fact stays yours alone while it has no such citation, while a duplicate merged into it has none, or while it cites a fact of yours that others cannot see; open the fact and it says which. You can take it back.",
-    confirm: "Share the project",
-  },
-  private: {
-    title: "Keep this project private?",
-    body: "What you published here goes back to being yours alone: your facts and tasks leave everyone else's view, and other people's confirmations of them are dropped. What you wrote on other people's shared facts and tasks (a confirmation, a note, a claim) stays with them. What other people already read cannot be recalled.",
-    confirm: "Keep it private",
-  },
-};
+const ASK: Record<Treatment, { title: string; body: (group?: string) => string; confirm: string }> =
+  {
+    shared: {
+      title: "Share this project?",
+      body: (group) =>
+        `Your facts here with a citation that can be looked up, and your tasks that are not steps of a plan, become visible to ${withWhom(group)}, under your name. That includes the ones you have already published. A fact stays yours alone while it has no such citation, while a duplicate merged into it has none, or while it cites a fact of yours that others cannot see; open the fact and it says which. You can take it back.`,
+      confirm: "Share the project",
+    },
+    private: {
+      title: "Keep this project private?",
+      body: () =>
+        "What you published here goes back to being yours alone: your facts and tasks leave everyone else's view, and other people's confirmations of them are dropped. What you wrote on other people's shared facts and tasks (a confirmation, a note, a claim) stays with them. What other people already read cannot be recalled.",
+      confirm: "Keep it private",
+    },
+  };
 
 /** How a row makes a choice, whether choices can be made here, and the choice being made now. */
 const Choosing = createContext<{
   sharing: boolean;
+  /** The groups the person may share with; one, `everyone`, on a server that has made no other. */
+  groups: string[];
   pending: boolean;
   choose: (choice: ProjectChoiceRequest) => void;
-}>({ sharing: false, pending: false, choose: () => undefined });
+}>({ sharing: false, groups: [], pending: false, choose: () => undefined });
 
-/** A choice that moves what the person published: asked before it is made. */
-function AskFirst({ project, to }: { project: ApiProject; to: Treatment }) {
+/**
+ * A choice that moves what the person published: asked before it is made. A share names its group
+ * when the person has others than `everyone` to choose from.
+ */
+function AskFirst({
+  project,
+  to,
+  group,
+  named = false,
+}: {
+  project: ApiProject;
+  to: Treatment;
+  group?: string;
+  named?: boolean;
+}) {
   const { choose, pending } = use(Choosing);
   const [open, setOpen] = useState(false);
   const ask = ASK[to];
-  const label = to === "shared" ? "Share" : "Keep private";
+  const label = to === "shared" ? (named ? `Share with ${group}` : "Share") : "Keep private";
   const confirm = () => {
     setOpen(false);
-    choose({ project: project.key, treatment: to });
+    choose({ project: project.key, treatment: to, ...(group === undefined ? {} : { group }) });
   };
   return (
     <ConfirmDialog
@@ -79,7 +102,7 @@ function AskFirst({ project, to }: { project: ApiProject; to: Treatment }) {
       change={{ text: ask.confirm, tone: "primary", onClick: confirm }}
     >
       <span className="block font-mono break-all">{project.key}</span>
-      <span className="mt-2 block">{ask.body}</span>
+      <span className="mt-2 block">{ask.body(group)}</span>
     </ConfirmDialog>
   );
 }
@@ -172,21 +195,26 @@ function Join({ project }: { project: ApiProject }) {
 
 function TreatmentCell({ project }: { project: ApiProject }) {
   const { treatment } = project;
+  const shown = project.group === undefined ? treatment : `${treatment} with ${project.group}`;
   return (
-    <Mark look={SEEN_BY[treatment]}>
-      {project.chosen ? treatment : `${treatment} · not chosen yet`}
-    </Mark>
+    <Mark look={SEEN_BY[treatment]}>{project.chosen ? shown : `${shown} · not chosen yet`}</Mark>
   );
 }
 
 function ChoiceCell({ project }: { project: ApiProject }) {
-  const { sharing, pending, choose } = use(Choosing);
+  const { sharing, pending, choose, groups } = use(Choosing);
   if (!sharing) return null;
   if (project.kind !== "repository") return <span className="text-ink-muted">yours alone</span>;
   if (project.treatment === "shared") return <AskFirst project={project} to="private" />;
   return (
     <span className="flex flex-wrap gap-2">
-      <AskFirst project={project} to="shared" />
+      {groups.length > 1 ? (
+        groups.map((group) => (
+          <AskFirst key={group} project={project} to="shared" group={group} named />
+        ))
+      ) : (
+        <AskFirst project={project} to="shared" />
+      )}
       {project.chosen ? null : (
         <Button
           size="sm"
@@ -264,10 +292,10 @@ const columns = column.columns([
 ]);
 
 /** What a choice did, in a sentence. */
-function outcome({ project, treatment, moved }: ProjectChoice): string {
+function outcome({ project, treatment, group, moved }: ProjectChoice): string {
   const what = `${count(moved.facts, "fact")} and ${count(moved.tasks, "task")}`;
   return treatment === "shared"
-    ? `${project} is shared: ${what} of yours became visible to everyone on this server.`
+    ? `${project} is shared: ${what} of yours became visible to ${withWhom(group)}.`
     : `${project} is private: ${what} of yours went back to being yours alone.`;
 }
 
@@ -285,11 +313,13 @@ export function ProjectsPage() {
   const { csrf } = useSession();
   const client = useQueryClient();
   const projects = useQuery(projectsQuery);
+  const groups = useQuery(groupsQuery);
   const choice = useMutation({
     mutationFn: (made: ProjectChoiceRequest) => chooseTreatment(made, csrf),
     onSuccess: () => refreshFacts(client),
   });
   const sharing = projects.data?.sharing === true;
+  const mine = (groups.data?.groups ?? []).filter((group) => group.mine).map((group) => group.name);
   return (
     <Page
       title="Projects"
@@ -297,7 +327,7 @@ export function ProjectsPage() {
     >
       <p>
         {sharing
-          ? "A project is private until you share it. Sharing shows everyone on this server your facts there with a citation that can be looked up, and your tasks that are not steps of a plan. Everything else stays yours, and a fact that stays private says why when you open it. Whoever operates this server can read all of it."
+          ? `A project is private until you share it. Sharing shows ${mine.length > 1 ? "the group you choose" : "everyone on this server"} your facts there with a citation that can be looked up, and your tasks that are not steps of a plan. Everything else stays yours, and a fact that stays private says why when you open it. Whoever operates this server can read all of it.`
           : "Nobody else is on this server, so everything here is private to you."}
       </p>
       <p role="status">{choice.isSuccess ? outcome(choice.data) : ""}</p>
@@ -305,7 +335,9 @@ export function ProjectsPage() {
       <Card label="Your projects">
         <QueryState query={projects} what="your projects" inset="p-4">
           {(data) => (
-            <Choosing value={{ sharing, pending: choice.isPending, choose: choice.mutate }}>
+            <Choosing
+              value={{ sharing, groups: mine, pending: choice.isPending, choose: choice.mutate }}
+            >
               <Listed projects={data.projects} />
             </Choosing>
           )}

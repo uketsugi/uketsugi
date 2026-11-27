@@ -13,6 +13,7 @@ import {
 import { ActivityPage, PERIODS } from "./pages/activity.tsx";
 import { ConnectPage } from "./pages/connect.tsx";
 import { FactsPage } from "./pages/facts.tsx";
+import { GroupsPage } from "./pages/groups.tsx";
 import { ProjectsPage } from "./pages/projects.tsx";
 import { TasksPage } from "./pages/tasks.tsx";
 import { Gate } from "./shell.tsx";
@@ -89,6 +90,12 @@ const projects = createRoute({
   component: ProjectsPage,
 });
 
+const groups = createRoute({
+  getParentRoute: () => root,
+  path: "/groups",
+  component: GroupsPage,
+});
+
 const connect = createRoute({
   getParentRoute: () => root,
   path: "/connect",
@@ -96,7 +103,7 @@ const connect = createRoute({
   component: ConnectPage,
 });
 
-const routeTree = root.addChildren([home, facts, tasks, activity, projects, connect]);
+const routeTree = root.addChildren([home, facts, tasks, activity, projects, groups, connect]);
 
 /** The router over a history: the address bar in a browser, memory in a test. */
 export function createAppRouter(history?: RouterHistory) {

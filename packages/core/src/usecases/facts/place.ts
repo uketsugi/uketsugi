@@ -16,6 +16,8 @@ import {
   canShare,
   heldBack,
   holderOfFact,
+  holdFacts,
+  reachAll,
   requireSharing,
   sharedIfSharing,
   type Cited,
@@ -57,14 +59,11 @@ export async function holdCited(
   kept: readonly string[] = [],
 ): Promise<void> {
   if (cited.length === 0 || !canShare(place.caller)) return;
-  const shared = await place.shared();
   const added = cited.filter((id) => !kept.includes(id));
-  const held = [
-    ...(await place.own.facts.getMany(added)),
-    ...(shared === null ? [] : await shared.facts.getMany(added)),
-  ];
-  const seen = new Set(held.map((fact) => fact.id));
-  if (added.every((id) => seen.has(id))) return;
+  await holdFacts(place, added);
+  let all = true;
+  for (const id of added) all &&= (await holderOfFact(place, id)) !== null;
+  if (all) return;
   throw new ToolFailure("unavailable", {
     what: "A fact this one cites stopped being visible while the call was being prepared.",
     meaning: "Its author took it back or it was removed, so nothing was written.",
@@ -111,10 +110,15 @@ function countOf(records: Records, moved: { facts: string[]; tasks: string[] }) 
   return { live: facts, facts: facts.length, tasks: moved.tasks.length };
 }
 
-/** The live facts of one audience that cite any of the given facts. */
-async function citing(writes: UnitWrites, ids: readonly string[]): Promise<string[]> {
+/**
+ * The facts of the person's own audience and of every group of theirs that cite any of the given
+ * facts: a fact of another project, in another group, follows what it cites wherever that goes.
+ */
+async function citing(place: Place, ids: readonly string[]): Promise<string[]> {
   const found: string[] = [];
-  for (const id of ids) found.push(...(await writes.facts.citing(id)));
+  for (const writes of [place.own, ...(await reachAll(place))]) {
+    for (const id of ids) found.push(...(await writes.facts.citing(id)));
+  }
   return found;
 }
 
@@ -146,18 +150,22 @@ export async function move(
     tasks: records.tasks.map((task) => task.id),
   });
   await logMove(place, KINDS[direction], went, { left: from, joined: to });
-  for (const id of home ? went.facts : []) await flagCiting(ports, shared, null, id);
+  const groups = await reachAll(place);
+  for (const id of home ? went.facts : []) {
+    for (const group of groups) await flagCiting(ports, group, null, id);
+  }
   const { live, ...moved } = countOf(records, went);
   // A fact that arrives looks for its author's duplicates there, and for a vector if it has none.
   for (const fact of live) {
     await enqueueFollowUps(ports, to, fact.id, { embed: !fact.embedded, at: place.at });
   }
-  const followed = await settle(ports, place, await citing(from, went.facts));
+  const followed = await settle(ports, place, await citing(place, went.facts));
   return { facts: moved.facts + followed, tasks: moved.tasks };
 }
 
 /**
- * Puts the caller's own facts where they now belong, each by its own project's choice, and
+ * Puts the caller's own facts where they now belong, each by its own project's choice (never by
+ * the project being chosen now), and
  * returns how many moved: what a write has just changed (a merge, its undoing, a give-back or a
  * move of a fact they cite) can leave a fact others cannot check where they read, or make a
  * private one theirs to see. A fact something has replaced is where the fact that replaced it is;
@@ -168,8 +176,8 @@ export async function settle(
   place: Place,
   ids: readonly string[],
 ): Promise<number> {
-  const shared = ids.length === 0 ? null : await place.shared();
-  if (shared === null) return 0;
+  if (ids.length === 0 || !canShare(place.caller)) return 0;
+  await place.shared();
   let moved = 0;
   for (const id of new Set(ids)) {
     const held = await holderOfFact(place, id);
@@ -179,8 +187,11 @@ export async function settle(
     const want = await landingOf(place, fact.project, fact, await writes.facts.behind(fact.id));
     if (want === writes) continue;
     const records = { facts: [fact], tasks: [] };
-    const direction = want === place.own ? "withdrawn" : "shared";
-    moved += (await move(ports, place, shared, records, direction)).facts;
+    // A fact is only ever in the group of its own project or in its person's own audience: it goes
+    // out to the group its project is shared with, and comes home from the group that holds it.
+    const home = want === place.own;
+    const group = home ? writes : want;
+    moved += (await move(ports, place, group, records, home ? "withdrawn" : "shared")).facts;
   }
   return moved;
 }
@@ -276,6 +287,9 @@ export async function onFact(
   const { before, correction, at } = write;
   const who = { caller: ctx.caller, project: before.project, at };
   return asPerson(ports, who, async (place) => {
+    // The groups this call needs are taken together, before the fact is looked for.
+    await reachAll(place);
+    await holdFacts(place, [before.id, ...(correction?.content.citedFacts ?? [])]);
     const held = await holderOfFact(place, before.id);
     const fact = held?.fact ?? null;
     const stale = correction !== null && fact?.contentHash !== before.contentHash;

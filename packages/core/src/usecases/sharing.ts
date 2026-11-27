@@ -8,12 +8,12 @@
  * else can see is confirmed by nobody else. The choice is a person's: no tool makes it.
  */
 import type { ProjectChoice, ProjectChoiceRequest } from "@uketsugi/contracts";
-import type { Caller, Fact } from "../domain.ts";
+import { EVERYONE, type Caller, type Fact, type Group } from "../domain.ts";
 import { isLive } from "../facts/duplicates.ts";
-import { invalidInput, unsupported } from "../failure.ts";
+import { invalidInput, ToolFailure, unsupported } from "../failure.ts";
 import type { CorePorts } from "../ports.ts";
 import { isPersonal, projectNamed } from "../project.ts";
-import { asPerson, canShare, heldBack, type Place } from "../sharing.ts";
+import { asPerson, canShare, heldBack, namedGroup, reachAll, type Place } from "../sharing.ts";
 import type { UnitWrites } from "../store-port.ts";
 import { move } from "./facts/place.ts";
 
@@ -103,7 +103,9 @@ async function reconcile(
 /** Brings everything the person shared in a project home to their own audience, as keeping it private does. */
 export async function bringHome(ports: MovePorts, place: Place, project: string): Promise<void> {
   const shared = await place.shared();
-  if (shared !== null) await reconcile(ports, { ...place, treatment: "private" }, shared, project);
+  if (shared !== null) {
+    await reconcile(ports, { ...place, treatment: "private", group: null }, shared, project);
+  }
 }
 
 /**
@@ -136,12 +138,39 @@ export async function chooseTreatment(
       "Share a repository's project; a named project or a folder's stays private.",
     );
   }
+  const group = treatment === "shared" ? groupNamed(caller, input.group) : null;
   const who = { caller, project: project.key, at: ports.clock.now() };
   const moved = await asPerson(ports, who, async (place) => {
-    const shared = await place.shared();
+    if (group !== null && place.group !== null && place.group.id !== group.id) {
+      throw new ToolFailure("conflict", {
+        what: `${project.key} is shared with ${place.group.name}.`,
+        meaning: "Nothing was changed: a project is shared with one group at a time.",
+        next: `Keep it private first, which takes back what you shared, and then share it with ${group.name}.`,
+      });
+    }
+    // What follows a move can land in the group of another project of the person's: every group of
+    // theirs is taken first, in the order of their ids, so a share succeeds whichever has the smaller.
+    await reachAll(place);
+    await place.own.choose(project.key, group?.id ?? null);
+    // Where the records are now, or are to go: the group they are shared with, or were.
+    const shared = group === null ? await place.shared() : await place.reach(group.id);
     if (shared === null) return { facts: 0, tasks: 0 };
-    await place.own.choose(project.key, treatment);
-    return reconcile(ports, { ...place, treatment }, shared, project.key);
+    // The unit now reaches the group the choice names, for the moves and for what follows them.
+    const chosen = { ...place, treatment, group, shared: () => Promise.resolve(shared) };
+    return reconcile(ports, chosen, shared, project.key);
   });
-  return { project: project.key, treatment, moved };
+  return { project: project.key, treatment, ...namedGroup(group), moved };
+}
+
+/** The group of the caller's a request names; `everyone` when it names none. */
+function groupNamed(caller: Caller, name: string | undefined): Group {
+  const wanted = (name ?? EVERYONE).trim();
+  const found = caller.groups.find((group) => group.name === wanted);
+  if (found === undefined) {
+    throw invalidInput(
+      `You are not in a group called "${wanted}".`,
+      `Choose one of your groups: ${caller.groups.map((group) => group.name).join(", ")}.`,
+    );
+  }
+  return found;
 }

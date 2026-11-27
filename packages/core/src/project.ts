@@ -3,7 +3,7 @@ import { scopeOf } from "./context.ts";
 import type { Caller, PersonProject, Project, ProjectRef } from "./domain.ts";
 import { invalidInput, notFound, projectRequired, ToolFailure } from "./failure.ts";
 import type { CorePorts } from "./ports.ts";
-import { canShare, standing } from "./sharing.ts";
+import { canShare, namedGroup, standing } from "./sharing.ts";
 
 const REPOSITORY = /^[a-z0-9._-]+\.[a-z0-9._-]+(\/[a-z0-9._-]+){2}$/;
 const NAMED = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
@@ -127,7 +127,7 @@ export async function resolveProject(
     const folder = await projects.ensure(caller.orgId, ref);
     const { orgId, principalId } = caller;
     if ((await projects.choice(orgId, principalId, ref.key)) === null) {
-      await projects.choose(orgId, principalId, ref.key, "private");
+      await projects.choose(orgId, principalId, ref.key, null);
     }
     return folder;
   }
@@ -233,8 +233,8 @@ export async function createNamedProject(
   const project = await projects.ensure(caller.orgId, ref);
   // Its maker's choice is what makes it one of their projects before any session names it.
   const { orgId, principalId } = caller;
-  await projects.choose(orgId, principalId, project.key, "private", displayName ?? undefined);
-  return apiProject(caller, { ...project, choice: "private", displayName }, 0);
+  await projects.choose(orgId, principalId, project.key, null, displayName ?? undefined);
+  return apiProject(caller, { ...project, choice: { groupId: null }, displayName }, 0);
 }
 
 /** A project as the dashboard shows it to one person. */
@@ -250,7 +250,9 @@ function apiProject(
     name: project.displayName,
     names: [...names],
     facts,
-    ...standing(caller, project.choice),
+    ...(({ treatment, group, chosen }) => ({ treatment, chosen, ...namedGroup(group) }))(
+      standing(caller, project.choice),
+    ),
   };
 }
 

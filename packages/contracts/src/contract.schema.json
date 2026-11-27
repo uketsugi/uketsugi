@@ -421,6 +421,10 @@
               "$ref": "#/$defs/audience",
               "description": "Who can see the fact as it now stands. Only on a server with several people."
             },
+            "group": {
+              "type": "string",
+              "description": "The group the fact is shared with, when it is shared with one other than `everyone`; `everyone` is not named."
+            },
             "private_because": {
               "$ref": "#/$defs/privateBecause",
               "description": "With `audience: private`, when the fact is the caller's own."
@@ -466,6 +470,10 @@
             "audience": {
               "$ref": "#/$defs/audience",
               "description": "Who can see the fact as it now stands. Only on a server with several people."
+            },
+            "group": {
+              "type": "string",
+              "description": "The group the fact is shared with, when it is shared with one other than `everyone`; `everyone` is not named."
             },
             "private_because": {
               "$ref": "#/$defs/privateBecause",
@@ -753,10 +761,41 @@
           "treatment": {
             "type": "string",
             "enum": ["private", "shared"],
-            "description": "`shared` shows what the person publishes there that others can check, and their tasks, to everyone on the server; `private` keeps all of it theirs and takes back what they shared."
+            "description": "`shared` shows what the person publishes there that others can check, and their tasks, to the group named, `everyone` if none is; `private` keeps all of it theirs and takes back what they shared."
+          },
+          "group": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "With `shared`: the group of the person's to share with. Left out, `everyone`. A project shared with a group is made private before it is shared with another."
           }
         },
         "required": ["project", "treatment"],
+        "additionalProperties": false
+      },
+      "GroupNamed": {
+        "type": "object",
+        "description": "`POST /api/groups`: makes a group of the organization's people. Only the organization's administrator makes one.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "What the group is called wherever a person reads who a project is shared with. Not `everyone`, which every organization has."
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "GroupMember": {
+        "type": "object",
+        "description": "`POST /api/groups/:name/members`: adds a person of the organization to a group.",
+        "properties": {
+          "person": {
+            "type": "string",
+            "description": "The person's id, as the group list gives it."
+          }
+        },
+        "required": ["person"],
         "additionalProperties": false
       },
       "SignInRequest": {
@@ -1293,6 +1332,54 @@
         },
         "required": ["projects", "sharing"]
       },
+      "GroupList": {
+        "type": "object",
+        "description": "`GET /api/groups`: the groups the person is in, and for the organization's administrator every group and every person.",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/apiGroup"
+            }
+          },
+          "people": {
+            "type": "array",
+            "description": "The organization's people, for the administrator to add to a group; empty for anyone else.",
+            "items": {
+              "$ref": "#/$defs/apiMember"
+            }
+          },
+          "administrator": {
+            "type": "boolean",
+            "description": "Whether the person made the organization, and so makes groups and says who is in them."
+          }
+        },
+        "required": ["groups", "people", "administrator"]
+      },
+      "GroupChanged": {
+        "type": "object",
+        "description": "`POST /api/groups`, `POST /api/groups/:name/members` and `POST /api/groups/:name/members/:person/remove`: the group as it now stands.",
+        "properties": {
+          "group": {
+            "$ref": "#/$defs/apiGroup"
+          }
+        },
+        "required": ["group"]
+      },
+      "JoinLink": {
+        "type": "object",
+        "description": "`POST /api/join-links`, where the server signs people in through a provider: what the administrator sends to the person they invite. The link is shown once and used once.",
+        "properties": {
+          "link": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "description": "ISO 8601, UTC."
+          }
+        },
+        "required": ["link", "expires_at"]
+      },
       "ClaudeCodeHookOutput": {
         "type": "object",
         "description": "`POST /api/hooks/claude-code`: the hook's output, as Claude Code reads it. Empty for every event but `SessionStart`.",
@@ -1323,6 +1410,10 @@
           "treatment": {
             "type": "string",
             "enum": ["private", "shared"]
+          },
+          "group": {
+            "type": "string",
+            "description": "The group the fact is shared with, when it is shared with one other than `everyone`; `everyone` is not named."
           },
           "moved": {
             "type": "object",
@@ -2088,6 +2179,10 @@
             "audience": {
               "$ref": "#/$defs/audience"
             },
+            "group": {
+              "type": "string",
+              "description": "The group it is shared with, when one other than `everyone`."
+            },
             "created_at": {
               "type": "string",
               "description": "When it was published. ISO 8601, UTC."
@@ -2198,6 +2293,10 @@
         },
         "audience": {
           "$ref": "#/$defs/audience"
+        },
+        "group": {
+          "type": "string",
+          "description": "The group it is shared with, when one other than `everyone`."
         },
         "claim": {
           "type": ["string", "null"]
@@ -2531,9 +2630,46 @@
         "chosen": {
           "type": "boolean",
           "description": "False while the person has made no choice: the project is private until they do."
+        },
+        "group": {
+          "type": "string",
+          "description": "The group it is shared with, when one other than `everyone`."
         }
       },
       "required": ["key", "kind", "name", "names", "facts", "treatment", "chosen"]
+    },
+    "apiMember": {
+      "type": "object",
+      "description": "A person of the organization, as a group lists them.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name"]
+    },
+    "apiGroup": {
+      "type": "object",
+      "description": "A group and who is in it.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mine": {
+          "type": "boolean",
+          "description": "Whether the person is in it, and so may share a project with it."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/apiMember"
+          }
+        }
+      },
+      "required": ["name", "mine", "members"]
     },
     "apiToken": {
       "type": "object",

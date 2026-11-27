@@ -29,6 +29,7 @@ export const api = setupServer(
   answer("/api/capabilities", fixtures.capabilities),
   answer("/api/connect", fixtures.connect),
   answer("/api/projects", fixtures.projects),
+  answer("/api/groups", fixtures.groups),
   answer("/api/facts", { facts: [fixtures.retries, fixtures.idempotency], next: null }),
   answer(`/api/facts/${fixtures.retries.id}`, fixtures.retriesDetail),
   answer("/api/tasks", fixtures.tasks),

@@ -13,6 +13,7 @@ import { EMBEDDING_MODEL_0005 } from "./migrations/0005_embedding_model.ts";
 import { PERSON_REMOVED_0006 } from "./migrations/0006_person_removed.ts";
 import { PATH_PROJECTS_0007 } from "./migrations/0007_path_projects.ts";
 import { PROJECT_NAMES_0008 } from "./migrations/0008_project_names.ts";
+import { GROUPS_0009 } from "./migrations/0009_groups.ts";
 
 /**
  * Every migration, by the name it is recorded under. `0001_init.3` is the schema 0.1.0 released:
@@ -27,6 +28,7 @@ export const MIGRATIONS: Record<string, Migration> = {
   "0006_person_removed": PERSON_REMOVED_0006,
   "0007_path_projects": PATH_PROJECTS_0007,
   "0008_project_names": PROJECT_NAMES_0008,
+  "0009_groups": GROUPS_0009,
 };
 
 /**

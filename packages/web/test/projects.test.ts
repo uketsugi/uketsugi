@@ -134,6 +134,58 @@ describe("Projects", () => {
     expect(screen.queryByText("private · not chosen yet")).toBeNull();
   });
 
+  it("says which group a project is shared with, by its name, and offers each group the person is in", async () => {
+    const sent: unknown[] = [];
+    api.use(
+      answer("/api/groups", {
+        groups: [
+          { name: "everyone", mine: true, members: [] },
+          { name: "design", mine: true, members: [] },
+          { name: "ops", mine: false, members: [] },
+        ],
+        people: [],
+        administrator: false,
+      }),
+      http.post("*/api/projects/choice", async ({ request }) => {
+        sent.push(await request.json());
+        const [repository, named] = projects.projects;
+        if (repository === undefined || named === undefined) throw new Error("two projects");
+        const shared = {
+          ...repository,
+          treatment: "shared",
+          chosen: true,
+          group: "design",
+        } as const;
+        api.use(answer("/api/projects", { projects: [shared, named], sharing: true }));
+        const made: ProjectChoice = {
+          project: PROJECT,
+          treatment: "shared",
+          group: "design",
+          moved: { facts: 2, tasks: 0 },
+        };
+        return HttpResponse.json(made);
+      }),
+    );
+    const user = open("/projects");
+    expect(
+      await screen.findByRole("button", { name: `Share with everyone ${PROJECT}…` }),
+    ).toBeTruthy();
+    // Only the groups the person is in: `ops` is the administrator's to see, and not a choice here.
+    expect(screen.queryByRole("button", { name: `Share with ops ${PROJECT}…` })).toBeNull();
+    expect(screen.queryByRole("button", { name: `Share ${PROJECT}…` })).toBeNull();
+    await user.click(screen.getByRole("button", { name: `Share with design ${PROJECT}…` }));
+    const dialog = within(await screen.findByRole("alertdialog", { name: "Share this project?" }));
+    expect(dialog.getByText(/become visible to the group design, under your name/)).toBeTruthy();
+    await user.click(dialog.getByRole("button", { name: "Share the project" }));
+    expect(
+      await screen.findByText(
+        `${PROJECT} is shared: 2 facts and 0 tasks of yours became visible to the group design.`,
+      ),
+    ).toBeTruthy();
+    expect(sent).toEqual([{ project: PROJECT, treatment: "shared", group: "design" }]);
+    expect(await screen.findByText("shared with design")).toBeTruthy();
+  });
+
   it("settles a project as private in one step when nothing was shared, and leaves a dialog without choosing", async () => {
     const sent: unknown[] = [];
     api.use(

@@ -27,7 +27,15 @@ afterAll(() => rm(root, { recursive: true, force: true }));
 const RELEASES = [
   ["0.1.0", "0002"],
   ["0.2.0", "0003"],
+  ["0.3.0", "0009"],
 ] as const;
+
+/** A project as the schema of a release took it: the first releases dated it, and 0004 took the date out. */
+async function insertProject(db: Db, below: string, org: string, key: string): Promise<void> {
+  const dated = below <= "0004";
+  await sql`insert into projects (org_id, key, kind ${dated ? sql`, created_at` : sql``})
+    values (${org}, ${key}, 'repository' ${dated ? sql`, now()` : sql``})`.execute(db);
+}
 
 /**
  * Migrates `db` to the migrations a release had, writes a project, a fact and two flags raised
@@ -39,8 +47,7 @@ async function upgradeKeepsRows(db: Db, below: string): Promise<void> {
   await migrate(db, Object.fromEntries(released));
   const [org, audience, fact] = [fakeUuid(0, 1), fakeUuid(0, 3), fakeUuid(1, 1)];
   const [later, earlier] = [fakeUuid(2, 1), fakeUuid(2, 2)];
-  await sql`insert into projects (org_id, key, kind, created_at)
-    values (${org}, 'github.com/acme/api', 'repository', now())`.execute(db);
+  await insertProject(db, below, org, "github.com/acme/api");
   await sql`
     insert into facts (org_id, id, audience_id, project, claim, status, author,
                        content_hash, claim_hash, created_at, updated_at)
@@ -63,6 +70,107 @@ async function upgradeKeepsRows(db: Db, below: string): Promise<void> {
   ]);
   const flags = await new SqlReview(db).openFlags({ orgId: org, audienceIds: [audience] }, [fact]);
   expect(flags.map((flag) => flag.id)).toEqual([earlier, later]);
+}
+
+/**
+ * Migrates `db` to the migrations a release had and writes what a server of several people holds
+ * (a shared audience, a shared fact, a choice to share a project and one to keep another private)
+ * and what a server of one holds, migrates to the newest, and checks that the shared audience is
+ * the group `everyone` with each person in it, that every record is where it was and every choice
+ * says what it said, and that a server of one has no group.
+ */
+async function upgradeKeepsSharing(db: Db, below: string): Promise<void> {
+  const released = Object.entries(MIGRATIONS).filter(([name]) => name < below);
+  await migrate(db, Object.fromEntries(released));
+  const [org, ann, bob, annOwn, bobOwn, shared, fact] = [1, 2, 3, 4, 5, 6, 7].map((n) =>
+    fakeUuid(0, n),
+  ) as [string, string, string, string, string, string, string];
+  const [solo, soloPerson, soloOwn] = [fakeUuid(1, 1), fakeUuid(1, 2), fakeUuid(1, 3)];
+  // An organization of two with no shared audience, whose first person was removed where a release could.
+  const [pair, gone, stayed] = [fakeUuid(3, 1), fakeUuid(3, 2), fakeUuid(3, 3)];
+  const removable = below > "0006";
+  const people = [
+    [org, ann, "Ann", "local:owner"],
+    [org, bob, "Bob", "local:bob"],
+    [solo, soloPerson, "Sol", "local:sol"],
+    [pair, gone, "Gone", "local:gone"],
+    [pair, stayed, "Stayed", "local:stayed"],
+  ];
+  for (const [orgId, id, name, subject] of people) {
+    await sql`insert into principals (org_id, id, display_name, subject)
+      values (${orgId}, ${id}, ${name}, ${subject})`.execute(db);
+  }
+  const audiences = [
+    [org, annOwn, "private", ann],
+    [org, bobOwn, "private", bob],
+    [org, shared, "shared", null],
+    [solo, soloOwn, "private", soloPerson],
+  ];
+  if (removable) {
+    await sql`update principals set removed_at = now() where id = ${gone}`.execute(db);
+  }
+  for (const [orgId, id, kind, owner] of audiences) {
+    await sql`insert into audiences (org_id, id, kind, owner_id)
+      values (${orgId}, ${id}, ${kind}, ${owner})`.execute(db);
+    await sql`insert into audience_head (org_id, audience_id, last_seq)
+      values (${orgId}, ${id}, 0)`.execute(db);
+  }
+  for (const key of ["github.com/acme/api", "github.com/acme/web"]) {
+    await insertProject(db, below, org, key);
+  }
+  await sql`insert into project_choices (org_id, principal_id, project, treatment)
+    values (${org}, ${ann}, 'github.com/acme/api', 'shared'),
+           (${org}, ${bob}, 'github.com/acme/api', 'private'),
+           (${org}, ${ann}, 'github.com/acme/web', 'private')`.execute(db);
+  await sql`
+    insert into facts (org_id, id, audience_id, project, claim, status, author,
+                       content_hash, claim_hash, created_at, updated_at)
+    values (${org}, ${fact}, ${shared}, 'github.com/acme/api', 'Shared', 'unconfirmed',
+            ${ann}, '\\x00', '\\x00', now(), now())`.execute(db);
+  await migrate(db);
+
+  const kinds = await db.selectFrom("audiences").select(["id", "kind", "name"]).execute();
+  expect(kinds.sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+    [
+      { id: annOwn, kind: "private", name: null },
+      { id: bobOwn, kind: "private", name: null },
+      { id: shared, kind: "group", name: "everyone" },
+      { id: soloOwn, kind: "private", name: null },
+    ].sort((a, b) => a.id.localeCompare(b.id)),
+  );
+  const members = await db
+    .selectFrom("audienceMembers")
+    .select(["audienceId", "principalId"])
+    .execute();
+  expect(members.map((row) => [row.audienceId, row.principalId]).sort()).toEqual(
+    [
+      [shared, ann],
+      [shared, bob],
+    ].sort(),
+  );
+  const choices = await db
+    .selectFrom("projectChoices")
+    .select(["principalId", "project", "audienceId"])
+    .orderBy("principalId")
+    .orderBy("project")
+    .execute();
+  expect(choices).toEqual([
+    { principalId: ann, project: "github.com/acme/api", audienceId: shared },
+    { principalId: ann, project: "github.com/acme/web", audienceId: null },
+    { principalId: bob, project: "github.com/acme/api", audienceId: null },
+  ]);
+  expect(await db.selectFrom("facts").select(["id", "audienceId"]).execute()).toEqual([
+    { id: fact, audienceId: shared },
+  ]);
+  const admins = await db
+    .selectFrom("principals")
+    .select("id")
+    .where("administrator", "=", true)
+    .orderBy("id")
+    .execute();
+  // The first person still there made it: a removed first person is passed over.
+  expect(admins.map((row) => row.id)).toEqual([ann, soloPerson, removable ? stayed : gone].sort());
+  expect(await db.selectFrom("audienceMembers").select("audienceId").execute()).toHaveLength(2);
 }
 
 describe("backup and restore", () => {
@@ -192,7 +300,7 @@ describe("a store that a newer version opens", () => {
   /** What a later version adds to today's migrations: one that makes a table. */
   const newer = {
     ...MIGRATIONS,
-    "0008_test_only_next": {
+    "0009_hosting_test_next": {
       async up(db: Parameters<typeof migrate>[0]) {
         await sql`create table next_thing (id int)`.execute(db);
       },
@@ -214,7 +322,9 @@ describe("a store that a newer version opens", () => {
     expect(await migrationState(engine.db, newer)).toMatchObject({ pending: [] });
     expect(await engine.db.selectFrom("facts").select("id").execute()).toEqual([{ id: kept }]);
     await engine.close();
-    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0008_test_only_next.tgz"]);
+    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual([
+      "before-0009_hosting_test_next.tgz",
+    ]);
   });
 
   test("keeps the snapshots of its three newest upgrades, and every file that is not one", async () => {
@@ -287,6 +397,10 @@ describe("on an engine of its own, in memory", () => {
     test(`a store that ${release} made, holding a project, a fact and two flags, keeps them through every later migration`, async () => {
       await upgradeKeepsRows(engine.db, below);
     });
+
+    test(`a store that ${release} made, holding a shared audience, a shared fact and choices, opens with the group everyone, its people in it and every record and choice as it was`, async () => {
+      await upgradeKeepsSharing(engine.db, below);
+    });
   }
 
   test("a store made by a build from before the first release is refused by name, in words", async () => {
@@ -309,6 +423,20 @@ describe.runIf(TEST_POSTGRES_URL !== "")("on a database of its own, on a server"
       );
       try {
         await upgradeKeepsRows(db, below);
+      } finally {
+        await db.destroy();
+        await database.drop();
+      }
+    });
+
+    test(`a store that ${release} made, holding a shared audience, a shared fact and choices, opens with the group everyone, its people in it and every record and choice as it was, on a server`, async () => {
+      const database = await createTestDatabase();
+      await onTestServer("create extension vector; create extension pg_trgm", database.name);
+      const db = connect(
+        new PostgresDialect({ pool: new pg.Pool({ connectionString: database.url }) }),
+      );
+      try {
+        await upgradeKeepsSharing(db, below);
       } finally {
         await db.destroy();
         await database.drop();

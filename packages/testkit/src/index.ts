@@ -1,5 +1,5 @@
 /** Test support: fakes for the ports that read the world, an MCP client, a tool caller, a test database, and the conformance suites a port's adapter must pass. */
-export { FakeClock, FakeEmbedder, FakeIdGen, FakeRunner, fakeUuid } from "./fakes.ts";
+export { everyoneOf, FakeClock, FakeEmbedder, FakeIdGen, FakeRunner, fakeUuid } from "./fakes.ts";
 export { eventually } from "./eventually.ts";
 export { HANG_GUARD_MS } from "./guard.ts";
 export { connectMcp } from "./mcp-client.ts";
@@ -20,6 +20,7 @@ export {
 } from "./postgres.ts";
 export { describeModelStepConformance } from "./conformance/model-step.ts";
 export { describeEmbedderConformance } from "./conformance/embedder.ts";
+export { describeGroupConformance } from "./conformance/groups.ts";
 export { describeMoveConformance } from "./conformance/moves.ts";
 export { describeStoreConformance } from "./conformance/store.ts";
 export { describeTaskStoreConformance } from "./conformance/tasks.ts";

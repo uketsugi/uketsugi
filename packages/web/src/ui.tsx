@@ -4,6 +4,7 @@
  */
 import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { Button as BaseButton } from "@base-ui/react/button";
+import { Input } from "@base-ui/react/input";
 import {
   CITATION_WORD,
   type CitationClass,
@@ -36,7 +37,14 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type ComponentProps,
+  type FormEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { partsOf } from "./api.ts";
 
 export const buttonClass = cva(
@@ -296,6 +304,32 @@ export function Card({ children, label }: { children: ReactNode; label?: string 
     <section aria-label={label} className="rounded-lg border border-line bg-surface">
       {children}
     </section>
+  );
+}
+
+/** What a form's submit does: no page load, and nothing again while the first is on its way. */
+export const submitOnce =
+  (busy: boolean, run: () => void) =>
+  (event: FormEvent): void => {
+    event.preventDefault();
+    if (!busy) run();
+  };
+
+/** A line of text the person types, at the width the form wants. */
+export function TextBox({
+  width,
+  onText,
+  ...rest
+}: Omit<ComponentProps<typeof Input>, "onChange"> & {
+  width: string;
+  onText: (text: string) => void;
+}) {
+  return (
+    <Input
+      {...rest}
+      onChange={(event) => onText(event.target.value)}
+      className={cx("h-8 max-w-full rounded-md border border-line-strong bg-surface px-3", width)}
+    />
   );
 }
 

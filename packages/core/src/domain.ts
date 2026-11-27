@@ -23,11 +23,20 @@ export interface Caller {
   readonly credentialId: string | null;
   /** The person's own audience: where a write lands unless the person shares its project. */
   readonly privateAudienceId: string;
-  /** What everyone on the server sees. Null on a host with one person: nothing is shared there. */
-  readonly sharedAudienceId: string | null;
-  /** Every audience the caller may read: the visible set. Every store read takes it. */
+  /** The groups the person is a member of. None on a host with one person: nothing is shared there. */
+  readonly groups: readonly Group[];
+  /** Every audience the caller may read: their own and their groups'. Every store read takes it. */
   readonly visibleAudienceIds: readonly string[];
 }
+
+/** A group of an organization: an audience several of its people read, which an administrator names. */
+export interface Group {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** The group every person of an organization with several people is a member of. */
+export const EVERYONE = "everyone";
 
 /** The scope of a read: the organization and the audiences the reader may see. */
 export interface ReadScope {
@@ -61,13 +70,12 @@ export interface Credential {
 export interface Person {
   readonly id: string;
   readonly displayName: string;
+  /** Whether they made the organization: the one person who makes its groups and invitations. */
+  readonly administrator: boolean;
 }
 
-/**
- * The kinds of audience, the unit of visibility: a person's own, and the one everyone on a server
- * with several people sees.
- */
-export const AUDIENCE_KINDS = ["private", "shared"] as const;
+/** The kinds of audience, the unit of visibility: a person's own, and a group's. */
+export const AUDIENCE_KINDS = ["private", "group"] as const;
 
 export const TREATMENTS = ["private", "shared"] as const;
 
@@ -76,6 +84,11 @@ export const TREATMENTS = ["private", "shared"] as const;
  * everyone on the server; `private` keeps all of it theirs. Only the person chooses.
  */
 export type Treatment = (typeof TREATMENTS)[number];
+
+/** A person's stored choice for a project: the group they share it with, or none (private). */
+export interface Choice {
+  readonly groupId: string | null;
+}
 
 export const PROJECT_KINDS = ["repository", "named", "path"] as const;
 
@@ -99,7 +112,7 @@ export interface Project extends ProjectRef {
  * while they have made none) and the name they gave a named project of their own.
  */
 export interface PersonProject extends Project {
-  readonly choice: Treatment | null;
+  readonly choice: Choice | null;
   readonly displayName: string | null;
 }
 

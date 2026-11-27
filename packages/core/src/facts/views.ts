@@ -16,7 +16,7 @@ import { liveHeads, nameOf, namesFor, scopeOf } from "../context.ts";
 import type { Caller, Fact } from "../domain.ts";
 import type { CorePorts } from "../ports.ts";
 import { footer } from "../render.ts";
-import { audienceOf, canShare, type HeldBack } from "../sharing.ts";
+import { audienceOf, canShare, groupOf, namedGroup, type HeldBack } from "../sharing.ts";
 import { citationView } from "./citations.ts";
 
 type ReadPorts = Pick<CorePorts, "store">;
@@ -102,6 +102,7 @@ export async function apiFacts(
       id: fact.id,
       project: fact.project,
       audience: audienceOf(caller, fact),
+      ...namedGroup(groupOf(caller, fact)),
       claim: fact.claim,
       detail: fact.detail,
       question: fact.question,
@@ -174,11 +175,16 @@ const HELD_BACK_BY: Record<HeldBack, string> = {
   merged_word: "a duplicate merged into it has no checkable citation",
 };
 
-function seenLine(result: Pick<PublishFactResult, "audience" | "private_because">): string[] {
-  const { audience, private_because: because } = result;
+function seenLine(
+  result: Pick<PublishFactResult, "audience" | "group" | "private_because">,
+): string[] {
+  const { audience, group, private_because: because } = result;
   if (audience === undefined) return [];
   const why = because === undefined || because === "project" ? "" : ` · ${HELD_BACK_BY[because]}`;
-  return [`fact: ${SEEN[audience]}${why}`];
+  // A result names a group that is not `everyone`, whose words are the ones a server always said.
+  const seen =
+    group === undefined ? SEEN[audience] : `shared · members of the group ${group} see it`;
+  return [`fact: ${seen}${why}`];
 }
 
 /**

@@ -20,6 +20,9 @@ import {
   type FactCorrection,
   type HostProof,
   type NewProjectRequest,
+  type JoinLink,
+  type GroupMember,
+  type GroupNamed,
   type ProjectChoiceRequest,
   type ProjectJoin,
   type ProjectNamed,
@@ -33,6 +36,7 @@ import {
   closeTask,
   confirmFact,
   correctFact,
+  addToGroup,
   createNamedProject,
   deleteProject,
   joinProjects,
@@ -40,12 +44,16 @@ import {
   factDetail,
   invitePerson,
   listFacts,
+  listGroups,
   listPeople,
   listProjects,
   listRulings,
   listTasks,
+  makeGroup,
+  makeInvitation,
   projectContents,
   redactFact,
+  removeFromGroup,
   removeNote,
   removePerson,
   replaceTokens,
@@ -162,12 +170,43 @@ function signInRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   });
 }
 
+/** The groups of an organization: made, filled and emptied by its administrator, and its invitation link where the edition has one. */
+function groupRoutes(
+  api: Hono<AuthEnv>,
+  { ports, edition }: Pick<ApiDeps, "ports" | "edition">,
+  inPerson: MiddlewareHandler<AuthEnv>,
+): void {
+  const { joinLink } = edition;
+  if (joinLink !== undefined) {
+    api.post("/join-links", inPerson, async (c) => {
+      const { secret, expires_at } = await makeInvitation(ports, c.get("caller"));
+      const link: JoinLink = { link: joinLink(secret), expires_at };
+      return c.json(link, 201);
+    });
+  }
+  api.post(
+    "/groups",
+    inPerson,
+    body("GroupNamed"),
+    onRequest("json", (caller, _id, said: GroupNamed) => makeGroup(ports, caller, said), 201),
+  );
+  api.post(
+    "/groups/:id/members",
+    inPerson,
+    body("GroupMember"),
+    onRequest("json", (caller, id, said: GroupMember) => addToGroup(ports, caller, id, said)),
+  );
+  api.post("/groups/:id/members/:person/remove", inPerson, async (c) =>
+    c.json(await removeFromGroup(ports, c.get("caller"), c.req.param("id"), c.req.param("person"))),
+  );
+}
+
 /**
  * What only a person may do: each takes the session of a signed-in browser, whatever token the
  * request also carries. A browser is signed in by something no harness holds, so no agent does
  * any of these for its person.
  */
-function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
+function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn, edition }: ApiDeps): void {
   const signedIn: MiddlewareHandler<AuthEnv> = (c, next) =>
     signIn.loginOf(c) === null ? Promise.resolve(failed(c, personOnly())) : next();
   const inPerson = every(signedIn, signIn.cookieAuth);
@@ -179,6 +218,7 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
       chooseTreatment(ports, caller, said),
     ),
   );
+  groupRoutes(api, { ports, edition }, inPerson);
   api.post(
     "/projects/join",
     inPerson,
@@ -323,6 +363,7 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
     c.json(await activityReport(ports, c.get("caller"), c.req.valid("query"))),
   );
   api.get("/projects", async (c) => c.json(await listProjects(ports, c.get("caller"))));
+  api.get("/groups", async (c) => c.json(await listGroups(ports, c.get("caller"))));
   api.get(
     "/projects/contents",
     query("ProjectNamed"),

@@ -17,6 +17,7 @@ import {
   type Store,
   type Unit,
 } from "@uketsugi/core";
+import { everyoneOf } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { CHECKABLE, sharedWorld } from "./sharing-world.ts";
 import { describeUseCases } from "./use-case-world.ts";
@@ -79,7 +80,7 @@ describeUseCases("chains of facts between a person and everyone", (w) => {
   const audienceOf = async (who: Caller, id: string): Promise<string> => {
     const fact = await s.seenBy(who, id);
     if (fact === null) return "unseen";
-    return fact.audienceId === who.sharedAudienceId ? "shared" : "private";
+    return fact.audienceId === everyoneOf(who) ? "shared" : "private";
   };
   const exportedTo = async (who: Caller, project: string): Promise<string> =>
     JSON.stringify(await exportMarkdown(s.ports, who, project));

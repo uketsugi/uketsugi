@@ -23,6 +23,7 @@
 import type {
   ActivityRow,
   Caller,
+  Choice,
   ClaimedJob,
   Confirmation,
   Credential,
@@ -33,6 +34,7 @@ import type {
   FactContent,
   Flag,
   FlagKind,
+  Group,
   JobDraft,
   DigestFailure,
   ModelTokens,
@@ -51,7 +53,6 @@ import type {
   TaskLease,
   TaskNote,
   TaskState,
-  Treatment,
   Turn,
 } from "./domain.ts";
 import type { ModelVector } from "./ports.ts";
@@ -244,21 +245,28 @@ export interface ProjectHoldings extends ForgottenProject {
 /** One state unit: the writes in the audience it was opened on, and what reaches beyond it. */
 export interface Unit extends UnitWrites {
   /**
-   * The same unit's writes in the organization's shared audience, whose head is locked now, after
-   * the unit's own. Only a unit opened on a person's own audience may ask: any other is refused,
-   * so that no two units ever wait for each other's head.
+   * The same unit's writes in a group of the organization, whose head is locked now, after the
+   * unit's own. Only a unit opened on a person's own audience may ask, and a unit takes the heads
+   * of groups in the order of their ids: any other is refused, so that no two units ever wait for
+   * each other's head.
    */
-  on(sharedAudienceId: string): Promise<UnitWrites>;
+  on(groupId: string): Promise<UnitWrites>;
+  /**
+   * The audience that holds a fact or a task the person whose audience the unit is open on can
+   * see: their own, or a group of theirs. Read without taking any head; null for a record they
+   * cannot see. Whatever it names is read again once its head is held.
+   */
+  audienceOf(kind: "fact" | "task", id: string): Promise<string | null>;
   /**
    * How the person whose audience the unit is open on treats a project, as it stands inside the
    * unit; null while they have made no choice. Their head row is held, so it cannot change
    * before the unit ends.
    */
-  choice(project: string): Promise<Treatment | null>;
-  /** Records that person's choice for a project; it commits, or not, with everything else the unit does. */
-  choose(project: string, treatment: Treatment): Promise<void>;
+  choice(project: string): Promise<Choice | null>;
+  /** Records that person's choice for a project: the group they share it with, or none. It commits, or not, with everything else the unit does. */
+  choose(project: string, groupId: string | null): Promise<void>;
   /**
-   * Moves records between the unit's audience and the shared one, each with everything that
+   * Moves records between the unit's audience and a group's, each with everything that
    * hangs off it: a fact with the facts superseded by it, its confirmations, flags, rulings and
    * pending jobs; a task with its notes. What the logs hold about them stays where it was
    * written. Returns the ids that moved, the facts behind a given fact among them; a record
@@ -269,7 +277,7 @@ export interface Unit extends UnitWrites {
    * Deletes what the person holds in a project in the unit's own audience, and nothing else:
    * their facts and tasks there, with everything that hangs off them and what any log holds about
    * them, their sessions there and their choice for it; the project's own record goes when
-   * nothing of anybody's names it. Their records in the shared audience are brought home first.
+   * nothing of anybody's names it. Their records in a group are brought home first.
    */
   forgetProject(project: string): Promise<ForgottenProject>;
   /**
@@ -277,7 +285,7 @@ export interface Unit extends UnitWrites {
    * `from` (facts and tasks in the unit's audience, their sessions) becomes `into`'s, their
    * choice for it stands for `into` unless they have one there, and `from` becomes their name for
    * `into`, as does every name of theirs that meant `from`. Refused, and nothing changed, while
-   * the shared audience holds any record of `from`, whoever wrote it: `shared` is how many.
+   * a group of the person's holds any record of `from`, whoever wrote it: `shared` is how many.
    */
   joinProject(from: string, into: string): Promise<JoinedProject | { shared: number }>;
 }
@@ -546,7 +554,7 @@ export interface ProjectsRepo {
    */
   listOf(orgId: string, principalId: string): Promise<PersonProject[]>;
   /** The person's choice for a project; null while they have made none. */
-  choice(orgId: string, principalId: string, project: string): Promise<Treatment | null>;
+  choice(orgId: string, principalId: string, project: string): Promise<Choice | null>;
   /**
    * Records the person's choice for a project; the one before it is replaced. `displayName`,
    * when given, becomes their name for the project; left out, the name they gave stays.
@@ -555,9 +563,31 @@ export interface ProjectsRepo {
     orgId: string,
     principalId: string,
     project: string,
-    treatment: Treatment,
+    groupId: string | null,
     displayName?: string,
   ): Promise<void>;
+}
+
+/** A group and the ids of the people in it. */
+export interface GroupMembers extends Group {
+  readonly members: readonly string[];
+}
+
+/** An invitation to store: the secret in its link is kept only as its SHA-256, in hex. */
+export interface NewInvitation {
+  readonly orgId: string;
+  readonly id: string;
+  readonly tokenHash: string;
+  readonly createdBy: string;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+/** A stored invitation. */
+export interface InvitationRecord {
+  readonly orgId: string;
+  readonly expiresAt: Date;
+  readonly usedAt: Date | null;
 }
 
 /** The ids a new principal takes if `ensurePrincipal` has to create it. */
@@ -588,13 +618,41 @@ export interface DirectoryRepo {
    * credentials, and the organization's shared audience, made with `sharedAudienceId` and its head
    * row if there is none yet. All of it is one transaction: a failure leaves no person behind who
    * has no credential, or whose organization has nothing to share in. From then on every caller of
-   * the organization sees the shared audience.
+   * the organization sees the group `everyone`, which every person of it is a member of.
    */
   addPerson(
     seed: PrincipalSeed,
-    sharedAudienceId: string,
+    everyoneId: string,
     credentials: readonly NewCredential[],
   ): Promise<void>;
+  /** The organization's groups with their members' ids, by name. */
+  groups(orgId: string): Promise<GroupMembers[]>;
+  /** Makes a group, with its head row; false when the organization has one of that name. */
+  createGroup(orgId: string, group: Group): Promise<boolean>;
+  /** Makes a person of the organization a member of a group; one who is a member already stays one. */
+  addMember(orgId: string, groupId: string, principalId: string): Promise<void>;
+  /**
+   * Takes a person out of a group: they no longer see what it holds, and a project of theirs that
+   * was shared with it is private for them again. What they published there stays.
+   */
+  removeMember(orgId: string, groupId: string, principalId: string): Promise<void>;
+  /** Whether a subject has a principal, in whichever organization, and whether it was removed; null when it has none. */
+  knownSubject(subject: string): Promise<{ orgId: string; removed: boolean } | null>;
+  /** Stores an invitation to an organization: the hash of the secret in its link. */
+  addInvitation(invitation: NewInvitation): Promise<void>;
+  /** The invitation a secret's hash belongs to, used or not; null when none has it. */
+  invitation(tokenHash: string): Promise<InvitationRecord | null>;
+  /**
+   * Makes the seed's person a member of the invitation's organization, in `everyone`, and marks
+   * the invitation used, as one step: false, and nothing changed, when it was used or expired
+   * before this step ran.
+   */
+  joinWithInvitation(
+    seed: PrincipalSeed,
+    everyoneId: string,
+    tokenHash: string,
+    at: Date,
+  ): Promise<boolean>;
   /** The organization's people, in the order they were added. */
   people(orgId: string): Promise<Person[]>;
   rename(orgId: string, principalId: string, displayName: string): Promise<void>;
