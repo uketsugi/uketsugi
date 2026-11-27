@@ -26,7 +26,7 @@ everything stays on your machine.
 harnesses added to it, and sessions that are told to search memory before they investigate and to
 publish what they establish. A small dashboard shows the facts, the tasks and what each session did.
 
-> **Pre-release.** Linux on x86-64 only. It has been run end to end with Claude Code and
+> **Early release.** Linux on x86-64 only. It has been run end to end with Claude Code and
 > Antigravity: each found what the other had recorded, and each finished a task the other had
 > left. For Codex, VS Code and Cursor the line that adds the server was run, and no session was.
 > Commands, and what is stored, may still change between versions.
