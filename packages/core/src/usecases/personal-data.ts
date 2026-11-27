@@ -139,7 +139,7 @@ async function blockedBy(ports: Pick<CorePorts, "store">, caller: Caller): Promi
   const people = await ports.store.directory.people(caller.orgId);
   const first = people.find((person) => person.administrator);
   if (first?.id !== caller.principalId || people.length < 2) return null;
-  return "You are the administrator of this organization and other people are in it. Remove them from it first, then delete your account.";
+  return "You are the administrator of this organization and other people are in it. Hand the organization over to one of them on the Groups page, then delete your account.";
 }
 
 /** What deleting the account takes, what it takes from each group, and what of other people's stays. */

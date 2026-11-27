@@ -7,6 +7,7 @@
  * by being removed from the organization.
  */
 import type {
+  AdministratorHandover,
   GroupChanged,
   GroupList,
   GroupMember,
@@ -53,6 +54,30 @@ async function viewOf(
   };
 }
 
+/**
+ * Hands the organization to another of its people: they are its administrator from then on and
+ * the caller is not. Only the administrator does it, and only to a person who is there. The
+ * groups as the caller now sees them are returned.
+ */
+export async function handOver(
+  ports: Ports,
+  caller: Caller,
+  input: AdministratorHandover,
+): Promise<GroupList> {
+  await requireAdministrator(ports, caller);
+  const person = await personIn(ports, caller, input.person);
+  if (person === caller.principalId) {
+    throw invalidInput(
+      "You are the administrator of this organization already.",
+      "Choose another person to hand it to.",
+    );
+  }
+  if (!(await ports.store.directory.handOver(caller.orgId, caller.principalId, person))) {
+    throw forbidden("The organization was not handed over.", "Reload the page and try again.");
+  }
+  return listGroups(ports, caller);
+}
+
 /** The groups the person is in; the administrator sees every group, and everyone they could add. */
 export async function listGroups(ports: Ports, caller: Caller): Promise<GroupList> {
   const administrator = (await administratorOf(ports, caller)) === caller.principalId;
@@ -69,6 +94,7 @@ export async function listGroups(ports: Ports, caller: Caller): Promise<GroupLis
     groups: await Promise.all(shown.map((group) => viewOf(ports, caller, group))),
     people,
     administrator,
+    you: caller.principalId,
   };
 }
 

@@ -22,6 +22,7 @@ import {
   type HostProof,
   type NewProjectRequest,
   type JoinLink,
+  type AdministratorHandover,
   type GroupMember,
   type GroupNamed,
   type ProjectChoiceRequest,
@@ -39,6 +40,7 @@ import {
   confirmFact,
   correctFact,
   addToGroup,
+  handOver,
   createNamedProject,
   deleteAccount,
   deleteProject,
@@ -200,6 +202,12 @@ function groupRoutes(
     inPerson,
     body("GroupMember"),
     onRequest("json", (caller, id, said: GroupMember) => addToGroup(ports, caller, id, said)),
+  );
+  api.post(
+    "/administrator",
+    inPerson,
+    body("AdministratorHandover"),
+    onRequest("json", (caller, _id, said: AdministratorHandover) => handOver(ports, caller, said)),
   );
   api.post("/groups/:id/members/:person/remove", inPerson, async (c) =>
     c.json(await removeFromGroup(ports, c.get("caller"), c.req.param("id"), c.req.param("person"))),

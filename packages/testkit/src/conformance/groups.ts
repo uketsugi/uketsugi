@@ -16,6 +16,21 @@ export function describeGroupConformance(name: string, harness: StoreHarness): v
     let alice: Caller;
     let carol: Caller;
 
+    /** Adds a person to the organization of `of`. */
+    async function addedTo(of: Caller, subject: string): Promise<Caller> {
+      const seed = {
+        subject,
+        displayName: subject,
+        orgId: of.orgId,
+        principalId: ids.uuid(),
+        audienceId: ids.uuid(),
+      };
+      await store.directory.addPerson(seed, ids.uuid(), []);
+      const added = await store.directory.callerOf(of.orgId, seed.principalId);
+      if (added === null) throw new Error(`${subject} was added`);
+      return added;
+    }
+
     const asAlice = () => targetOf(alice, clock.now());
 
     beforeAll(async () => {
@@ -106,6 +121,32 @@ export function describeGroupConformance(name: string, harness: StoreHarness): v
       await removal;
       expect(early, "the removal went through while a unit held the group's head").toBe(false);
       expect(await store.directory.callerOf(leaver.orgId, leaver.principalId)).toBeNull();
+    });
+
+    test("a hand-over makes one administrator at a time, and is refused, with nothing changed, for a person who is not there or not the administrator", async () => {
+      const owner = await person(store, ids, "test:handover-owner");
+      const next = await addedTo(owner, "test:handover-next");
+      const third = await addedTo(owner, "test:handover-third");
+      const gone = await addedTo(owner, "test:handover-gone");
+      await store.directory.removePerson(owner.orgId, gone.principalId, clock.now());
+      const administrators = async () =>
+        (await store.directory.people(owner.orgId))
+          .filter((one) => one.administrator)
+          .map((one) => one.id);
+      expect(await administrators()).toEqual([owner.principalId]);
+      for (const [from, to] of [
+        [owner.principalId, gone.principalId],
+        [owner.principalId, ids.uuid()],
+        [next.principalId, owner.principalId],
+        [next.principalId, third.principalId],
+      ]) {
+        expect(await store.directory.handOver(owner.orgId, from ?? "", to ?? "")).toBe(false);
+        expect(await administrators()).toEqual([owner.principalId]);
+      }
+      expect(await store.directory.handOver(owner.orgId, owner.principalId, next.principalId)).toBe(
+        true,
+      );
+      expect(await administrators()).toEqual([next.principalId]);
     });
 
     test("a unit takes the heads of groups in the order of their ids, and refuses the reverse", async () => {

@@ -18,6 +18,7 @@ const administered: GroupList = {
   ],
   people: [ANN, BO, CY],
   administrator: true,
+  you: ANN.id,
 };
 
 describe("Groups", () => {
@@ -81,5 +82,39 @@ describe("Groups", () => {
     ]);
     // A provider-signed edition's invitation link is offered only there.
     expect(screen.queryByRole("button", { name: "Make an invitation link" })).toBeNull();
+  });
+
+  it("lets the administrator hand the organization to another person, asking first, with the session's CSRF value", async () => {
+    const sent: { body: unknown; csrf: string | null }[] = [];
+    api.use(
+      answer("/api/groups", administered),
+      http.post("*/api/administrator", async ({ request }) => {
+        sent.push({ body: await request.json(), csrf: request.headers.get(API_CSRF_HEADER) });
+        return HttpResponse.json({ ...administered, administrator: false });
+      }),
+    );
+    const user = open("/groups");
+    const form = within(await screen.findByRole("region", { name: "Hand the organization over" }));
+    const choices = form.getAllByRole("option").map((option) => option.textContent);
+    expect(choices).toEqual(["Choose a person", "Bo", "Cy"]);
+    await user.selectOptions(form.getByLabelText("Hand the organization to"), BO.id);
+    await user.click(form.getByRole("button", { name: "Hand over" }));
+    expect(sent).toEqual([]);
+    await user.click(await screen.findByRole("button", { name: "Yes, hand it to Bo" }));
+    await screen.findByRole("region", { name: "design" });
+    expect(sent).toEqual([{ body: { person: BO.id }, csrf: session.csrf }]);
+  });
+
+  it("offers no hand-over to a person who is not the administrator", async () => {
+    open("/groups");
+    await screen.findByRole("region", { name: "everyone" });
+    expect(screen.queryByRole("region", { name: "Hand the organization over" })).toBeNull();
+  });
+
+  it("offers the administrator no hand-over while they are the only person", async () => {
+    api.use(answer("/api/groups", { ...administered, people: [ANN] }));
+    open("/groups");
+    await screen.findByRole("region", { name: "everyone" });
+    expect(screen.queryByRole("region", { name: "Hand the organization over" })).toBeNull();
   });
 });

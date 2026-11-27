@@ -40,7 +40,7 @@ export const RETENTION = [
 export const AFTER_DELETION = [
   "Deleting your account deletes every fact, task, note and session you wrote, in every project and in every group you shared it with, wherever it now is, a group you have since left included: the people in those groups stop reading it. Facts of other people that cited yours are marked as having a source that changed.",
   "What stays is what other people wrote, and what you did to their records, which the log keeps as ids and codes with no text, under an account that has no name.",
-  "Of the account itself two things stay, and no text: its internal id, on the log of what you did to other people's records and on flags and invitations; and a one-way hash of the identifier your sign-in provider gave you, kept so that the account cannot be opened again, which anyone who holds that identifier could match.",
+  "Of the account itself two things stay, and no text: its internal id, on the account's own row and private audience and wherever you are named on what is not yours, on the log, flags, invitations and a task's lease; and a one-way hash of the identifier your sign-in provider gave you, kept so that the account cannot be opened again, which anyone who holds that identifier could match.",
 ] as const;
 
 /** What the open edition says of backups. */

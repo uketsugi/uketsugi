@@ -44,6 +44,7 @@ export {
 export {
   acceptInvitation,
   addToGroup,
+  handOver,
   INVITATION_DAYS,
   listGroups,
   makeGroup,

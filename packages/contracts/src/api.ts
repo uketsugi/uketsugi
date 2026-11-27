@@ -34,6 +34,7 @@
  * | POST   | `/api/groups`             | cookie             | `GroupNamed`           | `GroupChanged`         |
  * | POST   | `/api/groups/:name/members` | cookie           | `GroupMember`          | `GroupChanged`         |
  * | POST   | `/api/groups/:name/members/:person/remove` | cookie | none              | `GroupChanged`         |
+ * | POST   | `/api/administrator`      | cookie             | `AdministratorHandover` | `GroupList`           |
  * | POST   | `/api/join-links`         | cookie             | none                   | `JoinLink`             |
  *   (only on a server whose edition signs people in itself)
  * | GET    | `/api/export`             | cookie or token    | `ExportParams`         | `text/markdown`        |

@@ -798,6 +798,18 @@
         "required": ["person"],
         "additionalProperties": false
       },
+      "AdministratorHandover": {
+        "type": "object",
+        "description": "`POST /api/administrator`: hands the organization to another of its people, who is its administrator from then on, and the caller is not. Answered with `GroupList`.",
+        "properties": {
+          "person": {
+            "type": "string",
+            "description": "The person's id, as the group list gives it."
+          }
+        },
+        "required": ["person"],
+        "additionalProperties": false
+      },
       "SignInRequest": {
         "type": "object",
         "description": "`POST /sign-in`: signs a browser in to the dashboard with the person's own key. A harness's token is refused here.",
@@ -1388,10 +1400,14 @@
           },
           "administrator": {
             "type": "boolean",
-            "description": "Whether the person made the organization, and so makes groups and says who is in them."
+            "description": "Whether the person is the organization's administrator, who makes groups, says who is in them and can hand the organization to another person."
+          },
+          "you": {
+            "type": "string",
+            "description": "The person's own id, as `people` gives it."
           }
         },
-        "required": ["groups", "people", "administrator"]
+        "required": ["groups", "people", "administrator", "you"]
       },
       "GroupChanged": {
         "type": "object",

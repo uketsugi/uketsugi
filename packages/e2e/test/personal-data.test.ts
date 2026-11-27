@@ -7,10 +7,13 @@ import {
   accountContents,
   deleteAccount,
   exportMine,
+  handOver,
+  makeInvitation,
   removeFromGroup,
   renderMine,
   scopeOf,
 } from "@uketsugi/core";
+import { onTestServer } from "@uketsugi/testkit";
 import { expect, test } from "vitest";
 import { groupsWorld, P } from "./groups-world.ts";
 import { CHECKABLE, sharedWorld } from "./sharing-world.ts";
@@ -89,7 +92,7 @@ describeUseCases("a person's own data", (w) => {
 
   test("the organization's administrator is refused while others are in it, and a wrong name is refused", async () => {
     await setUp();
-    expect((await accountContents(s.ports, s.ann)).blocked).toMatch(/Remove them/);
+    expect((await accountContents(s.ports, s.ann)).blocked).toMatch(/hand the organization over/i);
     await expect(deleteAccount(s.ports, s.ann, { name: s.ann.displayName })).rejects.toMatchObject({
       code: "forbidden",
     });
@@ -219,5 +222,79 @@ describeUseCases("a person's data after they left a group", (w) => {
     expect(await g.ports.store.facts.get(own, fact.id)).toBeNull();
     expect(await g.ports.store.tasks.get(own, task.task.id)).toBeNull();
     expect(await g.ports.store.review.history(own, fact.id, 10)).toEqual([]);
+  });
+});
+
+describeUseCases("an administrator who leaves", (w) => {
+  const s = sharedWorld(w);
+
+  test("hands the organization over first, and can then delete their account", async () => {
+    expect((await accountContents(s.ports, s.ann)).blocked).toMatch(/hand the organization over/i);
+    await expect(deleteAccount(s.ports, s.ann, { name: s.ann.displayName })).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await handOver(s.ports, s.ann, { person: s.bob.principalId });
+    expect((await accountContents(s.ports, s.ann)).blocked).toBeNull();
+    await deleteAccount(s.ports, s.ann, { name: s.ann.displayName });
+    expect(await s.ports.store.directory.callerOf(s.ann.orgId, s.ann.principalId)).toBeNull();
+    expect((await accountContents(s.ports, s.bob)).blocked).toBeNull();
+  });
+});
+
+/** The tables that may hold a deleted account's internal id, and the words of `AFTER_DELETION` that say so. A ruling by the person never outlives them: it is deleted with the fact it is on.. */
+const ID_KEPT: Record<string, string> = {
+  principals: "own row",
+  audiences: "private audience",
+  events: "log",
+  flags: "flags",
+  invitations: "invitations",
+  tasks: "lease",
+};
+
+describeUseCases("what is left of a deleted account", (w) => {
+  const s = sharedWorld(w);
+
+  test("the internal id stays only in the tables the sentence names", async (context) => {
+    if (w.database === null) context.skip("the tables are read on a PostgreSQL server");
+    const project = "github.com/acme/left-behind";
+    await s.choose(s.ann, project, "shared");
+    await s.choose(s.bob, project, "shared");
+    const [ann, bob] = [s.calls(s.ann, project), s.calls(s.bob, project)];
+    const annFact = await ann("publish_fact", { claim: "LEFTMARK a", citations: CHECKABLE });
+    const bobFact = await bob("publish_fact", {
+      claim: "LEFTMARK b",
+      citations: [{ kind: "fact", fact: annFact.id }, CHECKABLE],
+    });
+    const bobTask = await bob("publish_task", { title: "LEFTMARK task" });
+    await ann("claim_task", { id: bobTask.task.id });
+    await ann("update_fact", { id: bobFact.id, flag: "stale" });
+    await makeInvitation(s.ports, s.ann);
+    await handOver(s.ports, s.ann, { person: s.bob.principalId });
+    await deleteAccount(s.ports, s.ann, { name: s.ann.displayName });
+
+    const database = w.database ?? "";
+    const tables = (await onTestServer(
+      "select table_name from information_schema.tables where table_schema = 'public'",
+      database,
+    )) as { table_name: string }[];
+    const holding: string[] = [];
+    for (const { table_name } of tables) {
+      const rows = (await onTestServer(
+        `select count(*)::int as n from "${table_name}" t where t::text like '%${s.ann.principalId}%'`,
+        database,
+      )) as { n: number }[];
+      if ((rows[0]?.n ?? 0) > 0) holding.push(table_name);
+    }
+    expect(holding.sort()).toEqual([
+      "audiences",
+      "events",
+      "flags",
+      "invitations",
+      "principals",
+      "tasks",
+    ]);
+    const said = AFTER_DELETION.join(" ");
+    for (const table of holding) expect(said, table).toContain(ID_KEPT[table] ?? "");
+    for (const words of Object.values(ID_KEPT)) expect(said).toContain(words);
   });
 });

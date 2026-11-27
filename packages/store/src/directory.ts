@@ -13,6 +13,7 @@ import type {
   PrincipalSeed,
 } from "@uketsugi/core";
 import type { Selectable } from "kysely";
+import { handOverIn } from "./administrator.ts";
 import { eraseResidue, erasedSubject, removeIn } from "./erase.ts";
 import { insertCredential, endCredentials } from "./credentials.ts";
 import { addMembers, lockHeads, groupRows, insertAudience, joinEveryone } from "./audiences.ts";
@@ -218,6 +219,10 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
         .where("audienceId", "=", groupId)
         .execute();
     });
+  }
+
+  handOver(orgId: string, from: string, to: string): Promise<boolean> {
+    return handOverIn(this.db, orgId, from, to);
   }
 
   async knownSubject(subject: string): Promise<{ orgId: string; removed: boolean } | null> {

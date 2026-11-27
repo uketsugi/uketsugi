@@ -1,7 +1,8 @@
 /**
  * Groups: the people of the organization a project can be shared with. Everyone is in `everyone`.
  * The person who made the organization makes other groups, says who is in them and, where people
- * sign in through a provider, makes the link that invites a person; everyone else sees the groups
+ * sign in through a provider, makes the link that invites a person, and can hand the organization
+ * to another of its people; everyone else sees the groups
  * they are in and who is in them.
  */
 import type { GroupList } from "@uketsugi/contracts";
@@ -11,6 +12,7 @@ import {
   addToGroup,
   capabilitiesQuery,
   groupsQuery,
+  handOver,
   makeGroup,
   makeJoinLink,
   removeFromGroup,
@@ -21,6 +23,7 @@ import {
   Card,
   CodeBlock,
   Empty,
+  ChangeDialog,
   ErrorPanel,
   QueryState,
   submitOnce,
@@ -52,6 +55,30 @@ function Remove({ group, person, name }: { group: string; person: string; name: 
   );
 }
 
+/** A choice among the organization's people. */
+function PersonSelect(props: {
+  id: string;
+  people: GroupList["people"];
+  person: string;
+  onPerson: (id: string) => void;
+}) {
+  return (
+    <select
+      id={props.id}
+      value={props.person}
+      onChange={(event) => props.onPerson(event.target.value)}
+      className="h-8 rounded-md border border-line-strong bg-surface px-2"
+    >
+      <option value="">Choose a person</option>
+      {props.people.map((one) => (
+        <option key={one.id} value={one.id}>
+          {one.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** Adds one of the organization's people to a group. */
 function Add({ group, people }: { group: Group; people: GroupList["people"] }) {
   const [person, setPerson] = useState("");
@@ -72,19 +99,7 @@ function Add({ group, people }: { group: Group; people: GroupList["people"] }) {
       <label htmlFor={`add-${group.name}`} className="font-medium">
         Add to {group.name}
       </label>
-      <select
-        id={`add-${group.name}`}
-        value={person}
-        onChange={(event) => setPerson(event.target.value)}
-        className="h-8 rounded-md border border-line-strong bg-surface px-2"
-      >
-        <option value="">Choose a person</option>
-        {left.map((one) => (
-          <option key={one.id} value={one.id}>
-            {one.name}
-          </option>
-        ))}
-      </select>
+      <PersonSelect id={`add-${group.name}`} people={left} person={person} onPerson={setPerson} />
       <Button type="submit" disabled={person === "" || added.isPending}>
         Add
       </Button>
@@ -149,6 +164,35 @@ function Make() {
   );
 }
 
+/** Hands the organization to another of its people, asked about first: they are its administrator, and the person is not. */
+function HandOver({ people }: { people: GroupList["people"] }) {
+  const [person, setPerson] = useState("");
+  const chosen = people.find((one) => one.id === person);
+  const handed = useChange((csrf) => handOver(person, csrf), refreshGroups);
+  return (
+    <Card label="Hand the organization over">
+      <div className="flex flex-wrap items-center gap-2 p-4">
+        <label htmlFor="hand-over" className="font-medium">
+          Hand the organization to
+        </label>
+        <PersonSelect id="hand-over" people={people} person={person} onPerson={setPerson} />
+        <ChangeDialog
+          mutation={handed}
+          trigger={<Button disabled={chosen === undefined} />}
+          triggerText="Hand over"
+          title={`Hand the organization to ${chosen?.name ?? ""}?`}
+          keep="Keep it"
+          text={`Yes, hand it to ${chosen?.name ?? ""}`}
+        >
+          {chosen?.name ?? "They"} will be the administrator: they make groups, say who is in them
+          and invite people. You will be one of the people and cannot take it back unless they hand
+          it to you. Until you have handed it on you cannot delete your account.
+        </ChangeDialog>
+      </div>
+    </Card>
+  );
+}
+
 /** Where people sign in through a provider, the link that brings a person into this organization. */
 function Invite() {
   const { csrf } = useSession();
@@ -175,6 +219,7 @@ function Invite() {
 
 function Listed({ data }: { data: GroupList }) {
   const capabilities = useQuery(capabilitiesQuery).data?.dashboard;
+  const others = data.people.filter((one) => one.id !== data.you);
   const signsIn = capabilities !== undefined && !capabilities.key_form;
   return (
     <div className="space-y-4">
@@ -187,6 +232,7 @@ function Listed({ data }: { data: GroupList }) {
         <div className="space-y-4">
           <Make />
           {signsIn ? <Invite /> : null}
+          {others.length === 0 ? null : <HandOver people={others} />}
         </div>
       ) : null}
     </div>

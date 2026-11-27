@@ -9,6 +9,7 @@ import {
   type AccountContents,
   type AccountDeleted,
   type ActivityReport,
+  type AdministratorHandover,
   type ApiError,
   type ApiProject,
   type CapabilityDescriptor,
@@ -334,6 +335,12 @@ export function addToGroup(
 ): Promise<GroupChanged> {
   const path = `/api/groups/${encodeURIComponent(group)}/members`;
   return request<GroupChanged>(path, {}, { method: "POST", csrf, body: member });
+}
+
+/** Hands the organization to another of its people, who is its administrator from then on. */
+export function handOver(person: string, csrf: string): Promise<GroupList> {
+  const body: AdministratorHandover = { person };
+  return request<GroupList>("/api/administrator", {}, { method: "POST", csrf, body });
 }
 
 /** Takes a person out of a group; out of `everyone` is out of the organization. */

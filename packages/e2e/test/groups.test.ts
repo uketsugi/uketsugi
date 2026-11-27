@@ -7,6 +7,7 @@ import {
   acceptInvitation,
   addToGroup,
   createTokenIdentity,
+  handOver,
   invitePerson,
   listFacts,
   listGroups,
@@ -166,7 +167,7 @@ describeUseCases("groups", (w) => {
       addToGroup(s.ports, mine, "nonesuch", { person: s.cy.principalId }),
     ).rejects.toThrow(/no group called/);
     const seenByCy = await listGroups(s.ports, await s.again(s.cy));
-    expect(seenByCy).toMatchObject({ administrator: false, people: [] });
+    expect(seenByCy).toMatchObject({ administrator: false, people: [], you: s.cy.principalId });
     expect(seenByCy.groups.map((group) => group.name)).toEqual(["everyone"]);
     expect(idOf((await listGroups(s.ports, mine)).people, "cy")).toBe(s.cy.principalId);
   });
@@ -243,5 +244,49 @@ describeUseCases("groups", (w) => {
     ).toMatchObject({
       orgId: admin.orgId,
     });
+  });
+});
+
+describeUseCases("handing an organization over", (w) => {
+  const s = groupsWorld(w);
+
+  test("only the administrator hands the organization to a member who is there, and then that member is the administrator and the former one is not", async () => {
+    const [ann, bob] = [await s.again(s.ann), await s.again(s.bob)];
+    await expect(handOver(s.ports, bob, { person: bob.principalId })).rejects.toThrow(
+      /Only the person who made/,
+    );
+    await expect(handOver(s.ports, bob, { person: s.cy.principalId })).rejects.toThrow(
+      /Only the person who made/,
+    );
+    await expect(handOver(s.ports, ann, { person: "no-such-person" })).rejects.toThrow(
+      /Nobody with the id/,
+    );
+    await expect(handOver(s.ports, ann, { person: ann.principalId })).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+    const gone = await invitePerson(s.ports, w.owner, { name: "eve", operator_name: "ann" });
+    const eve = await createTokenIdentity(s.ports).authenticate(gone.issued[0]?.secret);
+    await removeFromGroup(s.ports, ann, "everyone", eve.principalId);
+    await expect(handOver(s.ports, ann, { person: eve.principalId })).rejects.toThrow(
+      /Nobody with the id/,
+    );
+    expect((await listGroups(s.ports, ann)).administrator).toBe(true);
+
+    const after = await handOver(s.ports, ann, { person: bob.principalId });
+    expect(after.administrator).toBe(false);
+    expect((await listGroups(s.ports, await s.again(s.bob))).administrator).toBe(true);
+    // The new administrator does what an administrator does; the former one cannot.
+    const newest = await s.again(s.bob);
+    await makeGroup(s.ports, newest, { name: "handed" });
+    await addToGroup(s.ports, newest, "handed", { person: s.cy.principalId });
+    await expect(makeGroup(s.ports, await s.again(s.ann), { name: "late" })).rejects.toThrow(
+      /Only the person who made/,
+    );
+    await expect(
+      handOver(s.ports, await s.again(s.ann), { person: s.ann.principalId }),
+    ).rejects.toThrow(/Only the person who made/);
+    // Back again, so that the other cases of this file stand on Ann.
+    await handOver(s.ports, newest, { person: s.ann.principalId });
+    expect((await listGroups(s.ports, await s.again(s.ann))).administrator).toBe(true);
   });
 });

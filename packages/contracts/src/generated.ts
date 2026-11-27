@@ -247,6 +247,7 @@ export interface ContractTypes {
   ProjectChoiceRequest?: ProjectChoiceRequest;
   GroupNamed?: GroupNamed;
   GroupMember?: GroupMember;
+  AdministratorHandover?: AdministratorHandover;
   SignInRequest?: SignInRequest;
   InviteRequest?: InviteRequest;
   FactCorrection?: FactCorrection;
@@ -914,6 +915,15 @@ export interface GroupNamed {
  * `POST /api/groups/:name/members`: adds a person of the organization to a group.
  */
 export interface GroupMember {
+  /**
+   * The person's id, as the group list gives it.
+   */
+  person: string;
+}
+/**
+ * `POST /api/administrator`: hands the organization to another of its people, who is its administrator from then on, and the caller is not. Answered with `GroupList`.
+ */
+export interface AdministratorHandover {
   /**
    * The person's id, as the group list gives it.
    */
@@ -1637,9 +1647,13 @@ export interface GroupList {
    */
   people: ApiMember[];
   /**
-   * Whether the person made the organization, and so makes groups and says who is in them.
+   * Whether the person is the organization's administrator, who makes groups, says who is in them and can hand the organization to another person.
    */
   administrator: boolean;
+  /**
+   * The person's own id, as `people` gives it.
+   */
+  you: string;
 }
 /**
  * A group and who is in it.
@@ -2073,6 +2087,7 @@ export interface ApiRequests {
   ProjectChoiceRequest: ProjectChoiceRequest;
   GroupNamed: GroupNamed;
   GroupMember: GroupMember;
+  AdministratorHandover: AdministratorHandover;
   SignInRequest: SignInRequest;
   InviteRequest: InviteRequest;
   FactCorrection: FactCorrection;

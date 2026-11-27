@@ -660,6 +660,12 @@ export interface DirectoryRepo {
    * was shared with it is private for them again. What they published there stays.
    */
   removeMember(orgId: string, groupId: string, principalId: string): Promise<void>;
+  /**
+   * Makes `to` the organization's administrator and `from` not: one change, so that the
+   * organization has one administrator at every moment. False, and nothing changed, when `from`
+   * is not the administrator or `to` is not a person who is there.
+   */
+  handOver(orgId: string, from: string, to: string): Promise<boolean>;
   /** Whether a subject has a principal, in whichever organization, and whether it was removed; null when it has none. */
   knownSubject(subject: string): Promise<{ orgId: string; removed: boolean } | null>;
   /** Stores an invitation to an organization: the hash of the secret in its link. */

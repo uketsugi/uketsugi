@@ -409,4 +409,5 @@ export const groups: GroupList = {
   ],
   people: [],
   administrator: false,
+  you: "0197a000-0000-7000-8000-000000000001",
 };
