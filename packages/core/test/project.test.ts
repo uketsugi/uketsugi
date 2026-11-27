@@ -176,6 +176,7 @@ function projectsOf() {
         return Promise.resolve();
       },
       listOf: () => Promise.resolve([]),
+      nameFor: () => Promise.resolve(null),
     },
   };
   return { ports: { store, clock: { now: () => new Date(0) } } as never, choices };

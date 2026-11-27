@@ -12,6 +12,7 @@ import type {
   FactPage,
   ProjectContents,
   ProjectDeleted,
+  ProjectJoined,
   ProjectList,
   SearchFactsResult,
   SearchTasksResult,
@@ -174,5 +175,53 @@ describeOnEachEngine("a person's own corrections", (open) => {
     // The agent's own search opened a session there again; the project holds nothing else.
     const left = await browser.get(`/api/projects/contents?${named}`);
     expect(await left.json()).toMatchObject({ facts: 0, tasks: 0, others_facts: 0 });
+  });
+
+  test("the person joins a renamed repository's old project into its new key, and an agent that still names the old one is given the memory", async () => {
+    const [old, renamed] = ["github.com/acme/ledger-old", "github.com/acme/ledger-renamed"];
+    const told = { kind: "person", who: "ann", quote: "the ledger audit runs nightly" };
+    const claim = "The ledger audit runs nightly at two";
+    const published = await agent.callTool("publish_fact", {
+      project: old,
+      claim,
+      citations: [told],
+    });
+    expect(published.isError, published.text).toBe(false);
+    const ask = async (project: string) =>
+      (
+        (await agent.callTool("search_facts", { project, query: "ledger audit nightly" }))
+          .structuredContent as unknown as SearchFactsResult
+      ).facts.map((entry) => entry.claim);
+    expect(await ask(renamed)).toEqual([]);
+
+    // Only a signed-in person joins: the agent's token is refused, and a bad body is named.
+    const refused = await fetch(`${url}/api/projects/join`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ from: old, into: renamed }),
+    });
+    expect(refused.status).toBe(403);
+    const browser = await person();
+    expect((await browser.post("/api/projects/join", { from: old })).status).toBe(422);
+    expect((await browser.post("/api/projects/join", { from: old, into: old })).status).toBe(422);
+    expect(await ask(old)).toEqual([claim]);
+
+    const joined = await browser.post("/api/projects/join", { from: old, into: renamed });
+    expect(joined.status).toBe(200);
+    expect((await joined.json()) as ProjectJoined).toEqual({
+      from: old,
+      into: renamed,
+      facts: 1,
+      tasks: 0,
+      sessions: 1,
+    });
+    expect(await ask(renamed)).toEqual([claim]);
+    expect(await ask(old)).toEqual([claim]);
+    const projects = (await (await browser.get("/api/projects")).json()) as ProjectList;
+    expect(projects.projects.find((project) => project.key === renamed)).toMatchObject({
+      names: [old],
+      facts: 1,
+    });
+    expect(projects.projects.map((project) => project.key)).not.toContain(old);
   });
 });

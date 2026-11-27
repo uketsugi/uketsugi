@@ -62,6 +62,12 @@ export interface Database {
     treatment: Treatment;
     displayName: string | null;
   };
+  projectNames: {
+    orgId: string;
+    principalId: string;
+    name: string;
+    project: string;
+  };
   sessions: {
     orgId: string;
     id: string;

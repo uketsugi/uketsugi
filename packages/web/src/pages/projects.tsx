@@ -3,15 +3,18 @@
  * each. On a server with other people the person chooses here, per project, to share it or keep
  * it private, and can change their mind. Nobody else makes the choice, and no agent can. Below
  * the list a person makes a named project, for work that no origin remote names. A person also
- * deletes a project of theirs here, after being shown what goes.
+ * deletes a project of theirs here, after being shown what goes, and joins one into another, for
+ * a repository that was renamed or moved, so that its memory is found under the new name.
  */
 import type { ApiProject, ProjectChoice, ProjectChoiceRequest } from "@uketsugi/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTable } from "@tanstack/react-table";
+import { Input } from "@base-ui/react/input";
 import { createContext, use, useState } from "react";
 import {
   chooseTreatment,
   deleteProject,
+  joinProject,
   projectContentsQuery,
   projectsQuery,
   refreshFacts,
@@ -100,12 +103,13 @@ function Contents({ project }: { project: string }) {
   );
 }
 
+/** What a delete or a join of a project changes: the facts, the tasks and the list itself. */
+const everythingChanged = (kept: QueryClient) =>
+  Promise.all([refreshFacts(kept), kept.invalidateQueries({ queryKey: ["tasks"] })]);
+
 /** Deletes everything of the person's in one project, asked about first and shown what goes. */
 function Delete({ project }: { project: ApiProject }) {
-  const deleted = useChange(
-    (csrf) => deleteProject(project.key, csrf),
-    (kept) => Promise.all([refreshFacts(kept), kept.invalidateQueries({ queryKey: ["tasks"] })]),
-  );
+  const deleted = useChange((csrf) => deleteProject(project.key, csrf), everythingChanged);
   return (
     <ChangeDialog
       mutation={deleted}
@@ -121,6 +125,47 @@ function Delete({ project }: { project: ApiProject }) {
         This cannot be undone. A copy can stay behind in the database’s own files and in a backup,
         which Uketsugi does not remove. An agent that works here again starts the project afresh.
       </span>
+    </ChangeDialog>
+  );
+}
+
+/** Joins the project into another the person names, asked about first: what moves, and that it stays. */
+function Join({ project }: { project: ApiProject }) {
+  const [into, setInto] = useState("");
+  const joined = useChange(
+    (csrf) => joinProject({ from: project.key, into: into.trim() }, csrf),
+    everythingChanged,
+  );
+  return (
+    <ChangeDialog
+      mutation={joined}
+      trigger={<Button size="sm" aria-label={`Join ${project.key} into another project…`} />}
+      triggerText="Join…"
+      title="Join this project into another?"
+      keep="Leave it as it is"
+      text="Join the project"
+    >
+      <span className="block font-mono break-all">{project.key}</span>
+      <span className="mt-2 block">
+        Everything of yours here (facts, tasks and sessions) moves to the project you name, and{" "}
+        {project.key} becomes another name for it, so an agent that still names it lands there. Use
+        it when a repository was renamed or moved, or a folder was pushed for the first time. If
+        both projects hold the same fact, you will have it twice: a join does not merge them. A join
+        cannot be undone.
+      </span>
+      <label htmlFor={`join-${project.key}`} className="mt-2 block font-medium">
+        Join it into
+      </label>
+      <Input
+        id={`join-${project.key}`}
+        autoComplete="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        placeholder="github.com/owner/new-name"
+        value={into}
+        onChange={(event) => setInto(event.target.value)}
+        className="mt-1 h-8 w-full rounded-md border border-line-strong bg-surface px-3 font-mono"
+      />
     </ChangeDialog>
   );
 }
@@ -156,6 +201,16 @@ function ChoiceCell({ project }: { project: ApiProject }) {
   );
 }
 
+/** The keys the person joined into a project, which an agent that still names one reaches it by. */
+function OtherNames({ names }: { names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <span className="block text-ink-muted">
+      Also called <span className="font-mono">{names.join(", ")}</span>
+    </span>
+  );
+}
+
 /** A folder's key, `file://<machine>/<path>`, as its machine and its path. */
 function Name({ project }: { project: ApiProject }) {
   if (project.kind === "path") {
@@ -165,12 +220,14 @@ function Name({ project }: { project: ApiProject }) {
       <span className="flex flex-col break-all">
         <span className="text-ink-muted">{folder.slice(0, at)}</span>
         <span className="font-mono">{folder.slice(at)}</span>
+        <OtherNames names={project.names} />
       </span>
     );
   }
   return (
     <span className="break-all">
       {project.name === null ? project.key : `${project.name} (${project.key})`}
+      <OtherNames names={project.names} />
     </span>
   );
 }
@@ -193,6 +250,11 @@ const columns = column.columns([
     id: "choice",
     header: "Change",
     cell: ({ row }) => <ChoiceCell project={row.original} />,
+  }),
+  column.display({
+    id: "join",
+    header: "Join",
+    cell: ({ row }) => <Join project={row.original} />,
   }),
   column.display({
     id: "delete",

@@ -832,6 +832,24 @@
         },
         "additionalProperties": false
       },
+      "ProjectJoin": {
+        "type": "object",
+        "description": "`POST /api/projects/join`: one of the person's projects joined into another. Only a signed-in browser makes it, and it cannot be undone.",
+        "properties": {
+          "from": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "The person's project that becomes their other name for `into`, by its canonical key."
+          },
+          "into": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "The project it joins, as a tool call names it; a key nothing has used yet is fine."
+          }
+        },
+        "required": ["from", "into"],
+        "additionalProperties": false
+      },
       "ProjectNamed": {
         "type": "object",
         "description": "`GET /api/projects/contents` query and `DELETE /api/projects` body: one of the person's projects, by its canonical key.",
@@ -1536,6 +1554,32 @@
           }
         },
         "required": ["project", "facts", "tasks", "sessions", "others_facts", "others_tasks"]
+      },
+      "ProjectJoined": {
+        "type": "object",
+        "description": "`POST /api/projects/join`: what moved. `from` is now the person's other name for `into`.",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "into": {
+            "type": "string",
+            "description": "The canonical key of the project joined into."
+          },
+          "facts": {
+            "type": "integer",
+            "description": "How many facts moved."
+          },
+          "tasks": {
+            "type": "integer",
+            "description": "How many tasks moved."
+          },
+          "sessions": {
+            "type": "integer",
+            "description": "How many sessions moved."
+          }
+        },
+        "required": ["from", "into", "facts", "tasks", "sessions"]
       },
       "ProjectDeleted": {
         "type": "object",
@@ -2468,6 +2512,13 @@
           "type": ["string", "null"],
           "description": "A named project's display name."
         },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The person's other names for it: keys they joined into it, which a call still carrying one lands here."
+        },
         "facts": {
           "type": "integer",
           "description": "How many live facts it holds that the person can see."
@@ -2482,7 +2533,7 @@
           "description": "False while the person has made no choice: the project is private until they do."
         }
       },
-      "required": ["key", "kind", "name", "facts", "treatment", "chosen"]
+      "required": ["key", "kind", "name", "names", "facts", "treatment", "chosen"]
     },
     "apiToken": {
       "type": "object",

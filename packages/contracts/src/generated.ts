@@ -237,6 +237,7 @@ export interface ContractTypes {
   InviteRequest?: InviteRequest;
   FactCorrection?: FactCorrection;
   FactConfirmation?: FactConfirmation;
+  ProjectJoin?: ProjectJoin;
   ProjectNamed?: ProjectNamed;
   DashboardSession?: DashboardSession;
   HostProof?: HostProof;
@@ -265,6 +266,7 @@ export interface ContractTypes {
   TaskClosed?: TaskClosed;
   NoteRemoved?: NoteRemoved;
   ProjectContents?: ProjectContents;
+  ProjectJoined?: ProjectJoined;
   ProjectDeleted?: ProjectDeleted;
 }
 export interface ToolError {
@@ -920,6 +922,19 @@ export interface FactConfirmation {
   checked?: string;
 }
 /**
+ * `POST /api/projects/join`: one of the person's projects joined into another. Only a signed-in browser makes it, and it cannot be undone.
+ */
+export interface ProjectJoin {
+  /**
+   * The person's project that becomes their other name for `into`, by its canonical key.
+   */
+  from: string;
+  /**
+   * The project it joins, as a tool call names it; a key nothing has used yet is fine.
+   */
+  into: string;
+}
+/**
  * `GET /api/projects/contents` query and `DELETE /api/projects` body: one of the person's projects, by its canonical key.
  */
 export interface ProjectNamed {
@@ -1519,6 +1534,10 @@ export interface ApiProject {
    */
   name: string | null;
   /**
+   * The person's other names for it: keys they joined into it, which a call still carrying one lands here.
+   */
+  names: string[];
+  /**
    * How many live facts it holds that the person can see.
    */
   facts: number;
@@ -1750,6 +1769,28 @@ export interface ProjectContents {
   others_tasks: number;
 }
 /**
+ * `POST /api/projects/join`: what moved. `from` is now the person's other name for `into`.
+ */
+export interface ProjectJoined {
+  from: string;
+  /**
+   * The canonical key of the project joined into.
+   */
+  into: string;
+  /**
+   * How many facts moved.
+   */
+  facts: number;
+  /**
+   * How many tasks moved.
+   */
+  tasks: number;
+  /**
+   * How many sessions moved.
+   */
+  sessions: number;
+}
+/**
  * `DELETE /api/projects`: what went.
  */
 export interface ProjectDeleted {
@@ -1804,5 +1845,6 @@ export interface ApiRequests {
   InviteRequest: InviteRequest;
   FactCorrection: FactCorrection;
   FactConfirmation: FactConfirmation;
+  ProjectJoin: ProjectJoin;
   ProjectNamed: ProjectNamed;
 }

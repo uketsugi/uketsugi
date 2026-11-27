@@ -52,6 +52,7 @@ export { factDetail, listFacts } from "./usecases/facts/list.ts";
 export { confirmFact, correctFact } from "./usecases/facts/correct.ts";
 export { redactFact } from "./usecases/facts/redact.ts";
 export { deleteProject, projectContents } from "./usecases/forget-project.ts";
+export { joinProjects } from "./usecases/join-project.ts";
 export { listTasks, taskDetail } from "./usecases/tasks/list.ts";
 export { closeTask } from "./usecases/tasks/update.ts";
 export type { Conversation, TurnSide } from "./usecases/session-note.ts";

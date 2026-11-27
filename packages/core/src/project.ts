@@ -1,7 +1,7 @@
 import type { ApiProject, NewProjectRequest, ProjectList } from "@uketsugi/contracts";
 import { scopeOf } from "./context.ts";
 import type { Caller, PersonProject, Project, ProjectRef } from "./domain.ts";
-import { invalidInput, projectRequired, ToolFailure } from "./failure.ts";
+import { invalidInput, notFound, projectRequired, ToolFailure } from "./failure.ts";
 import type { CorePorts } from "./ports.ts";
 import { canShare, standing } from "./sharing.ts";
 
@@ -112,6 +112,9 @@ export async function resolveProject(
   ref: ProjectRef,
 ): Promise<Project | null> {
   const { projects } = ports.store;
+  // A key the person joined into another project means that project for them.
+  const joined = await projects.nameFor(caller.orgId, caller.principalId, ref.key);
+  if (joined !== null) return projects.find(caller.orgId, joined);
   if (ref.kind === "repository") return projects.ensure(caller.orgId, ref);
   if (ref.kind === "path") {
     const folder = await projects.ensure(caller.orgId, ref);
@@ -123,6 +126,20 @@ export async function resolveProject(
   }
   const made = await projects.choice(caller.orgId, caller.principalId, ref.key);
   return made === null ? null : projects.find(caller.orgId, ref.key);
+}
+
+/** The project a request names, which must be one the person works in: nothing else is theirs to count, delete or join. */
+export async function ownProject(
+  ports: ProjectPorts,
+  caller: Caller,
+  named: string,
+): Promise<string> {
+  const key = parseProject(named)?.key;
+  const mine = await ports.store.projects.listOf(caller.orgId, caller.principalId);
+  if (key === undefined || !mine.some((project) => project.key === key)) {
+    throw notFound("listed project", named);
+  }
+  return key;
 }
 
 /** The project a piece of text names, as `parseProject` reads it and `resolveProject` finds it; null for none. */
@@ -214,11 +231,17 @@ export async function createNamedProject(
 }
 
 /** A project as the dashboard shows it to one person. */
-function apiProject(caller: Caller, project: PersonProject, facts: number): ApiProject {
+function apiProject(
+  caller: Caller,
+  project: PersonProject,
+  facts: number,
+  names: readonly string[] = [],
+): ApiProject {
   return {
     key: project.key,
     kind: project.kind,
     name: project.displayName,
+    names: [...names],
     facts,
     ...standing(caller, project.choice),
   };
@@ -234,8 +257,10 @@ export async function listProjects(
 ): Promise<ProjectList> {
   const { projects, facts } = ports.store;
   const scope = scopeOf(caller);
-  const rows = (await projects.listOf(caller.orgId, caller.principalId)).map(async (project) =>
-    apiProject(caller, project, await facts.count(scope, project.key)),
+  const listed = await projects.listOf(caller.orgId, caller.principalId);
+  const names = await projects.otherNames(caller.orgId, caller.principalId);
+  const rows = listed.map(async (project) =>
+    apiProject(caller, project, await facts.count(scope, project.key), names.get(project.key)),
   );
   return { projects: await Promise.all(rows), sharing: canShare(caller) };
 }

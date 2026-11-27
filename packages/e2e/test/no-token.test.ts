@@ -139,7 +139,12 @@ describe("one person on their own machine, with no token", () => {
     expect((await fetch(`${one.url}/api/backup`)).status).toBe(403);
     expect((await fetch(`${one.url}/api/sign-in-codes`, { method: "POST" })).status).toBe(403);
     expect((await fetch(`${one.url}/api/session`)).status).toBe(401);
-    for (const path of ["/api/projects", "/api/projects/choice", "/api/facts/x/redact"]) {
+    for (const path of [
+      "/api/projects",
+      "/api/projects/choice",
+      "/api/projects/join",
+      "/api/facts/x/redact",
+    ]) {
       const change = await fetch(`${one.url}${path}`, {
         method: "POST",
         headers: JSON_BODY,

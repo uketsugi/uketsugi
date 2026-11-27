@@ -309,7 +309,7 @@ describeUseCases("sharing a project between two people", (w) => {
     w.clock.advance(21 * 24 * 3_600_000);
     const made = await createNamedProject(s.ports, s.bob, { slug: "layoffs-q1", name: "Mine" });
 
-    const fields = ["chosen", "facts", "key", "kind", "name", "treatment"];
+    const fields = ["chosen", "facts", "key", "kind", "name", "names", "treatment"];
     expect(Object.keys(his ?? {}).sort()).toEqual(fields);
     expect(Object.keys(made).sort()).toEqual(fields);
     expect(JSON.stringify([his, made])).not.toContain(hers);

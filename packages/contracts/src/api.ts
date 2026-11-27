@@ -29,6 +29,7 @@
  * | DELETE | `/api/projects`           | cookie             | `ProjectNamed`         | `ProjectDeleted`       |
  * | GET    | `/api/projects/contents`  | cookie or token    | `ProjectNamed`         | `ProjectContents`      |
  * | POST   | `/api/projects/choice`    | cookie             | `ProjectChoiceRequest` | `ProjectChoice`        |
+ * | POST   | `/api/projects/join`      | cookie             | `ProjectJoin`          | `ProjectJoined`        |
  * | GET    | `/api/export`             | cookie or token    | `ExportParams`         | `text/markdown`        |
  * | POST   | `/api/hooks/claude-code`  | cookie or token    | `ClaudeCodeHook`       | `ClaudeCodeHookOutput` |
  * | GET    | `/api/host-proof`         | nobody, loopback   | `HostProofParams`      | `HostProof`            |

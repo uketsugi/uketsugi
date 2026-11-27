@@ -232,6 +232,9 @@ export interface ForgottenProject {
   readonly sessions: number;
 }
 
+/** What a join moved to the project it joined into. */
+export type JoinedProject = ForgottenProject;
+
 /** What a person holds in a project, and what of other people's they see there. */
 export interface ProjectHoldings extends ForgottenProject {
   readonly othersFacts: number;
@@ -269,6 +272,14 @@ export interface Unit extends UnitWrites {
    * nothing of anybody's names it. Their records in the shared audience are brought home first.
    */
   forgetProject(project: string): Promise<ForgottenProject>;
+  /**
+   * Joins the person's project `from` into `into`, the key of a project that exists: what they hold in
+   * `from` (facts and tasks in the unit's audience, their sessions) becomes `into`'s, their
+   * choice for it stands for `into` unless they have one there, and `from` becomes their name for
+   * `into`, as does every name of theirs that meant `from`. Refused, and nothing changed, while
+   * the shared audience holds any record of `from`, whoever wrote it: `shared` is how many.
+   */
+  joinProject(from: string, into: string): Promise<JoinedProject | { shared: number }>;
 }
 
 /** A page of facts for the dashboard and the export, newest first. Stubs are among them: a caller that shows only text leaves them out. */
@@ -522,6 +533,10 @@ export interface ProjectsRepo {
   /** What the person holds in a project (what `forgetProject` would take) and what of other people's the scope shows there. */
   holdings(scope: ReadScope, person: string, project: string): Promise<ProjectHoldings>;
   find(orgId: string, key: string): Promise<Project | null>;
+  /** The project the person's name for it now means, when a join made it their name; null for a key that is no name of theirs. */
+  nameFor(orgId: string, principalId: string, name: string): Promise<string | null>;
+  /** The person's other names, by the project each means, in byte order. */
+  otherNames(orgId: string, principalId: string): Promise<Map<string, string[]>>;
   /** The project with this key, created if it does not exist yet. */
   ensure(orgId: string, ref: ProjectRef): Promise<Project>;
   /**

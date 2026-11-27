@@ -22,6 +22,8 @@ import {
   type ProjectChoiceRequest,
   type ProjectContents,
   type ProjectDeleted,
+  type ProjectJoin,
+  type ProjectJoined,
   type ProjectList,
   type RedactResult,
   type RevertResult,
@@ -294,6 +296,11 @@ export function chooseTreatment(
   csrf: string,
 ): Promise<ProjectChoice> {
   return request<ProjectChoice>("/api/projects/choice", {}, { method: "POST", csrf, body: choice });
+}
+
+/** Joins one of the person's projects into another: it cannot be undone. */
+export function joinProject(join: ProjectJoin, csrf: string): Promise<ProjectJoined> {
+  return request<ProjectJoined>("/api/projects/join", {}, { method: "POST", csrf, body: join });
 }
 
 /** Makes a named project of the person's own, `me/<slug>`, for work no repository names. */

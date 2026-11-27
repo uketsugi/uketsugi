@@ -260,6 +260,22 @@ such as:
 The uketsugi project for this directory is `me/harbour-notes`.
 ```
 
+### A renamed or moved repository
+
+A project is named by its key. When a repository is renamed or transferred, or a folder is pushed
+for the first time, its key changes, and the new key starts with nothing: what was remembered is
+still stored under the old one. On Projects, choose Join on the old project and type the new key (a
+key nothing has used yet is fine, for a repository that was just renamed). Everything of yours in
+the old project, its facts, tasks and sessions, moves to the new one in one step, and the old key
+becomes another name for the new project, shown beside it. An agent that still names the old key, in
+an old clone or on another machine, lands in the new project.
+
+A join cannot be undone. It does not merge facts the two projects both hold, so you may have one
+twice. On a server with other people it is refused while the old project holds anything shared,
+whoever shared it, and the refusal says how many; if the shared records are yours, keeping the
+project private first takes them back. Joining a project that other people share is not possible
+yet.
+
 ## Running the server
 
 ### What set-up does

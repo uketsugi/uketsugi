@@ -8,7 +8,7 @@
  * the server (a snapshot of the store, people and their credentials, a sign-in code for the
  * operator) answers only a caller on this machine that sends the host's own secret, which no
  * harness is given. What only a person may do (choose how a project is treated, redact, correct or confirm a
- * fact, close a task, remove a session's note, delete a project, undo a merge, make a named
+ * fact, close a task, remove a session's note, delete or join a project, undo a merge, make a named
  * project) takes a signed-in browser, never a token.
  */
 import { getConnInfo } from "@hono/node-server/conninfo";
@@ -21,6 +21,7 @@ import {
   type HostProof,
   type NewProjectRequest,
   type ProjectChoiceRequest,
+  type ProjectJoin,
   type ProjectNamed,
   type SignInCode,
   type TokenReplaced,
@@ -34,6 +35,7 @@ import {
   correctFact,
   createNamedProject,
   deleteProject,
+  joinProjects,
   exportMarkdown,
   factDetail,
   invitePerson,
@@ -176,6 +178,12 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn }: ApiDeps): void {
     onRequest("json", (caller, _id, said: ProjectChoiceRequest) =>
       chooseTreatment(ports, caller, said),
     ),
+  );
+  api.post(
+    "/projects/join",
+    inPerson,
+    body("ProjectJoin"),
+    onRequest("json", (caller, _id, said: ProjectJoin) => joinProjects(ports, caller, said)),
   );
   api.post(
     "/projects",

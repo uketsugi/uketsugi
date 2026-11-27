@@ -382,6 +382,30 @@ export class SqlProjects extends Repo implements ProjectsRepo {
       .execute();
   }
 
+  async nameFor(orgId: string, principalId: string, name: string): Promise<string | null> {
+    const row = await this.db
+      .selectFrom("projectNames")
+      .select("project")
+      .where("orgId", "=", orgId)
+      .where("principalId", "=", principalId)
+      .where("name", "=", name)
+      .executeTakeFirst();
+    return row?.project ?? null;
+  }
+
+  async otherNames(orgId: string, principalId: string): Promise<Map<string, string[]>> {
+    const rows = await this.db
+      .selectFrom("projectNames")
+      .select(["project", "name"])
+      .where("orgId", "=", orgId)
+      .where("principalId", "=", principalId)
+      .orderBy(inByteOrder("name"))
+      .execute();
+    const names = new Map<string, string[]>();
+    for (const { project, name } of rows) names.set(project, [...(names.get(project) ?? []), name]);
+    return names;
+  }
+
   async choice(orgId: string, principalId: string, project: string): Promise<Treatment | null> {
     const row = await this.db
       .selectFrom("projectChoices")

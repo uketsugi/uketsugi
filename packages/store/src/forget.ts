@@ -66,6 +66,9 @@ export async function forgetProject(
     .executeTakeFirst();
   await sql`delete from project_choices
     where org_id = ${orgId} and principal_id = ${person} and project = ${project}`.execute(db);
+  // Their other names for it go too: a name needs the project it means.
+  await sql`delete from project_names
+    where org_id = ${orgId} and principal_id = ${person} and project = ${project}`.execute(db);
   // The project's own record, unless somebody's session or choice still names it.
   await db
     .deleteFrom("projects")
@@ -76,6 +79,9 @@ export async function forgetProject(
     )
     .where(
       sql<boolean>`not exists (select 1 from project_choices c where c.org_id = ${orgId} and c.project = ${project})`,
+    )
+    .where(
+      sql<boolean>`not exists (select 1 from project_names n where n.org_id = ${orgId} and n.project = ${project})`,
     )
     .execute();
   return {

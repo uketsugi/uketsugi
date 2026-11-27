@@ -15,24 +15,13 @@
 import type { ProjectContents, ProjectDeleted, ProjectNamed } from "@uketsugi/contracts";
 import { scopeOf } from "../context.ts";
 import type { Caller } from "../domain.ts";
-import { notFound } from "../failure.ts";
 import type { CorePorts } from "../ports.ts";
-import { parseProject } from "../project.ts";
+import { ownProject } from "../project.ts";
 import { asPerson } from "../sharing.ts";
 import { flagCiting } from "./facts/write.ts";
 import { bringHome } from "./sharing.ts";
 
 type Ports = Pick<CorePorts, "store" | "clock" | "ids" | "embedder">;
-
-/** The project a request names, which must be one the person works in: nothing else is theirs to count or delete. */
-async function ownProject(ports: Ports, caller: Caller, named: string): Promise<string> {
-  const key = parseProject(named)?.key;
-  const mine = await ports.store.projects.listOf(caller.orgId, caller.principalId);
-  if (key === undefined || !mine.some((project) => project.key === key)) {
-    throw notFound("listed project", named);
-  }
-  return key;
-}
 
 /** What the person holds in a project, which is what deleting it takes, and what of other people's stays. */
 export async function projectContents(

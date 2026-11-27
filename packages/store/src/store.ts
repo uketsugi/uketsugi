@@ -5,6 +5,7 @@ import { actorColumns, scoped, uuidsOf, type Db } from "./codec.ts";
 import { SqlDirectory, SqlProjects } from "./directory.ts";
 import { SqlFacts, SqlUnitFacts } from "./facts.ts";
 import { forgetProject } from "./forget.ts";
+import { joinProject, sharedRecords } from "./join.ts";
 import { SqlJobs } from "./jobs.ts";
 import { SqlReview, SqlUnitReview } from "./review.ts";
 import { SqlSearch } from "./search.ts";
@@ -159,7 +160,7 @@ function unitOver(trx: Db, target: UnitTarget, heads: Heads): Unit {
       });
     return asked;
   };
-  return {
+  const unit: Unit = {
     ...writesOn(trx, target, heads),
     async on(sharedAudienceId) {
       if (!heads.holds(sharedAudienceId)) {
@@ -188,7 +189,17 @@ function unitOver(trx: Db, target: UnitTarget, heads: Heads): Unit {
         throw new Error("a move runs to or from the shared audience the unit has reached");
       return moveRecords(trx, orgId, move);
     },
+    async joinProject(from, into) {
+      const shared = await audiences().select("id").where("kind", "=", "shared").executeTakeFirst();
+      if (shared !== undefined) {
+        await unit.on(shared.id);
+        const records = await sharedRecords(trx, orgId, shared.id, from);
+        if (records > 0) return { shared: records };
+      }
+      return joinProject(trx, target, await person(), from, into);
+    },
   };
+  return unit;
 }
 
 /** Marks the code a unit's callback runs, and whatever it awaits, until the callback settles. */

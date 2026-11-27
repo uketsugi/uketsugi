@@ -24,6 +24,7 @@ const FERRY: ApiProject = {
   key: "me/ferry-notes",
   kind: "named",
   name: null,
+  names: [],
   facts: 0,
   treatment: "private",
   chosen: true,
@@ -55,7 +56,7 @@ async function naming() {
 describe("Projects", () => {
   mockApi();
 
-  it("lists the person's projects, says which they have not chosen for, and offers no choice for a named one, only its deletion", async () => {
+  it("lists the person's projects, says which they have not chosen for, and offers no choice for a named one, only its join and its deletion", async () => {
     open("/projects");
     const table = within(await screen.findByRole("table", { name: /Your projects/ }));
     const [, repository, named] = table.getAllByRole("row");
@@ -69,7 +70,7 @@ describe("Projects", () => {
       within(named as HTMLElement)
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Delete me/q4-expenses…"]);
+    ).toEqual(["Join me/q4-expenses into another project…", "Delete me/q4-expenses…"]);
     expect(await violations()).toEqual([]);
   });
 
@@ -78,6 +79,7 @@ describe("Projects", () => {
       key: "file://box/home/ann/Work Dir",
       kind: "path",
       name: null,
+      names: [],
       facts: 3,
       treatment: "private",
       chosen: true,
@@ -312,5 +314,65 @@ describe("Projects", () => {
     await user.click(section.getByRole("button", { name: "Make the project" }));
     expect(section.getByRole<HTMLInputElement>("textbox", { name: "Slug" }).required).toBe(true);
     expect(sent).toEqual([]);
+  });
+
+  it("shows a project's other names, and joins one project into another only after saying what moves and that it cannot be undone", async () => {
+    const [repository, named] = projects.projects;
+    if (repository === undefined || named === undefined) throw new Error("the fixture has two");
+    const renamed = "github.com/acme/new-name";
+    api.use(
+      answer("/api/projects", {
+        ...projects,
+        projects: [{ ...repository, names: ["github.com/acme/older"] }, named],
+      }),
+    );
+    const sent: { body: unknown; csrf: string | null }[] = [];
+    api.use(
+      http.post("*/api/projects/join", async ({ request }) => {
+        sent.push({ body: await request.json(), csrf: request.headers.get(API_CSRF_HEADER) });
+        api.use(
+          answer("/api/projects", {
+            ...projects,
+            projects: [{ ...repository, key: renamed, names: [PROJECT, "github.com/acme/older"] }],
+          }),
+        );
+        return HttpResponse.json({
+          from: PROJECT,
+          into: renamed,
+          facts: 41,
+          tasks: 0,
+          sessions: 2,
+        });
+      }),
+    );
+    const user = open("/projects");
+    const table = within(await screen.findByRole("table", { name: /Your projects/ }));
+    expect(table.getByText("github.com/acme/older")).toBeTruthy();
+    expect(table.getByText(/Also called/)).toBeTruthy();
+
+    await user.click(table.getByRole("button", { name: `Join ${PROJECT} into another project…` }));
+    const dialog = within(
+      await screen.findByRole("alertdialog", { name: "Join this project into another?" }),
+    );
+    expect(
+      dialog.getByText(/Everything of yours here \(facts, tasks and sessions\) moves/),
+    ).toBeTruthy();
+    expect(dialog.getByText(/does not merge them\. A join cannot be undone\./)).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    await user.click(dialog.getByRole("button", { name: "Leave it as it is" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(sent).toEqual([]);
+
+    await user.click(table.getByRole("button", { name: `Join ${PROJECT} into another project…` }));
+    const again = within(await screen.findByRole("alertdialog"));
+    await user.type(again.getByRole("textbox", { name: "Join it into" }), ` ${renamed} `);
+    await user.click(again.getByRole("button", { name: "Join the project" }));
+    await waitFor(() =>
+      expect(sent).toEqual([{ body: { from: PROJECT, into: renamed }, csrf: session.csrf }]),
+    );
+    expect(
+      await within(await screen.findByRole("table", { name: /Your projects/ })).findByText(renamed),
+    ).toBeTruthy();
+    expect(screen.getByText(`${PROJECT}, github.com/acme/older`)).toBeTruthy();
   });
 });
