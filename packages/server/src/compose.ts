@@ -88,6 +88,12 @@ export interface Edition {
    * administrator the link (`POST /api/join-links`); left out, there is no such route.
    */
   readonly joinLink?: (secret: string) => string;
+  /**
+   * Where a person may delete their own account (`DELETE /api/account`), what the edition says of
+   * its backups beside it. Left out, the edition has no such route: the person who runs the
+   * server holds the data and ends it.
+   */
+  readonly personalData?: { readonly backups: string };
 }
 
 /** The open edition. */

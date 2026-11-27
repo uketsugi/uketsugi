@@ -61,6 +61,7 @@ describe("the shell and sign-in", () => {
       "Activity",
       "Projects",
       "Groups",
+      "Your data",
       "Connect",
     ]);
     expect(await pages.findByRole("link", { name: "Facts", current: "page" })).toBeTruthy();

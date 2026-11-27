@@ -37,6 +37,10 @@
  * | POST   | `/api/join-links`         | cookie             | none                   | `JoinLink`             |
  *   (only on a server whose edition signs people in itself)
  * | GET    | `/api/export`             | cookie or token    | `ExportParams`         | `text/markdown`        |
+ * | GET    | `/api/export/mine`        | cookie or token    | `ExportMineParams`     | `MyData` or `text/markdown` |
+ * | GET    | `/api/account/contents`   | cookie or token    | none                   | `AccountContents`      |
+ * | DELETE | `/api/account`            | cookie             | `AccountDeletion`      | `AccountDeleted`       |
+ *   (`DELETE` only on an edition that lets a person delete their account)
  * | POST   | `/api/hooks/claude-code`  | cookie or token    | `ClaudeCodeHook`       | `ClaudeCodeHookOutput` |
  * | GET    | `/api/host-proof`         | nobody, loopback   | `HostProofParams`      | `HostProof`            |
  * | POST   | `/api/sign-in-codes`      | host, loopback     | none                   | `SignInCode`           |
@@ -55,7 +59,7 @@
  *   own dashboard key, typed into the sign-in page (`POST /sign-in`), or on the host a one-time
  *   link (`ukt ui`). What only a person may do takes it and never a token: choosing how a project
  *   is treated, redacting, correcting or confirming a fact, closing a task, removing a session's
- *   note, deleting a project, undoing a merge, making a named project.
+ *   note, deleting a project or the account, undoing a merge, making a named project.
  * - **host**: the host's own secret, kept in its data directory and printed by no verb, sent as a
  *   bearer by `ukt` from the loopback address. It is whoever runs the server: `ukt ui` gets a
  *   sign-in link with it, `ukt backup` a snapshot of the whole store while a server runs, and

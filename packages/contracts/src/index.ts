@@ -3,6 +3,7 @@ import document from "./contract.schema.json" with { type: "json" };
 
 export * from "./api.ts";
 export * from "./generated.ts";
+export * from "./retention.ts";
 export * from "./texts.ts";
 
 type Schema = Readonly<Record<string, unknown>>;

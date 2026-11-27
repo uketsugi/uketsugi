@@ -233,6 +233,26 @@ export interface ForgottenProject {
   readonly sessions: number;
 }
 
+/** Everything one person wrote that a scope holds, in every project, and where in the scope it is. */
+export interface AccountHoldings {
+  readonly facts: number;
+  readonly tasks: number;
+  readonly sessions: number;
+  /** Notes they wrote on tasks, theirs or other people's. */
+  readonly taskNotes: number;
+  /** Facts they confirmed. */
+  readonly confirmations: number;
+  /** What of the facts and tasks each audience of the scope holds, by audience id. */
+  readonly byAudience: ReadonlyMap<string, { readonly facts: number; readonly tasks: number }>;
+}
+
+/** What an account's deletion took that no project's deletion had. */
+export interface ErasedAccount {
+  readonly credentials: number;
+  readonly facts: number;
+  readonly tasks: number;
+}
+
 /** What a join moved to the project it joined into. */
 export type JoinedProject = ForgottenProject;
 
@@ -346,6 +366,8 @@ export interface TasksRepo {
   count(scope: ReadScope, query: Omit<TaskListQuery, "limit">): Promise<number>;
   /** The notes of the given tasks, oldest first. */
   notes(scope: ReadScope, taskIds: readonly string[]): Promise<TaskNote[]>;
+  /** The notes one person wrote, on any task the scope holds, oldest first. */
+  notesBy(scope: ReadScope, person: string): Promise<TaskNote[]>;
   /** The newest note of each of the given tasks that has one: what a list and the brief show. */
   latestNotes(scope: ReadScope, taskIds: readonly string[]): Promise<TaskNote[]>;
   /** Everything the logs the reader may see hold about one task, oldest first: its publishing, claims, notes, releases and completion. */
@@ -540,6 +562,8 @@ export interface SessionsRepo {
 export interface ProjectsRepo {
   /** What the person holds in a project (what `forgetProject` would take) and what of other people's the scope shows there. */
   holdings(scope: ReadScope, person: string, project: string): Promise<ProjectHoldings>;
+  /** What the person wrote in every project, where the scope reaches: what deleting the account takes. */
+  authored(scope: ReadScope, person: string): Promise<AccountHoldings>;
   find(orgId: string, key: string): Promise<Project | null>;
   /** The project the person's name for it now means, when a join made it their name; null for a key that is no name of theirs. */
   nameFor(orgId: string, principalId: string, name: string): Promise<string | null>;
@@ -664,6 +688,14 @@ export interface DirectoryRepo {
    * it ended; 0 when the person is not there or was removed already.
    */
   removePerson(orgId: string, principalId: string, at: Date): Promise<number>;
+  /**
+   * Ends an account the person asked to have deleted, in one transaction under their own
+   * audience's head: whatever they wrote that is still anywhere, in whichever audience, with the
+   * log's entries about it, their confirmations and task notes, sessions, choices, names and
+   * credentials are deleted; the row stays as a removed person with no name and only a hash of its
+   * subject, so that the subject is refused when it signs in again.
+   */
+  eraseAccount(orgId: string, principalId: string, at: Date): Promise<ErasedAccount>;
   /**
    * The caller a live secret's hash belongs to, when it is a credential of this kind, with the
    * credential stamped as used at `usedAt` (at most once a minute). Looks across organizations:

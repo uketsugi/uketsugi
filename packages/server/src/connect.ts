@@ -12,6 +12,7 @@ import {
   MCP_REVISIONS,
   pathPrintedBy,
   PROMPT_DESCRIPTIONS,
+  LOCAL_BACKUPS,
   SERVER_NAME,
   TOKEN_ENV,
   type CapabilityDescriptor,
@@ -323,7 +324,7 @@ async function degradedBy(ports: Pick<AppPorts, "embedder" | "store">): Promise<
 
 /** The descriptor of this server as it is composed now, for the edition of that name. */
 export async function capabilityDescriptor(
-  edition: Pick<Edition, "name" | "dashboard">,
+  edition: Pick<Edition, "name" | "dashboard" | "personalData">,
   app: App,
   ports: Pick<AppPorts, "embedder" | "runner" | "store">,
 ): Promise<CapabilityDescriptor> {
@@ -346,6 +347,10 @@ export async function capabilityDescriptor(
     prompts: Object.keys(PROMPT_DESCRIPTIONS),
     degraded: await degradedBy(ports),
     dashboard: edition.dashboard ?? OPEN_DASHBOARD_WORDS,
+    data: {
+      delete_account: edition.personalData !== undefined,
+      backups: edition.personalData?.backups ?? LOCAL_BACKUPS,
+    },
   };
 }
 

@@ -6,6 +6,8 @@ import {
   API_CSRF_HEADER,
   API_ERROR_STATUS,
   isApiError,
+  type AccountContents,
+  type AccountDeleted,
   type ActivityReport,
   type ApiError,
   type ApiProject,
@@ -275,6 +277,17 @@ export function deleteProject(project: string, csrf: string): Promise<ProjectDel
     {},
     { method: "DELETE", csrf, body: { project } },
   );
+}
+
+/** What deleting the account takes, asked when the person opens the question. */
+export const accountContentsQuery = queryOptions({
+  queryKey: ["account", "contents"],
+  queryFn: () => request<AccountContents>("/api/account/contents"),
+  gcTime: 0,
+});
+
+export function deleteAccount(name: string, csrf: string): Promise<AccountDeleted> {
+  return request<AccountDeleted>("/api/account", {}, { method: "DELETE", csrf, body: { name } });
 }
 
 /** The newest rulings, each with whether it can be reverted. */

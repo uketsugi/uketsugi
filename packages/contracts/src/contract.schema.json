@@ -900,6 +900,26 @@
         },
         "required": ["project"],
         "additionalProperties": false
+      },
+      "ExportMineParams": {
+        "type": "object",
+        "description": "`GET /api/export/mine` query: the whole of what the person wrote, as JSON (the default) or as a Markdown document.",
+        "properties": {
+          "format": { "enum": ["json", "markdown"], "default": "json" }
+        },
+        "additionalProperties": false
+      },
+      "AccountDeletion": {
+        "type": "object",
+        "description": "`DELETE /api/account` body: the person's name as the dashboard shows it, typed to confirm.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -1100,6 +1120,22 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "data": {
+            "type": "object",
+            "description": "What the dashboard says of a person's data, which an edition gives once.",
+            "properties": {
+              "delete_account": {
+                "type": "boolean",
+                "description": "Whether a person can delete their own account here (`DELETE /api/account`)."
+              },
+              "backups": {
+                "type": "string",
+                "description": "What this edition says of its backups, and what a deletion does not reach in them."
+              }
+            },
+            "required": ["delete_account", "backups"],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -1111,7 +1147,8 @@
           "tools",
           "prompts",
           "degraded",
-          "dashboard"
+          "dashboard",
+          "data"
         ]
       },
       "ConnectInfo": {
@@ -1693,6 +1730,148 @@
           }
         },
         "required": ["project", "facts", "tasks", "sessions"]
+      },
+      "AccountContents": {
+        "type": "object",
+        "description": "`GET /api/account/contents`: what deleting the account takes, and what stays.",
+        "properties": {
+          "facts": {
+            "type": "integer",
+            "description": "Facts the person wrote, in every project and group: live, earlier wordings and redacted stubs."
+          },
+          "tasks": { "type": "integer", "description": "Tasks they published." },
+          "sessions": { "type": "integer", "description": "Their sessions, each with its note." },
+          "task_notes": {
+            "type": "integer",
+            "description": "Notes they wrote on tasks, their own or other people's."
+          },
+          "confirmations": {
+            "type": "integer",
+            "description": "Facts of other people they confirmed."
+          },
+          "groups": {
+            "type": "array",
+            "description": "The groups that hold some of it: what stops being readable there.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "other_members": {
+                  "type": "integer",
+                  "description": "Other people in the group, who will no longer read what is shared there."
+                },
+                "facts": { "type": "integer" },
+                "tasks": { "type": "integer" }
+              },
+              "required": ["name", "other_members", "facts", "tasks"]
+            }
+          },
+          "others_facts": {
+            "type": "integer",
+            "description": "Other people's facts in the same projects, which stay."
+          },
+          "others_tasks": {
+            "type": "integer",
+            "description": "Other people's tasks in the same projects, which stay."
+          },
+          "blocked": {
+            "type": ["string", "null"],
+            "description": "Why the account cannot be deleted now; null when it can."
+          }
+        },
+        "required": [
+          "facts",
+          "tasks",
+          "sessions",
+          "task_notes",
+          "confirmations",
+          "groups",
+          "others_facts",
+          "others_tasks",
+          "blocked"
+        ]
+      },
+      "AccountDeleted": {
+        "type": "object",
+        "description": "`DELETE /api/account`: what went.",
+        "properties": {
+          "facts": { "type": "integer" },
+          "tasks": { "type": "integer" },
+          "sessions": { "type": "integer" },
+          "credentials_ended": { "type": "integer" }
+        },
+        "required": ["facts", "tasks", "sessions", "credentials_ended"]
+      },
+      "MyData": {
+        "type": "object",
+        "description": "`GET /api/export/mine`: everything the person wrote, as one JSON document. Other people's text, tokens, hashes and vectors are not in it.",
+        "properties": {
+          "version": { "const": 1 },
+          "exported_at": { "type": "string", "description": "ISO 8601, UTC." },
+          "projects": { "type": "array", "items": { "$ref": "#/$defs/apiProject" } },
+          "facts": { "type": "array", "items": { "$ref": "#/$defs/apiFact" } },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "project": { "type": "string" },
+                "title": { "type": "string" },
+                "description": { "type": ["string", "null"] },
+                "state": { "$ref": "#/$defs/taskState" },
+                "created_at": { "type": "string" },
+                "updated_at": { "type": "string" }
+              },
+              "required": [
+                "id",
+                "project",
+                "title",
+                "description",
+                "state",
+                "created_at",
+                "updated_at"
+              ]
+            }
+          },
+          "task_notes": {
+            "type": "array",
+            "description": "The notes the person's agents wrote on tasks, theirs or other people's.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "task": { "type": "string" },
+                "kind": { "enum": ["note", "handoff"] },
+                "text": { "type": "string" },
+                "at": { "type": "string" }
+              },
+              "required": ["task", "kind", "text", "at"]
+            }
+          },
+          "session_notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project": { "type": ["string", "null"] },
+                "client": { "type": "string" },
+                "text": { "type": "string" },
+                "final": { "type": "boolean" },
+                "at": { "type": "string" }
+              },
+              "required": ["project", "client", "text", "final", "at"]
+            }
+          }
+        },
+        "required": [
+          "version",
+          "exported_at",
+          "projects",
+          "facts",
+          "tasks",
+          "task_notes",
+          "session_notes"
+        ]
       }
     }
   },

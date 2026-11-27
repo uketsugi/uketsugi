@@ -3,6 +3,7 @@ import type {
   Credential,
   CredentialKind,
   DirectoryRepo,
+  ErasedAccount,
   Group,
   GroupMembers,
   InvitationRecord,
@@ -12,15 +13,9 @@ import type {
   PrincipalSeed,
 } from "@uketsugi/core";
 import type { Selectable } from "kysely";
+import { eraseResidue, erasedSubject, removeIn } from "./erase.ts";
 import { insertCredential, endCredentials } from "./credentials.ts";
-import {
-  addMembers,
-  groupIdsOf,
-  lockHeads,
-  groupRows,
-  insertAudience,
-  joinEveryone,
-} from "./audiences.ts";
+import { addMembers, lockHeads, groupRows, insertAudience, joinEveryone } from "./audiences.ts";
 import { inByteOrder, Repo, toBytes, uuidsOf, type Db } from "./codec.ts";
 import type { Database } from "./schema.ts";
 
@@ -226,7 +221,10 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
   }
 
   async knownSubject(subject: string): Promise<{ orgId: string; removed: boolean } | null> {
-    const row = await this.principals().where("subject", "=", subject).executeTakeFirst();
+    // An account that was deleted holds the hash of its subject in place of it.
+    const row = await this.principals()
+      .where("subject", "in", [subject, erasedSubject(subject)])
+      .executeTakeFirst();
     return row === undefined ? null : { orgId: row.orgId, removed: row.removedAt !== null };
   }
 
@@ -286,27 +284,26 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
     return this.listed(orgId, true);
   }
 
-  async removePerson(orgId: string, principalId: string, at: Date): Promise<number> {
-    const [id] = uuidsOf([principalId]);
-    if (id === undefined) return 0;
-    return this.db.transaction().execute(async (trx) => {
-      const gone = await trx
-        .updateTable("principals")
-        .set({ removedAt: at })
-        .where("orgId", "=", orgId)
-        .where("id", "=", id)
-        .where("removedAt", "is", null)
-        .executeTakeFirst();
-      if (gone.numUpdatedRows === 0n) return 0;
-      const groups = await groupIdsOf(trx, orgId, id);
-      await lockHeads(trx, orgId, groups);
-      await trx
-        .deleteFrom("audienceMembers")
-        .where("orgId", "=", orgId)
-        .where("principalId", "=", id)
-        .execute();
-      return endCredentials(trx, orgId, id, at);
+  removePerson(orgId: string, principalId: string, at: Date): Promise<number> {
+    return this.ofPerson(principalId, 0, (trx, id) => removeIn(trx, orgId, id, at));
+  }
+
+  eraseAccount(orgId: string, person: string, at: Date): Promise<ErasedAccount> {
+    const nobody = { credentials: 0, facts: 0, tasks: 0 };
+    return this.ofPerson(person, nobody, async (trx, id) => {
+      await removeIn(trx, orgId, id, at);
+      return eraseResidue(trx, orgId, id);
     });
+  }
+
+  /** A transaction of work on a person; `none` for an id that is no uuid. */
+  private async ofPerson<T>(
+    principalId: string,
+    none: T,
+    work: (trx: Db, id: string) => Promise<T>,
+  ) {
+    const [id] = uuidsOf([principalId]);
+    return id === undefined ? none : this.db.transaction().execute((trx) => work(trx, id));
   }
 
   async rename(orgId: string, principalId: string, displayName: string): Promise<void> {

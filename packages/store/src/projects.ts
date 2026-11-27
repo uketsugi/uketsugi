@@ -1,4 +1,5 @@
 import type {
+  AccountHoldings,
   Choice,
   PersonProject,
   Project,
@@ -7,7 +8,7 @@ import type {
   ProjectsRepo,
   ReadScope,
 } from "@uketsugi/core";
-import { holdingsIn } from "./forget.ts";
+import { authoredIn, holdingsIn } from "./forget.ts";
 import { inByteOrder, Repo } from "./codec.ts";
 import { didSomething } from "./sessions.ts";
 
@@ -15,6 +16,10 @@ import { didSomething } from "./sessions.ts";
 export class SqlProjects extends Repo implements ProjectsRepo {
   holdings(scope: ReadScope, person: string, project: string): Promise<ProjectHoldings> {
     return holdingsIn(this.db, scope, person, project);
+  }
+
+  authored(scope: ReadScope, person: string): Promise<AccountHoldings> {
+    return authoredIn(this.db, scope, person);
   }
 
   private of(orgId: string) {

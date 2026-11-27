@@ -399,6 +399,31 @@ only, unless you set it up with `--host`.
   you give it the new one: remove the server from it and add it again with the lines on the
   Connect page. One that sends none is not affected.
 
+### Taking your data, and how long it is kept
+
+The dashboard's Your data page has two downloads of everything you wrote, in every project and
+group: a JSON file, which another tool can read, and a Markdown document, which you can. They hold
+your facts, your tasks, the notes your agents left and your projects, and not what other people
+wrote. `ukt export --markdown <folder>` writes the facts as Markdown, one file a project.
+
+Each kind of record is kept as follows.
+
+- **Facts, tasks and the notes on them.** Kept until you delete them, their project or your account. There is no timer.
+- **Earlier wordings of a fact, and redacted facts.** An earlier wording stays with its fact until that is deleted. A redacted fact keeps no text.
+- **A session's note.** Kept until you remove it, or delete its project or your account.
+- **What you and an agent said, kept for a language model to read.** Deleted once the model has read it, or when you remove the session's note.
+- **The log of who did what.** Holds ids, kinds and hashes and no text. The entries about a record are deleted with it.
+- **Tokens.** Only a token's hash is kept, until the account is deleted.
+- **Totals of language-model use.** Counts of tokens with no person and no text in them, kept for seven days.
+
+A backup is a file you make with `ukt backup` and keep on your own disk. Deleting a project or a fact does not reach it, and restoring one brings back what it held.
+
+Deleting a project (Projects on the dashboard) deletes what you wrote in it. A server you run has no
+account to delete: the person who runs it holds the data, and ending it is
+[removing Uketsugi](#removing-uketsugi). Removing a person with `ukt remove` is not an
+erasure: what they wrote stays, under their name. Deleting an account is the erasure, and it is
+offered where a service hosts the account.
+
 ### Removing Uketsugi
 
 ```sh

@@ -14,6 +14,7 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
 import {
   SIGN_IN_PATH,
+  type AccountDeletion,
   type ApiRequests,
   type DashboardSession,
   type FactConfirmation,
@@ -30,6 +31,7 @@ import {
   type TokenReplaced,
 } from "@uketsugi/contracts";
 import {
+  accountContents,
   activityReport,
   checkModel,
   chooseTreatment,
@@ -38,7 +40,10 @@ import {
   correctFact,
   addToGroup,
   createNamedProject,
+  deleteAccount,
   deleteProject,
+  exportMine,
+  renderMine,
   joinProjects,
   exportMarkdown,
   factDetail,
@@ -268,6 +273,14 @@ function inPersonRoutes(api: Hono<AuthEnv>, { ports, signIn, edition }: ApiDeps)
     body("ProjectNamed"),
     onRequest("json", (caller, _id, said: ProjectNamed) => deleteProject(ports, caller, said)),
   );
+  if (edition.personalData !== undefined) {
+    api.delete(
+      "/account",
+      inPerson,
+      body("AccountDeletion"),
+      onRequest("json", (caller, _id, said: AccountDeletion) => deleteAccount(ports, caller, said)),
+    );
+  }
   api.post(
     "/rulings/:id/revert",
     inPerson,
@@ -369,6 +382,23 @@ function personRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
     query("ProjectNamed"),
     onRequest("query", (caller, _id, said: ProjectNamed) => projectContents(ports, caller, said)),
   );
+  api.get(
+    "/account/contents",
+    onRequest(null, (caller) => accountContents(ports, caller)),
+  );
+  api.get("/export/mine", query("ExportMineParams"), async (c) => {
+    const mine = await exportMine(ports, c.get("caller"));
+    const { format } = c.req.valid("query");
+    c.header(
+      "Content-Disposition",
+      `attachment; filename="uketsugi-export.${format === "markdown" ? "md" : "json"}"`,
+    );
+    if (format === "markdown") {
+      c.header("Content-Type", "text/markdown; charset=utf-8");
+      return c.body(renderMine(mine));
+    }
+    return c.json(mine);
+  });
   api.get("/export", query("ExportParams"), async (c) => {
     const files = await exportMarkdown(ports, c.get("caller"), c.req.valid("query").project);
     c.header("Content-Type", "text/markdown; charset=utf-8");

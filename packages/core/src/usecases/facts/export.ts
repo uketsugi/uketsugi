@@ -38,7 +38,7 @@ export async function allFacts(
 }
 
 /** A fact as a section of a project's document. */
-function section(fact: ApiFact): string {
+export function factSection(fact: ApiFact): string {
   const flags = flaggedSuffix(fact.flags);
   return [
     `## ${(fact.claim ?? "").replace(/\s+/g, " ").trim()}`,
@@ -62,7 +62,7 @@ function section(fact: ApiFact): string {
 function document(project: string, facts: readonly ApiFact[], at: Date): string {
   const count = `${facts.length} fact${facts.length === 1 ? "" : "s"}`;
   const head = [`# ${project}`, "", `Exported from uketsugi at ${at.toISOString()} · ${count}`, ""];
-  return [...head, ...facts.map(section)].join("\n");
+  return [...head, ...facts.map(factSection)].join("\n");
 }
 
 /**

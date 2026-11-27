@@ -253,6 +253,8 @@ export interface ContractTypes {
   FactConfirmation?: FactConfirmation;
   ProjectJoin?: ProjectJoin;
   ProjectNamed?: ProjectNamed;
+  ExportMineParams?: ExportMineParams;
+  AccountDeletion?: AccountDeletion;
   DashboardSession?: DashboardSession;
   HostProof?: HostProof;
   SignInCode?: SignInCode;
@@ -285,6 +287,9 @@ export interface ContractTypes {
   ProjectContents?: ProjectContents;
   ProjectJoined?: ProjectJoined;
   ProjectDeleted?: ProjectDeleted;
+  AccountContents?: AccountContents;
+  AccountDeleted?: AccountDeleted;
+  MyData?: MyData;
 }
 export interface ToolError {
   error: {
@@ -980,6 +985,18 @@ export interface ProjectNamed {
   project: string;
 }
 /**
+ * `GET /api/export/mine` query: the whole of what the person wrote, as JSON (the default) or as a Markdown document.
+ */
+export interface ExportMineParams {
+  format: "json" | "markdown";
+}
+/**
+ * `DELETE /api/account` body: the person's name as the dashboard shows it, typed to confirm.
+ */
+export interface AccountDeletion {
+  name: string;
+}
+/**
  * `GET /api/session`: who is signed in. A 401 means nobody: the person runs `ukt ui` again.
  */
 export interface DashboardSession {
@@ -1118,6 +1135,19 @@ export interface CapabilityDescriptor {
          */
         no_token: string;
       };
+  /**
+   * What the dashboard says of a person's data, which an edition gives once.
+   */
+  data: {
+    /**
+     * Whether a person can delete their own account here (`DELETE /api/account`).
+     */
+    delete_account: boolean;
+    /**
+     * What this edition says of its backups, and what a deletion does not reach in them.
+     */
+    backups: string;
+  };
 }
 /**
  * `GET /api/connect`: everything the Connect page shows.
@@ -1913,6 +1943,101 @@ export interface ProjectDeleted {
    */
   sessions: number;
 }
+/**
+ * `GET /api/account/contents`: what deleting the account takes, and what stays.
+ */
+export interface AccountContents {
+  /**
+   * Facts the person wrote, in every project and group: live, earlier wordings and redacted stubs.
+   */
+  facts: number;
+  /**
+   * Tasks they published.
+   */
+  tasks: number;
+  /**
+   * Their sessions, each with its note.
+   */
+  sessions: number;
+  /**
+   * Notes they wrote on tasks, their own or other people's.
+   */
+  task_notes: number;
+  /**
+   * Facts of other people they confirmed.
+   */
+  confirmations: number;
+  /**
+   * The groups that hold some of it: what stops being readable there.
+   */
+  groups: {
+    name: string;
+    /**
+     * Other people in the group, who will no longer read what is shared there.
+     */
+    other_members: number;
+    facts: number;
+    tasks: number;
+  }[];
+  /**
+   * Other people's facts in the same projects, which stay.
+   */
+  others_facts: number;
+  /**
+   * Other people's tasks in the same projects, which stay.
+   */
+  others_tasks: number;
+  /**
+   * Why the account cannot be deleted now; null when it can.
+   */
+  blocked: string | null;
+}
+/**
+ * `DELETE /api/account`: what went.
+ */
+export interface AccountDeleted {
+  facts: number;
+  tasks: number;
+  sessions: number;
+  credentials_ended: number;
+}
+/**
+ * `GET /api/export/mine`: everything the person wrote, as one JSON document. Other people's text, tokens, hashes and vectors are not in it.
+ */
+export interface MyData {
+  version: 1;
+  /**
+   * ISO 8601, UTC.
+   */
+  exported_at: string;
+  projects: ApiProject[];
+  facts: ApiFact[];
+  tasks: {
+    id: string;
+    project: string;
+    title: string;
+    description: string | null;
+    state: TaskState;
+    created_at: string;
+    updated_at: string;
+  }[];
+  /**
+   * The notes the person's agents wrote on tasks, theirs or other people's.
+   */
+  task_notes: {
+    task: string;
+    kind: "note" | "handoff";
+    text: string;
+    at: string;
+  }[];
+  session_notes: {
+    project: string | null;
+    client: string;
+    text: string;
+    final: boolean;
+    at: string;
+  }[];
+}
 
 export const TOOL_NAMES = ["search_facts","publish_fact","update_fact","search_tasks","publish_task","claim_task","update_task"] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -1954,4 +2079,6 @@ export interface ApiRequests {
   FactConfirmation: FactConfirmation;
   ProjectJoin: ProjectJoin;
   ProjectNamed: ProjectNamed;
+  ExportMineParams: ExportMineParams;
+  AccountDeletion: AccountDeletion;
 }

@@ -202,6 +202,14 @@ export class SqlTasks extends Repo implements TasksRepo {
     return (await oldestFirst?.execute()) ?? [];
   }
 
+  notesBy(scope: ReadScope, person: string): Promise<TaskNote[]> {
+    return notesIn(this.db, scope)
+      .where("author", "=", person)
+      .orderBy("at")
+      .orderBy("id")
+      .execute();
+  }
+
   async latestNotes(scope: ReadScope, taskIds: readonly string[]): Promise<TaskNote[]> {
     const newestOfEach = notesAmong(this.db, scope, taskIds)
       ?.distinctOn("taskId")

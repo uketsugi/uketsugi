@@ -60,6 +60,7 @@ const NAV = [
     pages: [
       { to: "/projects", name: "Projects" },
       { to: "/groups", name: "Groups" },
+      { to: "/your-data", name: "Your data" },
       { to: "/connect", name: "Connect" },
     ],
   },

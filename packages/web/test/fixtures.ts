@@ -1,6 +1,7 @@
 /** What a server would answer, typed by the contract, for the pages' tests. */
 import {
   FENCED_BLOCK,
+  LOCAL_BACKUPS,
   PROMPT_DESCRIPTIONS,
   TOOL_NAMES,
   TOKEN_ENV,
@@ -37,6 +38,7 @@ export const capabilities: CapabilityDescriptor = {
   tools: [...TOOL_NAMES],
   prompts: ["setup", "activate"],
   degraded: ["no_model"],
+  data: { delete_account: false, backups: LOCAL_BACKUPS },
   // What the open edition's server says, as the pages show it.
   dashboard: {
     sign_in: [
@@ -68,6 +70,7 @@ export const hostedCapabilities: CapabilityDescriptor = {
   ...capabilities,
   edition: "hosted",
   dashboard: hostedWords,
+  data: { delete_account: true, backups: "Backups are kept thirty days." },
 };
 
 /** What a server that needs no token from a harness on its own machine describes: the harness lines carry none. */
