@@ -218,7 +218,7 @@ export function sentLine(name: string): string {
 }
 
 /** Whether a run was given a budget, which has no use without a model. */
-export function budgetGiven(options: LlmOptions): boolean {
+function budgetGiven(options: LlmOptions): boolean {
   return (options.llmBudget?.trim() ?? "") !== "";
 }
 

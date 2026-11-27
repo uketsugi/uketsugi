@@ -16,7 +16,7 @@ export const RELAXATIONS: Readonly<Record<string, Change>> = {
 };
 
 /** Every relaxation at once. */
-export const ALL_RELAXED = "all relaxed";
+const ALL_RELAXED = "all relaxed";
 
 export const VARIANTS: readonly string[] = [...Object.keys(RELAXATIONS), ALL_RELAXED];
 

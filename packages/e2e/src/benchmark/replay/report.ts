@@ -10,7 +10,7 @@ import { briefCounts, briefLength, count, inTop, TOLD, tally, TOP } from "./figu
 import { baselineLines, namingLines, relaxedLines } from "./tables.ts";
 
 /** The figures of memory research's round 3 the replay is judged against (top 10 in a cell's first query). */
-export const KEPT_FIGURES: Readonly<Record<string, { top10: number; cells: number }>> = {
+const KEPT_FIGURES: Readonly<Record<string, { top10: number; cells: number }>> = {
   "own/words": { top10: 44, cells: 74 },
   "own/model": { top10: 26, cells: 74 },
   "project/words": { top10: 14, cells: 80 },

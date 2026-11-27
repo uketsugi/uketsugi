@@ -38,11 +38,14 @@ async function searchPage(
   params: FactListParams,
   q: string,
 ): Promise<FactPage> {
-  const ref = parseProject(params.project);
-  if (ref === null) {
+  const key =
+    parseProject(params.project) === null
+      ? undefined
+      : await projectFilter(ports, caller, params.project, "facts");
+  if (key === undefined) {
     throw invalidInput("A search needs a project.", "Choose the project to search in.");
   }
-  const project = await ports.store.projects.find(caller.orgId, ref.key);
+  const project = await ports.store.projects.find(caller.orgId, key);
   if (project === null) return { facts: [], next: null, matched: 0 };
   const found = await rankFacts(ports, { caller, project }, q, params.limit);
   return { facts: await apiFacts(ports, caller, found.facts), next: null, matched: found.matched };
@@ -58,7 +61,7 @@ export async function listFacts(
   if (q !== "") return searchPage(ports, caller, params, q);
   const { limit } = params;
   const rows = await ports.store.facts.list(scopeOf(caller), {
-    project: projectFilter(params.project, "facts"),
+    project: await projectFilter(ports, caller, params.project, "facts"),
     before: positionOf(params.cursor),
     limit: limit + 1,
   });

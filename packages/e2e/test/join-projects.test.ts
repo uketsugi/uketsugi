@@ -3,7 +3,14 @@
  * call that still names the old key lands in the new project, and on a server with others a join
  * is refused while the old project holds anything shared, with nothing left unreachable.
  */
-import { createNamedProject, joinProjects, listProjects, scopeOf } from "@uketsugi/core";
+import {
+  createNamedProject,
+  joinProjects,
+  listFacts,
+  listProjects,
+  listTasks,
+  scopeOf,
+} from "@uketsugi/core";
 import { toolCaller } from "@uketsugi/testkit";
 import { describe, expect, test } from "vitest";
 import { CHECKABLE, sharedWorld, TESTIMONY } from "./sharing-world.ts";
@@ -60,6 +67,27 @@ describeUseCases("joining a project into another", (w) => {
     expect(found(await ref.store.facts.list(w.scope, { project: fresh, limit: 5 }))).toContain(
       "Written from the old clone",
     );
+  });
+
+  test("the dashboard's lists filtered or searched by the old key show the new project's, as a link made before the join still does", async () => {
+    const { old, claim, fresh } = await used();
+    await join(old, fresh);
+    const ports = w.portsWith(null);
+
+    for (const named of [old, fresh]) {
+      const facts = await listFacts(ports, w.owner, { project: named, limit: 10 });
+      const searched = await listFacts(ports, w.owner, {
+        project: named,
+        q: "retry queue",
+        limit: 10,
+      });
+      const tasks = await listTasks(ports, w.owner, { project: named, limit: 10 });
+      expect([found(facts.facts), found(searched.facts), tasks.tasks.length]).toEqual([
+        [claim],
+        [claim],
+        1,
+      ]);
+    }
   });
 
   test("names never chain: joining the new project into another points the old key at that one too", async () => {
@@ -210,6 +238,15 @@ describeUseCases("joining a project on a server of two people", (w) => {
       const own = await createNamedProject(s.ports, s.ann, { slug: `own-${made}` });
       await joinProjects(s.ports, s.ann, { from: old, into: own.key });
       expect(await choiceOf(own.key)).toBe("private");
+      expect(await choiceOf(old)).toBeNull();
+    });
+
+    test("gives way to the privacy of a folder with no origin, which is never shared, however old was", async () => {
+      const { old } = names();
+      await used(old, "shared");
+      const folder = `file://box/work/fresh-${made}`;
+      await joinProjects(s.ports, s.ann, { from: old, into: folder });
+      expect(await choiceOf(folder)).toBe("private");
       expect(await choiceOf(old)).toBeNull();
     });
 

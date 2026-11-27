@@ -110,7 +110,7 @@ const KEY_END_CHARS = 8;
  * enough to be told from other words. A provider may repeat the key it refused, whole or masked,
  * in the reason it gives, and that text goes to logs, `ukt doctor` and the API.
  */
-export function withoutKey(text: string, key: string): string {
+function withoutKey(text: string, key: string): string {
   let kept = text;
   for (let size = key.length; size >= KEY_END_CHARS; size -= 1) {
     for (const piece of new Set([key.slice(0, size), key.slice(-size)])) {

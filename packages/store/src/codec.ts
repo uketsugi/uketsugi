@@ -90,7 +90,7 @@ export function vectorUnder(vector: ModelVector | null): RawBuilder<string | nul
 }
 
 /** A vector in the text form a halfvec column takes. */
-export function toHalfvec(vector: Float32Array): string {
+function toHalfvec(vector: Float32Array): string {
   return `[${Array.from(vector).join(",")}]`;
 }
 

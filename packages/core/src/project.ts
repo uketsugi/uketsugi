@@ -67,9 +67,16 @@ export function hookProject(
 
 /**
  * The project one of the dashboard's lists is narrowed to, by its canonical key; undefined for
- * every project. `things` is what the list holds, for the refusal of a filter that names none.
+ * every project. A key the person joined into another project is that project's, as it is for a
+ * call, so a link or a bookmark made before the join still lists what it did. `things` is what
+ * the list holds, for the refusal of a filter that names none.
  */
-export function projectFilter(named: string | undefined, things: string): string | undefined {
+export async function projectFilter(
+  ports: Pick<CorePorts, "store">,
+  caller: Caller,
+  named: string | undefined,
+  things: string,
+): Promise<string | undefined> {
   if (named === undefined) return undefined;
   const ref = parseProject(named);
   if (ref === null) {
@@ -78,7 +85,7 @@ export function projectFilter(named: string | undefined, things: string): string
       `Choose a project from the list, or leave the filter out to see every project's ${things}.`,
     );
   }
-  return ref.key;
+  return (await ports.store.projects.nameFor(caller.orgId, caller.principalId, ref.key)) ?? ref.key;
 }
 
 /** The owner part of a named project that belongs to one person. */

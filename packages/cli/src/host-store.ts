@@ -103,7 +103,7 @@ export function storePlace(home: Home, store: HostStore): string {
 }
 
 /** What to do about a store that a newer release made. Starting again with this release does not help. */
-export const NEWER_STORE_WAY_OUT =
+const NEWER_STORE_WAY_OUT =
   "Run the release that made it: after an upgrade, `ukt rollback` brings back the one before; otherwise install that release again. Or put back a snapshot taken before (`ukt restore <file>`; `ukt doctor` names the one an upgrade made).";
 
 /**

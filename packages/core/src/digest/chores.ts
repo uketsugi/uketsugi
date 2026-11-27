@@ -75,7 +75,7 @@ export interface Pair {
   readonly b: string;
 }
 
-export const VERDICTS = ["same", "contradicts", "different"] as const;
+const VERDICTS = ["same", "contradicts", "different"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
 const JUDGE_INSTRUCTIONS = `You compare pairs of statements about one software project. Each was written by an AI coding agent as a fact for later sessions to rely on.

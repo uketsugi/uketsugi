@@ -1,6 +1,5 @@
 {
   "name": "uketsugi",
-  "version": "0.2.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -16,6 +15,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dup": "jscpd",
+    "smoke": "vitest run -c deploy/vitest.config.js install",
     "advisories": "node scripts/advisories.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm advisories && pnpm test && pnpm dup",
     "generate": "pnpm -r generate && prettier --write packages/core/src/scan/token-rules.json",

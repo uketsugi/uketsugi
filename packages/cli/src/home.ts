@@ -48,7 +48,7 @@ export interface Home {
 /**
  * Where a server on this data directory listens. Its process is named too, for a store that has no
  * lock to name it (on a PostgreSQL server): a verb tells a server that is busy from one that is
- * gone by it. A record left by release 0.2.0 has none, and an embedded store's lock answers.
+ * gone by it. A record left by an early release has none, and an embedded store's lock answers.
  */
 export interface ServerRecord {
   readonly url: string;

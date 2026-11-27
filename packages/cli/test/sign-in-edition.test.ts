@@ -6,7 +6,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { connectInfo, hostProof } from "@uketsugi/server";
+import { connectInfo, hostProof, withoutToken } from "@uketsugi/server";
 import { afterEach, expect, test } from "vitest";
 import { doctor } from "../src/doctor.ts";
 import { setup } from "../src/setup.ts";
@@ -21,14 +21,6 @@ afterEach(async () => {
 });
 
 /** The answers of a sign-in edition's server at the data directory's address; `/mcp` wants a sign-in. */
-/** The Connect answer of an edition that gives no token: no variable and no command for it. */
-function connectWithoutToken(origin: string): unknown {
-  const info = { ...connectInfo(origin, null, false) } as Record<string, unknown>;
-  delete info["token_env"];
-  delete info["token_command"];
-  return info;
-}
-
 async function signInServer(dataDir: string, origin: string, port: number): Promise<void> {
   const refusal = {
     error: { what: "Sign in.", meaning: "Your harness signs in.", next: "Sign in." },
@@ -48,7 +40,7 @@ async function signInServer(dataDir: string, origin: string, port: number): Prom
           degraded: [],
           dashboard: { sign_in: ["Sign in."], key_form: false, no_token: NO_TOKEN },
         },
-        "/api/connect": connectWithoutToken(origin),
+        "/api/connect": withoutToken(connectInfo(origin, null, false)),
         "/api/projects": { projects: [] },
         "/healthz": {
           jobs: {

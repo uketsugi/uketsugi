@@ -64,7 +64,7 @@ export interface Part {
 
 const WORDS_ONLY = "search will match words only, not meaning";
 export const LEFT_OUT = `left out; ${WORDS_ONLY}`;
-export const STANDS = "Everything else set-up did is in place.";
+const STANDS = "Everything else set-up did is in place.";
 /** The word for a part that was left as it is. */
 export const SKIPPED = "skipped";
 

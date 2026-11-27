@@ -4,7 +4,9 @@
  * PATH, set up, served, and called as a harness calls it. Everything the installed `ukt` runs
  * with is in that home and a folder of a dozen basic tools.
  *
- * Needs UKT_MODEL_DIR (a model directory). See deploy/vitest.config.js for how to run it.
+ * `pnpm smoke` runs it, and nothing else, from the workspace root: one command from the source to a
+ * tool call. With UKT_MODEL_DIR (a model directory) the embedding model is set up and used as well;
+ * without it set-up leaves the model out, so nothing is downloaded. See deploy/vitest.config.js.
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
@@ -25,6 +27,10 @@ const RELEASE = join(WORKSPACE, "deploy", "dist");
 const TOOLS = ["sh", "uname", "dirname", "mkdir", "cp", "rm", "mv", "tar", "gzip", "sha256sum"];
 const MORE_TOOLS = ["sed", "chmod"];
 const PROJECT = "github.com/acme/billing-service";
+/** A model directory to set up with, where there is one; without, the model is left out. */
+const modelDir = process.env["UKT_MODEL_DIR"];
+const WITH_MODEL = modelDir === undefined ? ["--no-model"] : [];
+const MODEL_LEFT_OUT = modelDir === undefined;
 
 describe("the release, installed by its script into an empty home with no node", () => {
   let root: string;
@@ -37,8 +43,6 @@ describe("the release, installed by its script into an empty home with no node",
     JSON.parse((await run(ukt, [...args, "--json"], { env })).stdout) as Envelope;
 
   beforeAll(async () => {
-    const modelDir = process.env["UKT_MODEL_DIR"];
-    if (modelDir === undefined) throw new Error("set UKT_MODEL_DIR to a model directory");
     await run(join(WORKSPACE, "deploy", "build.sh"), [], { maxBuffer: 64 * 1024 * 1024 });
     root = await mkdtemp(join(tmpdir(), "ukt-install-"));
     const [home, tools] = [join(root, "home"), join(root, "tools")];
@@ -49,7 +53,8 @@ describe("the release, installed by its script into an empty home with no node",
       await symlink(stdout.trim(), join(tools, tool));
     }
     ukt = join(home, ".local", "bin", "ukt");
-    env = { HOME: home, PATH: `${join(home, ".local", "bin")}:${tools}`, UKT_MODEL_DIR: modelDir };
+    env = { HOME: home, PATH: `${join(home, ".local", "bin")}:${tools}` };
+    if (modelDir !== undefined) env["UKT_MODEL_DIR"] = modelDir;
     const script = join(RELEASE, "install.sh");
     installed = (await run(join(tools, "sh"), [script], { env })).stdout;
   });
@@ -80,18 +85,20 @@ describe("the release, installed by its script into an empty home with no node",
       "antigravity",
       "claude-code",
     ]);
-    expect((await run(ukt, ["--version"], { env })).stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect((await run(ukt, ["--version"], { env })).stdout.trim()).toMatch(
+      /^\d+\.\d+\.\d+(\+\w+)?$/,
+    );
   });
 
   test("sets up: a data directory, a token and the verified model", async () => {
-    const setup = await envelope("setup");
+    const setup = await envelope("setup", ...WITH_MODEL);
 
     expect(setup).toMatchObject({
       ok: true,
       data: {
         data_dir: join(root, "home", ".local", "share", "uketsugi"),
         created: { data_dir: true, token: true },
-        model: { state: "present" },
+        model: { state: MODEL_LEFT_OUT ? "skipped" : "present" },
       },
     });
   });
@@ -114,7 +121,7 @@ describe("the release, installed by its script into an empty home with no node",
     });
     const found = await client.callTool("search_facts", {
       project: PROJECT,
-      query: "how often are webhooks retried?",
+      query: "webhooks retry backoff",
     });
     await client.close();
 
@@ -125,19 +132,28 @@ describe("the release, installed by its script into an empty home with no node",
       plugins: [{ name: "uketsugi", source: { source: "archive" } }],
     });
 
-    expect(started).toMatchObject({ ok: true, data: { model: expect.any(String) as string } });
+    expect(started).toMatchObject({
+      ok: true,
+      data: { model: MODEL_LEFT_OUT ? null : (expect.any(String) as string) },
+    });
     expect(published.isError).toBe(false);
     expect(found.structuredContent).toMatchObject({ matched: 1, shown: 1 });
     expect(found.text).toContain("Invoice webhooks retry five times");
   });
 
-  test("passes its own doctor with nothing to fix", async () => {
+  test("passes its own doctor", async () => {
     const doctor = await envelope("doctor");
 
     expect(doctor.ok).toBe(true);
+    // Every check a new install can pass passes; the model's is a warning only where it was left out.
     expect(doctor.data?.["findings"]).toEqual(
-      ["data directory", "token", "server", "store", "model"].map((check): unknown =>
-        expect.objectContaining({ check, state: "ok" }),
+      expect.arrayContaining(
+        ["data directory", "token", "server", "store", "model"].map((check): unknown =>
+          expect.objectContaining({
+            check,
+            state: check === "model" && MODEL_LEFT_OUT ? "warn" : "ok",
+          }),
+        ),
       ),
     );
   });

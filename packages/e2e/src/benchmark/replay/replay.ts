@@ -133,7 +133,7 @@ async function withRelaxedPlaces(
 }
 
 /** Replays one case; returns a row per cell that has a query. */
-export async function replayCase(
+async function replayCase(
   env: ReplayEnv,
   shape: Shape,
   entry: ReplayCase,

@@ -1,7 +1,7 @@
 /**
  * The store records which embedding model made its vectors, as one row: a vector of another model
  * is never compared. Every store made before this holds vectors of the one model every release
- * pinned (0.1.0 and 0.2.0, `granite-small-r2@int8:1f4cf47e4ade`), so a store that has any vector
+ * pinned (every release so far, `granite-small-r2@int8:1f4cf47e4ade`), so a store that has any vector
  * is recorded as made by it; one with none is left unrecorded and takes the first model that
  * opens it, with nothing to discard.
  */

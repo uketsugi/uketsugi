@@ -30,8 +30,6 @@ services:
   uketsugi:
     build:
       context: .
-      args:
-        RELEASE: dist/uketsugi-${UKT_VERSION:-0.2.0}-linux-x64.tar.gz
     init: true
     restart: unless-stopped
     environment:

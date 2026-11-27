@@ -22,7 +22,11 @@ export async function listTasks(
   params: TaskListParams,
 ): Promise<TaskPage> {
   const { status, limit } = params;
-  const filter = { project: projectFilter(params.project, "tasks"), status, limit };
+  const filter = {
+    project: await projectFilter(ports, caller, params.project, "tasks"),
+    status,
+    limit,
+  };
   const { matched, listed, viewer } = await readTasks(ports, { caller }, filter);
   return {
     tasks: listed.map(({ task, note }) =>

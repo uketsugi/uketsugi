@@ -26,7 +26,7 @@ everything stays on your machine.
 harnesses added to it, and sessions that are told to search memory before they investigate and to
 publish what they establish. A small dashboard shows the facts, the tasks and what each session did.
 
-> **Pre-release (0.2.0).** Linux on x86-64 only. It has been run end to end with Claude Code and
+> **Pre-release.** Linux on x86-64 only. It has been run end to end with Claude Code and
 > Antigravity: each found what the other had recorded, and each finished a task the other had
 > left. For Codex, VS Code and Cursor the line that adds the server was run, and no session was.
 > Commands, and what is stored, may still change between versions.
@@ -41,7 +41,7 @@ no Node.js: the release brings its own runtime and leaves any Node you have alon
 ### 1. Install
 
 ```sh
-curl -fsSL https://github.com/uketsugi/uketsugi/releases/download/v0.2.0/install.sh | sh
+curl -fsSL https://github.com/uketsugi/uketsugi/releases/latest/download/install.sh | sh
 ```
 
 It downloads one archive of about 60 MB, checks it against the SHA-256 the script carries,
@@ -366,7 +366,7 @@ stored since) and keeps the store as it is now in `backups/before-rollback-<time
 asks. A `ukt serve` you started yourself you stop first and start again afterwards; so does a
 service this shell cannot reach (one entered with `su`). An older release over a store a newer one
 made is refused with the reason, and the release you had keeps running. `ukt --version` says
-`0.2.0` for a release and `0.2.0+<commit>` for any other build.
+`<version>` for a release and `<version>+<commit>` for any other build.
 
 ## Your data
 

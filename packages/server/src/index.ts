@@ -15,7 +15,7 @@ export type { DashboardWords } from "./dashboard-words.ts";
 export type { Pending, PendingOptions } from "./pending.ts";
 export { hostProof } from "./auth.ts";
 export { DEFAULT_HOST, loopbackOfEvery } from "./guard.ts";
-export { connectInfo, word } from "./connect.ts";
+export { connectInfo, withoutToken, word } from "./connect.ts";
 export { SERVER_NAME } from "@uketsugi/contracts";
 export { openLocalPorts, openPorts, startLocalServer } from "./local.ts";
 export type {

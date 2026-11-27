@@ -4,8 +4,8 @@
 # second half: `docker compose build`).
 FROM debian:bookworm-slim
 
-# The release tarball, relative to the deploy directory.
-ARG RELEASE=dist/uketsugi-0.2.0-linux-x64.tar.gz
+# The release tarball, relative to the deploy directory: the one in dist/ (two there fail the unpacking below, loudly).
+ARG RELEASE=dist/uketsugi-*-linux-x64.tar.gz
 ADD ${RELEASE} /opt/
 # The data directory is its owner's alone, as `ukt setup` makes one and `ukt doctor`, the health
 # check, requires; a new volume takes the mode it has here.

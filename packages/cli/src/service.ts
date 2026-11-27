@@ -35,7 +35,7 @@ const STOP_WITHIN_MS = (STOP_SECONDS + 30) * 1000;
 const STOPPING = new Set(["stop", "restart", "disable"]);
 
 /** What clears a unit the manager stopped starting after repeated failures. */
-export const RESET_FAILED = `systemctl --user reset-failed ${NAME}`;
+const RESET_FAILED = `systemctl --user reset-failed ${NAME}`;
 
 /** How many of the server's last lines a person is shown. */
 const LAST_LINES = 8;

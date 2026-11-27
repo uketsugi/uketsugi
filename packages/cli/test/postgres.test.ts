@@ -2,7 +2,10 @@
  * A host whose store is kept on a PostgreSQL server. These cases run when a PostgreSQL server is
  * given: see testkit's `postgres.ts`.
  */
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +17,10 @@ import {
 } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { doctor } from "../src/doctor.ts";
+import { readRecord, resolveHome, writeRecord } from "../src/home.ts";
 import { token } from "../src/host-verbs.ts";
 import { serve } from "../src/serve.ts";
+import { servingNow } from "../src/server-client.ts";
 import { setup } from "../src/setup.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { fakeIo, tempDir } from "./support.ts";
@@ -71,6 +76,32 @@ describe.runIf(TEST_POSTGRES_URL !== "")("a host set up on a PostgreSQL server",
     // ...and it holds the address itself: it is what the next verb reads to find the database.
     const kept = JSON.parse(await readFile(join(dataDir, "settings.json"), "utf8")) as unknown;
     expect(kept).toMatchObject({ databaseUrl: database.url });
+  });
+
+  test("a server that holds it and says nothing is found by the process its record names, there being no lock note: running, it is the server; gone, it is nothing", async () => {
+    const serving = await serve(fakeIo(), { dataDir, ...LISTEN }, {});
+    const home = resolveHome(dataDir, {});
+    const made = await readRecord(home);
+    const silent = createServer(() => undefined);
+    await new Promise<void>((listening) => silent.listen(0, "127.0.0.1", listening));
+    const url = `http://127.0.0.1:${(silent.address() as AddressInfo).port}`;
+    const child = spawn(process.execPath, ["-e", ""]);
+    await new Promise((ended) => child.on("exit", ended));
+
+    // The record a real server on PostgreSQL leaves, pointed at an address that takes the connection and is silent.
+    const found = async (record: object) => {
+      await writeRecord(home, { ...made, ...record } as NonNullable<typeof made>);
+      return servingNow(home).catch((error: unknown) => error);
+    };
+    const [running, gone] = [await found({ url }), await found({ url, pid: child.pid })];
+    silent.closeAllConnections();
+    silent.close();
+    await serving.close();
+
+    expect(made).toMatchObject({ pid: process.pid });
+    expect(existsSync(join(dataDir, "lock.owner"))).toBe(false);
+    expect(running).toMatchObject({ url });
+    expect(gone).toBeNull();
   });
 
   test("refuses a verb that copies the data directory's own store, and names PostgreSQL's tools", async () => {

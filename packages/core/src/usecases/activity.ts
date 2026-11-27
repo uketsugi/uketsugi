@@ -17,7 +17,7 @@ import type { CorePorts } from "../ports.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How many of the person's sessions "recent sessions" lists. */
-export const RECENT_SESSIONS = 20;
+const RECENT_SESSIONS = 20;
 
 function sessionRow(session: Session): ActivitySession {
   const { digestedAt, modelTokens, digestFailure } = session;
