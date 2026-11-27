@@ -1375,6 +1375,24 @@
         },
         "required": ["person", "added", "issued"]
       },
+      "PersonRemoved": {
+        "type": "object",
+        "description": "`POST /api/people/:id/remove`.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "credentials_ended": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many of their credentials were live and are ended."
+          }
+        },
+        "required": ["id", "name", "credentials_ended"]
+      },
       "TokenRevoked": {
         "type": "object",
         "description": "`POST /api/tokens/:id/revoke`.",

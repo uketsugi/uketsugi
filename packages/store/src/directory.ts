@@ -63,6 +63,26 @@ async function insertCredential(db: Db, credential: NewCredential): Promise<void
     .execute();
 }
 
+/** Ends a person's live credentials at `at`, of one kind or of every kind. Returns how many it ended. */
+async function endCredentials(
+  db: Db,
+  orgId: string,
+  principalId: string,
+  at: Date,
+  kind?: CredentialKind,
+): Promise<number> {
+  const live = db
+    .updateTable("credentials")
+    .where("principalId", "=", principalId)
+    .where("orgId", "=", orgId)
+    .where("revokedAt", "is", null)
+    .set({ revokedAt: at });
+  const ended = await (
+    kind === undefined ? live : live.where("kind", "=", kind)
+  ).executeTakeFirst();
+  return Number(ended.numUpdatedRows);
+}
+
 /** Principals, their credentials and their audiences. */
 export class SqlDirectory extends Repo implements DirectoryRepo {
   /**
@@ -151,9 +171,36 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
     });
   }
 
-  async people(orgId: string): Promise<Person[]> {
-    // Ids are UUIDv7: their order is the order the people were added in.
-    return this.principals().where("orgId", "=", orgId).orderBy("id").execute();
+  /** The organization's people, or those removed from it; ids are UUIDv7, so their order is the order they were added in. */
+  private listed(orgId: string, removed: boolean): Promise<Person[]> {
+    const rows = this.principals().where("orgId", "=", orgId).orderBy("id");
+    return (
+      removed ? rows.where("removedAt", "is not", null) : rows.where("removedAt", "is", null)
+    ).execute();
+  }
+
+  people(orgId: string): Promise<Person[]> {
+    return this.listed(orgId, false);
+  }
+
+  removedPeople(orgId: string): Promise<Person[]> {
+    return this.listed(orgId, true);
+  }
+
+  async removePerson(orgId: string, principalId: string, at: Date): Promise<number> {
+    const [id] = uuidsOf([principalId]);
+    if (id === undefined) return 0;
+    return this.db.transaction().execute(async (trx) => {
+      const gone = await trx
+        .updateTable("principals")
+        .set({ removedAt: at })
+        .where("orgId", "=", orgId)
+        .where("id", "=", id)
+        .where("removedAt", "is", null)
+        .executeTakeFirst();
+      if (gone.numUpdatedRows === 0n) return 0;
+      return endCredentials(trx, orgId, id, at);
+    });
   }
 
   async rename(orgId: string, principalId: string, displayName: string): Promise<void> {
@@ -242,16 +289,9 @@ export class SqlDirectory extends Repo implements DirectoryRepo {
         .where("id", "=", principalId)
         .forUpdate()
         .execute();
-      const ended = await trx
-        .updateTable("credentials")
-        .set({ revokedAt: at })
-        .where("orgId", "=", orgId)
-        .where("principalId", "=", principalId)
-        .where("kind", "=", "agent")
-        .where("revokedAt", "is", null)
-        .executeTakeFirst();
+      const ended = await endCredentials(trx, orgId, principalId, at, "agent");
       await insertCredential(trx, credential);
-      return Number(ended.numUpdatedRows);
+      return ended;
     });
   }
 

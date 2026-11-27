@@ -98,6 +98,27 @@ describe("backup and restore", () => {
     await copy.close();
   });
 
+  test("a restore that keeps the schema leaves a snapshot of an earlier release at that release's schema, which an ordinary restore brings to this one", async () => {
+    const [released, snapshots] = [join(root, "released"), join(root, "released.tgz")];
+    const before = Object.entries(MIGRATIONS).filter(([name]) => name < "0003");
+    const engine = await startEngine(join(root, "released-source"));
+    await migrate(engine.db, Object.fromEntries(before));
+    await writeFile(snapshots, Buffer.from(await (await engine.snapshot()).arrayBuffer()));
+    await engine.close();
+
+    await restoreEmbeddedStore({ dataDir: released, file: snapshots, keepSchema: true });
+    const kept = await startEngine(join(released, "pg"));
+    const pendingKept = (await migrationState(kept.db)).pending;
+    await kept.close();
+    await restoreEmbeddedStore({ dataDir: released, file: snapshots });
+    const moved = await startEngine(join(released, "pg"));
+    const pendingMoved = (await migrationState(moved.db)).pending;
+    await moved.close();
+
+    expect(pendingKept).toEqual(Object.keys(MIGRATIONS).filter((name) => name >= "0003"));
+    expect(pendingMoved).toEqual([]);
+  });
+
   test("a restore is refused while a process owns the directory, and a file that is no snapshot replaces nothing", async () => {
     await expect(restoreEmbeddedStore({ dataDir: from, file })).rejects.toThrow(
       /in use by another uketsugi process .* Stop that process/,
@@ -171,7 +192,7 @@ describe("a store that a newer version opens", () => {
   /** What a later version adds to today's migrations: one that makes a table. */
   const newer = {
     ...MIGRATIONS,
-    "0005_test_only_next": {
+    "0007_test_only_next": {
       async up(db: Parameters<typeof migrate>[0]) {
         await sql`create table next_thing (id int)`.execute(db);
       },
@@ -193,18 +214,18 @@ describe("a store that a newer version opens", () => {
     expect(await migrationState(engine.db, newer)).toMatchObject({ pending: [] });
     expect(await engine.db.selectFrom("facts").select("id").execute()).toEqual([{ id: kept }]);
     await engine.close();
-    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0005_test_only_next.tgz"]);
+    expect(await readdir(join(dataDir, BACKUPS_DIR))).toEqual(["before-0007_test_only_next.tgz"]);
   });
 
   test("keeps the snapshots of its three newest upgrades, and every file that is not one", async () => {
     const backups = join(dataDir, BACKUPS_DIR);
     await writeFile(join(backups, "uketsugi-20260101T000000Z.tgz"), "a person's own backup");
-    for (const name of ["0006_more", "0007_again", "0008_last"])
+    for (const name of ["0008_more", "0009_again", "0010_last"])
       await keepUpgradeSnapshot(dataDir, name, new Blob(["as it was"]));
     expect((await readdir(backups)).sort()).toEqual([
-      "before-0006_more.tgz",
-      "before-0007_again.tgz",
-      "before-0008_last.tgz",
+      "before-0008_more.tgz",
+      "before-0009_again.tgz",
+      "before-0010_last.tgz",
       "uketsugi-20260101T000000Z.tgz",
     ]);
   });
@@ -239,6 +260,11 @@ describe("on an engine of its own, in memory", () => {
     const another =
       /^This store was made by another build of uketsugi, with a schema this build cannot read .+ Nothing was changed: the build that made it still opens it\./;
     await expect(migrate(engine.db)).rejects.toThrow(another);
+    // The cause is typed, with the migration this build lacks, so that a caller can say what to do.
+    await expect(migrate(engine.db)).rejects.toMatchObject({
+      name: "StoreNewerError",
+      missing: "9998_newer",
+    });
   });
 
   test("a store that 0.1.0 made takes the model step's migration, and the facts it holds are an agent's", async () => {

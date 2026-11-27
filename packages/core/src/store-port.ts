@@ -583,6 +583,14 @@ export interface DirectoryRepo {
   /** The organization's people, in the order they were added. */
   people(orgId: string): Promise<Person[]>;
   rename(orgId: string, principalId: string, displayName: string): Promise<void>;
+  /** The people who were removed, in the order they were added: their names stay taken. */
+  removedPeople(orgId: string): Promise<Person[]>;
+  /**
+   * Removes a person from the organization's people and ends every live credential of theirs, as
+   * one step. Their row stays, so what they shared still names them. Returns how many credentials
+   * it ended; 0 when the person is not there or was removed already.
+   */
+  removePerson(orgId: string, principalId: string, at: Date): Promise<number>;
   /**
    * The caller a live secret's hash belongs to, when it is a credential of this kind, with the
    * credential stamped as used at `usedAt` (at most once a minute). Looks across organizations:

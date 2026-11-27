@@ -165,6 +165,24 @@ export function serves(state: ServiceState, home: Home): boolean {
   return state.text !== null && state.text.includes(`${servedBy(home)}\n`);
 }
 
+/**
+ * The data directory a unit serves, read back from its command line as `unitWord` wrote it; null
+ * where the unit names none. A service names it in full, so this is the one the service holds,
+ * whatever the shell asking has set.
+ */
+export function unitDataDir(state: ServiceState): string | null {
+  const found = /--data-dir (?:"((?:[^"\\]|\\.)*)"|(\S+))\n/.exec(state.text ?? "");
+  const text = found?.[1] ?? found?.[2];
+  return text === undefined
+    ? null
+    : text.replaceAll(/\\(.)/g, "$1").replaceAll("%%", "%").replaceAll("$$", "$");
+}
+
+/** Whether the unit runs this launcher: the one an install's release has, which stays where it is from one release to the next. */
+export function runsLauncher(state: ServiceState, launcher: string): boolean {
+  return state.text?.includes(`ExecStart=${unitWord(launcher)} serve `) === true;
+}
+
 /** What starts the server again, given what starts it: the same words, as a restart. */
 export function restartOf(start: string): string {
   return start === "ukt serve" ? "restart `ukt serve`" : start.replace(" start ", " restart ");
@@ -251,7 +269,7 @@ export async function lastWords(io: Io, env: NodeJS.ProcessEnv, home: Home): Pro
 }
 
 /** Starts the unit and waits for its server. What went wrong, or null when the server answers and has proven itself. */
-async function start(
+export async function start(
   io: Io,
   env: NodeJS.ProcessEnv,
   home: Home,
@@ -360,10 +378,17 @@ export async function pauseFor(
   verb: string,
 ): Promise<Pause | null> {
   const running = await servingNow(home);
-  if (running === null) return null;
   const state = await serviceState(io, env);
+  // A service that is starting or that the manager keeps starting again is no server yet and holds
+  // the store the moment it is: it is stopped for the work and started afterwards all the same.
+  const restarting =
+    state.manager && serves(state, home) && /activating|failed|auto-restart/.test(state.standing);
+  if (running === null && !restarting) return null;
   const alone = `Only one process may hold the store, so \`ukt ${verb}\` did nothing.`;
-  const what = `The server is running on this data directory (at ${running.url}).`;
+  const what =
+    running === null
+      ? `The server of your service (${UNIT}) is not up and the manager keeps starting it.`
+      : `The server is running on this data directory (at ${running.url}).`;
   // The service is there and this shell cannot reach its manager: nothing here could start it again.
   if (!state.manager && serves(state, home))
     throw new CliFailure({
@@ -371,7 +396,7 @@ export async function pauseFor(
       meaning: `It runs as your service (${UNIT}), and ${state.why}. ${alone}`,
       next: `Run \`ukt ${verb}\` from a shell of your own login, where \`${SERVICE_COMMANDS.stop}\` works.`,
     });
-  if (!(state.manager && serves(state, home) && state.running))
+  if (!(state.manager && serves(state, home) && (state.running || restarting)))
     throw new CliFailure({
       what,
       meaning: alone,

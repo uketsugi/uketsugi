@@ -31,6 +31,12 @@ export interface RestoreOptions {
   readonly dataDir: string;
   /** A file `backupEmbeddedStore` wrote. */
   readonly file: string;
+  /**
+   * Leave the snapshot at the schema it was taken at, which a restore otherwise brings to this
+   * version's. For going back to the release that wrote the snapshot: that release opens the
+   * store, and a store already at this version's schema is one it could not read.
+   */
+  readonly keepSchema?: boolean;
 }
 
 /** Syncs a directory, so that a rename inside it survives a power cut. Not every platform can. */
@@ -43,7 +49,7 @@ async function syncDirectory(directory: string): Promise<void> {
 /**
  * Replaces the store in a data directory with a snapshot. It takes the directory's lock, so it
  * refuses while a server runs on the directory. The snapshot is loaded beside the store and
- * brought to this version's schema before anything is replaced: a snapshot that cannot be read,
+ * brought to this version's schema (unless `keepSchema`) before anything is replaced: a snapshot that cannot be read,
  * or that a newer version wrote, leaves the store as it was.
  */
 export async function restoreEmbeddedStore(options: RestoreOptions): Promise<void> {
@@ -55,7 +61,7 @@ export async function restoreEmbeddedStore(options: RestoreOptions): Promise<voi
     try {
       const engine = await startEngine(incoming, new Blob([await readFile(options.file)]));
       try {
-        await migrate(engine.db);
+        if (options.keepSchema !== true) await migrate(engine.db);
       } finally {
         await engine.close();
       }

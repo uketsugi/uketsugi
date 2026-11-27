@@ -12,6 +12,7 @@ import type { JobCounts } from "@uketsugi/core";
 import type { Starting } from "@uketsugi/server";
 import { describeRecovery, ENGINE_DIR, usable } from "@uketsugi/store";
 import { jobsFinding, plural, serverModelFindings } from "./doctor-jobs.ts";
+import { checkCalls, checkUpgrade, startFailureFinding } from "./doctor-upgrade.ts";
 import { checkService, foreignAnswer, listensAt } from "./doctor-service.ts";
 import { connectLines } from "./harness-lines.ts";
 import {
@@ -50,7 +51,9 @@ export interface Finding {
     | "model"
     | "language model"
     | "jobs"
-    | "harnesses";
+    | "harnesses"
+    | "calls"
+    | "upgrade";
   readonly state: "ok" | "warn" | "fail";
   readonly detail: string;
   readonly fix?: string;
@@ -172,6 +175,7 @@ async function checkServer(
   home: Home,
   fix: string,
   askModel: boolean,
+  restarting: boolean,
 ): Promise<{
   findings: Finding[];
   vector: boolean | null;
@@ -202,10 +206,13 @@ async function checkServer(
       detail: "not checked: the store is checked through the running server",
     };
     // A program that holds the port is the cause, and starting the server again does not move it.
-    const origin = await foreignAnswer(home);
+    // While the manager keeps starting the server, what answers at its port may be that server
+    // between two starts, and the reason its last start failed is the current one.
+    const kept = await startFailureFinding(home, detail);
+    const origin = kept !== null && restarting ? null : await foreignAnswer(home);
     const stopped: Finding =
       origin === null
-        ? { check, state: "fail", detail, fix }
+        ? (kept ?? { check, state: "fail", detail, fix })
         : {
             check,
             state: "fail",
@@ -371,7 +378,17 @@ export async function doctor(
   const service = await serviceState(io, env);
   // A server that is down is started by its service where it has one.
   const start = startCommand(service, home);
-  const server = await checkServer(home, startFix(service, home), options.llm !== false);
+  // A service the manager keeps starting, and that keeps failing.
+  const restarting =
+    service.manager &&
+    serves(service, home) &&
+    /activating|failed|auto-restart/.test(service.standing);
+  const server = await checkServer(
+    home,
+    startFix(service, home),
+    options.llm !== false,
+    restarting,
+  );
   const about = (check: Finding["check"]): Finding[] =>
     server.findings.filter((finding) => finding.check === check);
   const findings = [
@@ -391,6 +408,8 @@ export async function doctor(
     ...about("language model"),
     ...about("jobs"),
     ...(server.vector === null ? [] : await checkHarnesses(home, dirFlag(options))),
+    ...(server.vector === null ? [] : await checkCalls(home)),
+    ...(await checkUpgrade(home)),
   ];
   const count = (state: Finding["state"]): number =>
     findings.filter((finding) => finding.state === state).length;

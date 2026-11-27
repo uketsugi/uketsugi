@@ -3,7 +3,6 @@
  * `ukt`: the command line of the server on this machine. This file connects a terminal to the
  * program; each verb, with its options and its work, is in the file beside it.
  */
-import { readFileSync } from "node:fs";
 import { confirm, password, spinner } from "@clack/prompts";
 import { Command, CommanderError, Option } from "commander";
 import open from "open";
@@ -17,6 +16,8 @@ import { progressLine, runVerb, type Io } from "./report.ts";
 import { serveVerb } from "./serve.ts";
 import { setupVerbs } from "./setup.ts";
 import { storeVerbs } from "./store-verbs.ts";
+import { upgradeVerbs } from "./upgrade.ts";
+import { version } from "./version.ts";
 
 /** The terminal a person runs `ukt` in. Prompts and the spinner are drawn only when one is there. */
 export function terminal(): Io {
@@ -51,13 +52,6 @@ export function terminal(): Io {
   };
 }
 
-function version(): string {
-  const manifest = JSON.parse(
-    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-  ) as { version: string };
-  return manifest.version;
-}
-
 /** Parses `argv` (the arguments after the program's name), runs the verb, and returns the exit code. */
 export async function main(
   argv: readonly string[],
@@ -67,7 +61,7 @@ export async function main(
   let code = 0;
   const ukt = new Command("ukt")
     .description("uketsugi: a shared memory for your AI agents, served from this machine.")
-    .version(version())
+    .version(version(env))
     .exitOverride()
     .configureOutput({
       writeOut: (text) => io.out(text.trimEnd()),
@@ -94,6 +88,7 @@ export async function main(
     doctorVerb,
     remoteVerbs,
     storeVerbs,
+    upgradeVerbs,
   ])
     add(program);
   try {

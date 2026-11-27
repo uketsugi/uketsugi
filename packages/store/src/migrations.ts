@@ -10,6 +10,7 @@ import { MODEL_STEP_0002 } from "./migrations/0002_model_step.ts";
 import { DIGEST_FAILURE_0003 } from "./migrations/0003_digest_failure.ts";
 import { UNREAD_0004 } from "./migrations/0004_unread.ts";
 import { EMBEDDING_MODEL_0005 } from "./migrations/0005_embedding_model.ts";
+import { PERSON_REMOVED_0006 } from "./migrations/0006_person_removed.ts";
 
 /**
  * Every migration, by the name it is recorded under. `0001_init.3` is the schema 0.1.0 released:
@@ -21,7 +22,28 @@ export const MIGRATIONS: Record<string, Migration> = {
   "0003_digest_failure": DIGEST_FAILURE_0003,
   "0004_unread": UNREAD_0004,
   "0005_embedding_model": EMBEDDING_MODEL_0005,
+  "0006_person_removed": PERSON_REMOVED_0006,
 };
+
+/**
+ * Thrown when a store has recorded a migration this build does not have: a newer release made it
+ * (or a build from before the first release did). Nothing was changed. The way out is a build
+ * that has the migration, or a snapshot taken before it was applied.
+ */
+export class StoreNewerError extends Error {
+  /** The recorded migration this build lacks, when the migrator named it. */
+  readonly missing: string | null;
+  constructor(why: string, cause: unknown) {
+    super(
+      "This store was made by another build of uketsugi, with a schema this build cannot read " +
+        `(${why}). Nothing was changed: the build that made it still opens it. ` +
+        "Run that build, or put back a copy of the store from before the newer build opened it.",
+      { cause },
+    );
+    this.name = "StoreNewerError";
+    this.missing = /migration (\S+) is missing/.exec(why)?.[1] ?? null;
+  }
+}
 
 /** The migrator over a set of migrations: this package's, unless a test of an upgrade gives fewer. */
 function migratorOf(db: Db, migrations: Record<string, Migration>): Migrator {
@@ -40,14 +62,7 @@ export async function migrate(
   const { error } = await migratorOf(db, migrations).migrateToLatest();
   if (error !== undefined) {
     const why = error instanceof Error ? error.message : "the migrator gave no reason";
-    if (why.startsWith("corrupted migrations")) {
-      throw new Error(
-        "This store was made by another build of uketsugi, with a schema this build cannot read " +
-          `(${why}). Nothing was changed: the build that made it still opens it. ` +
-          "Give this build a new data directory or an empty database.",
-        { cause: error },
-      );
-    }
+    if (why.startsWith("corrupted migrations")) throw new StoreNewerError(why, error);
     throw new Error(
       `The store could not be brought to this version's schema (${why}). ` +
         "Nothing was changed: the version that last opened it still can.",

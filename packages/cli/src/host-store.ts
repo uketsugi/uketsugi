@@ -10,6 +10,7 @@ import {
   holdsEmbeddedStore,
   serverStoreName,
   StoreInUseError,
+  StoreNewerError,
   StoreUnreadableError,
   StoreUnavailableError,
 } from "@uketsugi/store";
@@ -101,6 +102,10 @@ export function storePlace(home: Home, store: HostStore): string {
   return store.kind === "postgres" ? `PostgreSQL at ${store.name}` : home.dataDir;
 }
 
+/** What to do about a store that a newer release made. Starting again with this release does not help. */
+export const NEWER_STORE_WAY_OUT =
+  "Run the release that made it: after an upgrade, `ukt rollback` brings back the one before; otherwise install that release again. Or put back a snapshot taken before (`ukt restore <file>`; `ukt doctor` names the one an upgrade made).";
+
 /**
  * The failure of a store that could not be opened, in the three parts, or null when the error is
  * not about that: another process holds it, or its database could not be reached.
@@ -110,6 +115,7 @@ export function storeFailure(error: unknown, meaning: string): CliFailure | null
     new CliFailure({ what: describe(error), meaning, next });
   if (error instanceof StoreInUseError)
     return failed("Use the server that is running, or stop it, then run this again.");
+  if (error instanceof StoreNewerError) return failed(NEWER_STORE_WAY_OUT);
   if (error instanceof StoreUnreadableError)
     return failed(
       error.permission

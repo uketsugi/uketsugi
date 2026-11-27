@@ -6,8 +6,14 @@
  * does the other's work, so a harness that holds a token cannot act as its person. A secret is
  * shown once, when it is issued; only its SHA-256 is kept.
  */
-import type { Invitation, InviteRequest, PeopleList, TokenRevoked } from "@uketsugi/contracts";
-import type { Caller, Credential, CredentialKind } from "./domain.ts";
+import type {
+  Invitation,
+  InviteRequest,
+  PeopleList,
+  PersonRemoved,
+  TokenRevoked,
+} from "@uketsugi/contracts";
+import type { Caller, Credential, CredentialKind, Person } from "./domain.ts";
 import type { NewCredential, PrincipalSeed } from "./store-port.ts";
 import { invalidInput, ToolFailure } from "./failure.ts";
 import { sha256Hex, toHex } from "./hash.ts";
@@ -241,9 +247,9 @@ export async function invitePerson(
     throw invalidInput(`"${input.name}" cannot be a person's name.`, "Pass the person's own name.");
   }
   const { directory } = ports.store;
-  const known = (await directory.people(operator.orgId)).find((person) =>
-    sameName(person.displayName, name),
-  );
+  const named = (people: readonly Person[]) =>
+    people.find((person) => sameName(person.displayName, name));
+  const known = named(await directory.people(operator.orgId));
   if ((known === undefined) !== (input.another === undefined)) {
     throw new ToolFailure("conflict", {
       what:
@@ -256,6 +262,17 @@ export async function invitePerson(
           ? "Add them first, without asking for another credential."
           : "To add a different person, give them a name of their own. To give this person another harness token or another dashboard key, say which: `ukt invite <name> --token` or `ukt invite <name> --key`.",
     });
+  }
+  if (known === undefined) {
+    const gone = named(await directory.removedPeople(operator.orgId));
+    if (gone !== undefined) {
+      throw new ToolFailure("conflict", {
+        what: `${gone.displayName} was on this server and was removed.`,
+        meaning:
+          "Nothing was issued: what they shared still carries that name, and a new person with it could not be told from them.",
+        next: "Give the new person a name of their own.",
+      });
+    }
   }
   if (known !== undefined && input.another !== undefined) {
     const holder = { orgId: operator.orgId, principalId: known.id };
@@ -325,4 +342,36 @@ export async function revokeToken(
   }
   const revoked = await directory.revokeCredential(operator.orgId, id, ports.clock.now());
   return { id, revoked };
+}
+
+/**
+ * Removes a person, as whoever runs the server asks: they leave the server's people and every
+ * credential of theirs ends. What they shared stays, under their name; what was private to them
+ * stays and nobody reaches it. The person who runs the server is not removable. Once one person
+ * is left, the server takes that person's harnesses on this machine with no token again.
+ */
+export async function removePerson(
+  ports: Pick<CorePorts, "store" | "clock">,
+  operator: Caller,
+  personId: string,
+): Promise<PersonRemoved> {
+  const { directory } = ports.store;
+  const id = personId.trim().toLowerCase();
+  const person = (await directory.people(operator.orgId)).find((listed) => listed.id === id);
+  if (person === undefined) {
+    throw new ToolFailure("not_found", {
+      what: `Nobody with the id ${personId} is on this server.`,
+      meaning: "Nothing was changed.",
+      next: "Run `ukt people` and pass a person as it is listed there.",
+    });
+  }
+  if (person.id === operator.principalId) {
+    throw new ToolFailure("invalid_input", {
+      what: "Whoever runs this server cannot be removed from it.",
+      meaning: "Nothing was changed.",
+      next: "To end one of their credentials, use `ukt revoke <id>`.",
+    });
+  }
+  const ended = await directory.removePerson(operator.orgId, person.id, ports.clock.now());
+  return { id: person.id, name: person.displayName, credentials_ended: ended };
 }

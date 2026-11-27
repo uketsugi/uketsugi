@@ -9,8 +9,8 @@
 import { TOKEN_ENV, type ApiPerson, type Invitation } from "@uketsugi/contracts";
 import { resolveHome } from "./home.ts";
 import type { Program } from "./program.ts";
-import { CliFailure, type Report } from "./report.ts";
-import { connectAsHost, invite, people, revoke } from "./server-client.ts";
+import { CliFailure, confirmPlan, type Io, type Report } from "./report.ts";
+import { connectAsHost, invite, people, removePerson, revoke } from "./server-client.ts";
 
 interface PeopleOptions {
   readonly dataDir?: string;
@@ -138,8 +138,54 @@ export async function revokeToken(
   };
 }
 
-/** Adds `people`, `invite` and `revoke` to the program. */
-export function peopleVerbs({ env, verb, run }: Program): void {
+export interface RemoveOptions extends PeopleOptions {
+  readonly yes?: boolean;
+}
+
+/** `ukt remove <name>`: takes a person off the server and ends every credential of theirs. */
+export async function removeOne(
+  io: Io,
+  name: string,
+  options: RemoveOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<Report> {
+  const server = await connectAsHost(resolveHome(options.dataDir, env));
+  const listed = (await people(server)).people;
+  const person = listed.find(
+    (each) => each.name.trim().toLowerCase() === name.trim().toLowerCase(),
+  );
+  if (person === undefined)
+    throw new CliFailure({
+      what: `Nobody called ${name} is on this server.`,
+      meaning: "Nothing was changed.",
+      next: "Run `ukt people` and pass a name as it is listed there.",
+    });
+  const live = person.tokens.filter((token) => token.revoked_at === null).length;
+  await confirmPlan(
+    io,
+    [
+      `This removes ${person.name} from this server and ends their ${live} live credential${live === 1 ? "" : "s"}.`,
+      "What they shared stays, under their name. What was private to them stays and nobody can reach it.",
+      listed.length === 2
+        ? "You are then the only person here, and the harnesses on this machine need no token again."
+        : `${listed.length - 1} people are then left, so every harness still sends a token.`,
+    ],
+    options,
+  );
+  const done = await removePerson(server, person.id);
+  return {
+    data: { ...done },
+    lines: [
+      `Removed ${done.name}. ${done.credentials_ended} credential${done.credentials_ended === 1 ? "" : "s"} ended.`,
+      listed.length === 2
+        ? "Nobody else is on this server: a harness on this machine needs no token again."
+        : `${listed.length - 1} people are on this server: every harness still sends a token.`,
+    ],
+  };
+}
+
+/** Adds `people`, `invite`, `remove` and `revoke` to the program. */
+export function peopleVerbs({ io, env, verb, run }: Program): void {
   verb("people", "list everyone on this server and their credentials").action(
     (options: PeopleOptions) => run("people", options, () => listPeople(options, env)),
   );
@@ -154,6 +200,12 @@ export function peopleVerbs({ env, verb, run }: Program): void {
     )
     .action((name: string, options: InviteOptions) =>
       run("invite", options, () => invitePerson(name, options, env)),
+    );
+  verb("remove", "take a person off this server and end every credential of theirs")
+    .argument("<name>", "the person's name, as `ukt people` lists it")
+    .option("--yes", "do not ask before removing")
+    .action((name: string, options: RemoveOptions) =>
+      run("remove", options, () => removeOne(io, name, options, env)),
     );
   verb("revoke", "end one credential; every other one goes on working")
     .argument("<id>", "a credential's id, as `ukt people` lists it")

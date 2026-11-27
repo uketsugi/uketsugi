@@ -280,5 +280,50 @@ export function describeMoveConformance(name: string, harness: StoreHarness): vo
       expect(rotated.reduce((sum, { revoked }) => sum + revoked, 0)).toBe(5);
       expect(new Set(rotated.map(({ token }) => token)).size).toBe(5);
     });
+
+    test("a removed person leaves the people and every credential of theirs ends, and their name is still known to what they shared", async () => {
+      const { directory } = store;
+      const seed = {
+        subject: "test:erin",
+        displayName: "erin",
+        orgId: alice.orgId,
+        principalId: ids.uuid(),
+        audienceId: ids.uuid(),
+      };
+      const secrets = new Map<string, string>();
+      const credential = (kind: "agent" | "person") => {
+        const tokenHash = ids.uuid().replaceAll("-", "").repeat(2);
+        secrets.set(kind, tokenHash);
+        return {
+          orgId: alice.orgId,
+          id: ids.uuid(),
+          principalId: seed.principalId,
+          kind,
+          label: kind,
+          tokenHash,
+          createdAt: clock.now(),
+        };
+      };
+      await directory.addPerson(seed, ids.uuid(), [credential("agent"), credential("person")]);
+      const listed = async () =>
+        (await directory.people(alice.orgId)).map((entry) => entry.displayName);
+      expect(await listed()).toContain("erin");
+
+      expect(await directory.removePerson(alice.orgId, seed.principalId, clock.now())).toBe(2);
+
+      expect(await listed()).not.toContain("erin");
+      expect(
+        (await directory.removedPeople(alice.orgId)).map((entry) => entry.displayName),
+      ).toEqual(["erin"]);
+      for (const kind of ["agent", "person"] as const)
+        expect(
+          await directory.callerByTokenHash(secrets.get(kind) ?? "", kind, clock.now()),
+        ).toBeNull();
+      const held = await directory.credentials(alice.orgId, seed.principalId);
+      expect(held.every((entry) => entry.revokedAt !== null)).toBe(true);
+      const names = await directory.names(alice.orgId, [seed.principalId]);
+      expect(names.get(seed.principalId)).toBe("erin");
+      expect(await directory.removePerson(alice.orgId, seed.principalId, clock.now())).toBe(0);
+    });
   });
 }

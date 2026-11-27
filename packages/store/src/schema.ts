@@ -25,7 +25,13 @@ type Json<T> = ColumnType<T, string, string>;
 type Bytes = Uint8Array;
 
 export interface Database {
-  principals: { orgId: string; id: string; displayName: string; subject: string };
+  principals: {
+    orgId: string;
+    id: string;
+    displayName: string;
+    subject: string;
+    removedAt: Date | null;
+  };
   credentials: {
     orgId: string;
     id: string;

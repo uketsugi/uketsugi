@@ -8,8 +8,10 @@
 # nothing else is written. UKT_LIB_DIR and UKT_BIN_DIR move the two. The tarball's SHA-256 is
 # checked before anything is unpacked: against --sha256 or UKT_SHA256, else the value this copy
 # of the script was built with, else the `.sha256` file beside the tarball. Run over an earlier
-# release it replaces it, and a server that runs as the person's service (`ukt setup` installs
-# one) is started again on the new release.
+# release it replaces it and keeps that one at <lib>.previous; a server that runs as the person's
+# service (`ukt setup` installs one) is started again on the new release, and if it does not
+# answer, the earlier release is put back (`ukt upgrade --settle`, below). `ukt rollback` goes back
+# after an upgrade that went well.
 set -eu
 
 # Set by deploy/build.sh in the copy that ships with a release.
@@ -24,24 +26,20 @@ fail() {
   exit 1
 }
 
-# After an upgrade a server that was running still runs the release just replaced, whose files are
-# gone. One that runs as the person's service (the unit `ukt setup` writes, by that name) is
-# started again here; one in a terminal is its person's to start again.
-SERVICE=uketsugi.service
-restart_server() {
-  unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$SERVICE"
-  if [ ! -f "$unit" ]; then
-    printf 'If `ukt serve` is running, stop it and start it again: it still runs the release this one replaced.\n'
-  elif ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show "$SERVICE" >/dev/null 2>&1; then
-    printf 'Your service (%s) could not be reached from this shell, so it still runs the release this one replaced.\n' "$SERVICE"
-    printf 'From a shell of your own login: systemctl --user restart %s\n' "${SERVICE%.service}"
-  elif ! systemctl --user is-active --quiet "$SERVICE"; then
-    printf 'Your service (%s) is not running. Start it with: systemctl --user reset-failed %s; systemctl --user start %s\n' "$SERVICE" "${SERVICE%.service}" "${SERVICE%.service}"
-  elif systemctl --user restart "$SERVICE"; then
-    printf 'Restarted your service (%s) on this release. `ukt doctor` checks that it answers.\n' "$SERVICE"
+# After the swap the service is the business of a `ukt` that knows how it is run: this release's, or
+# where this release predates the verb (a release put back over a newer one), the release it
+# replaced, which has it. Where neither has, nothing here can restart or check the service, and
+# the script says so instead of claiming it did.
+settle() {
+  lib=$1
+  # A release that has the verb lists it; asking it to run the verb would end well enough on one that has not.
+  if "$lib/bin/ukt" --help 2>&1 | grep -q '^  upgrade '; then settler=$lib/bin/ukt
+  elif "$lib.previous/bin/ukt" --help 2>&1 | grep -q '^  upgrade '; then settler=$lib.previous/bin/ukt
   else
-    printf 'Your service (%s) did not restart: journalctl --user -u %s shows why.\n' "$SERVICE" "${SERVICE%.service}"
+    printf 'Neither release can restart or check your service. If it is running, restart it: systemctl --user restart uketsugi\n'
+    return 0
   fi
+  "$settler" upgrade --settle "$lib"
 }
 
 # Everything below runs from one function, called on the script's last line: a download of this
@@ -142,10 +140,22 @@ version=$("$release/bin/ukt" --version 2>&1) || fail "the runtime in the release
   "It needs Linux on x86-64 with glibc 2.28 or newer."
 
 upgrade=no
-if [ -e "$lib" ]; then upgrade=yes; mv -- "$lib" "$work/previous"; fi
+if [ -e "$lib" ]; then
+  upgrade=yes
+  was=$(sed -n '1s/^uketsugi //p' "$lib/VERSION" 2>/dev/null || true)
+  printf 'Upgrading uketsugi %s to %s in %s.\n' "${was:-(unknown version)}" "$version" "$lib"
+  printf 'The release you have is kept at %s.previous. If your service (uketsugi.service) is this install'"'"'s and running, it is restarted on the new release, and\n' "$lib"
+  printf 'if its server does not answer, the release you have is put back and started again.\n'
+  mv -- "$lib" "$work/previous"
+fi
 if ! mv -- "$release" "$lib"; then
   if [ -e "$work/previous" ]; then mv -- "$work/previous" "$lib"; fi
   fail "the release could not be moved to $lib." "Check that the directory can be written."
+fi
+# The release it replaced is kept one deep, for `ukt rollback` and for a start that fails.
+if [ "$upgrade" = yes ]; then
+  rm -rf -- "$lib.previous"
+  mv -- "$work/previous" "$lib.previous"
 fi
 
 quoted=$(printf '%s' "$lib/bin/ukt" | sed "s/'/'\\\\''/g")
@@ -153,11 +163,15 @@ printf '#!/bin/sh\nexec '\''%s'\'' "$@"\n' "$quoted" >"$bin/ukt.$$"
 chmod 755 "$bin/ukt.$$"
 mv -f -- "$bin/ukt.$$" "$bin/ukt"
 
+if [ "$upgrade" = yes ]; then
+  # A new release whose server does not start is put back by this, and the script ends there.
+  settle "$lib" || { printf 'Nothing was installed: the release you had is the one that runs.\n' >&2; exit 1; }
+fi
 printf 'Installed uketsugi %s in %s\n' "$version" "$lib"
 printf 'The command is %s\n' "$bin/ukt"
-if [ "$upgrade" = yes ]; then restart_server; fi
+if [ "$upgrade" = yes ]; then printf '`ukt doctor` checks that everything is in order.\n'; fi
 case ":${PATH:-}:" in
-  *":$bin:"*) printf '\nNext: ukt setup\n' ;;
+  *":$bin:"*) if [ "$upgrade" = no ]; then printf '\nNext: ukt setup\n'; fi ;;
   *)
     # The file a new shell of the person's kind reads when it starts.
     shell=${SHELL:-}
@@ -170,7 +184,7 @@ case ":${PATH:-}:" in
     printf '  export PATH="%s:$PATH"\n' "$bin"
     printf 'and for new ones:\n'
     printf '  echo '\''export PATH="%s:$PATH"'\'' >> %s\n' "$bin" "$startup"
-    printf '\nNext: ukt setup   (or now: %s setup)\n' "$bin/ukt"
+    if [ "$upgrade" = no ]; then printf '\nNext: ukt setup   (or now: %s setup)\n' "$bin/ukt"; fi
     ;;
 esac
 }

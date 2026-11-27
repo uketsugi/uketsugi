@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
-import { UNIT } from "../src/service.ts";
 import { tempDir } from "./support.ts";
 
 const run = promisify(execFile);
@@ -16,10 +15,15 @@ const INSTALLER = fileURLToPath(new URL("../../../deploy/install.sh", import.met
 const here = process.platform === "linux" && process.arch === "x64";
 
 /** A tarball shaped like a release, whose `ukt` only says its version, and the tarball's SHA-256. */
-async function fakeRelease(dir: string): Promise<{ file: string; sha256: string }> {
+async function fakeRelease(
+  dir: string,
+  ukt = "#!/bin/sh\necho 0.0.0\n",
+  version = "0.0.0",
+): Promise<{ file: string; sha256: string }> {
   const bin = join(dir, "uketsugi-0.0.0-linux-x64", "bin");
   await mkdir(bin, { recursive: true });
-  await writeFile(join(bin, "ukt"), "#!/bin/sh\necho 0.0.0\n");
+  await writeFile(join(bin, "ukt"), ukt);
+  await writeFile(join(dir, "uketsugi-0.0.0-linux-x64", "VERSION"), `uketsugi ${version}\n`);
   await chmod(join(bin, "ukt"), 0o755);
   const file = join(dir, "release.tar.gz");
   await run("tar", ["-czf", file, "-C", dir, "uketsugi-0.0.0-linux-x64"]);
@@ -58,8 +62,10 @@ describe.runIf(here)("deploy/install.sh, as a person's first command", () => {
     expect((await install("/bin/bash")).stdout).toContain(`>> ${home}/.bashrc`);
     expect((await install("/bin/dash")).stdout).toContain(`>> ${home}/.profile`);
     // With the directory on the PATH already there is nothing to add.
+    const fresh = join(dir, "fresh");
+    await mkdir(fresh);
     const onPath = await run("sh", [INSTALLER, "--tarball", file, "--sha256", sha256], {
-      env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` },
+      env: { HOME: fresh, PATH: `${join(fresh, ".local", "bin")}:/usr/bin:/bin` },
     });
     expect(onPath.stdout).not.toContain("PATH");
     expect(onPath.stdout.trimEnd().endsWith("Next: ukt setup")).toBe(true);
@@ -132,38 +138,81 @@ describe.runIf(here)("deploy/install.sh, as a person's first command", () => {
     }
   });
 
-  test("over an earlier release, starts a server that runs as the person's service again on the new one", async () => {
-    const dir = await tempDir();
-    const { file, sha256 } = await fakeRelease(dir);
-    const [home, tools] = [join(dir, "home"), join(dir, "tools")];
-    await mkdir(join(home, ".config", "systemd", "user"), { recursive: true });
-    await mkdir(tools);
-    // A service manager of the test's own: it says the unit is running and records what it is asked.
-    const calls = join(dir, "calls");
-    await writeFile(join(tools, "systemctl"), `#!/bin/sh\necho "$*" >> ${calls}\n`);
-    await chmod(join(tools, "systemctl"), 0o755);
-    const install = () =>
-      run("sh", [INSTALLER, "--tarball", file, "--sha256", sha256], {
-        env: { HOME: home, PATH: `${tools}:/usr/bin:/bin` },
-      });
+  /**
+   * A release whose `ukt` is a script of the test's own: it knows the verb `upgrade` (or not), says
+   * its version, and records what it was asked in `calls` and ends as `UKT_TEST_SETTLE` says.
+   */
+  const scripted = (label: string, calls: string, verb: boolean): string => `#!/bin/sh
+case "$1 $2" in
+  "--help ") ${verb ? 'echo "  upgrade [options]  fetch the newest release"' : 'echo "  serve  run the server"'}; exit 0 ;;
+  "upgrade --settle") echo "${label} settle $3" >> ${calls}; echo "settled by ${label}"; exit "\${UKT_TEST_SETTLE:-0}" ;;
+esac
+echo ${label}
+`;
 
-    const fresh = await install();
-    const byHand = await install();
-    await writeFile(join(home, ".config", "systemd", "user", UNIT), "[Service]\n");
-    const upgraded = await install();
+  describe("over an earlier release", () => {
+    /** Installs the release `old` and then the release `next` over it, as a person runs the script twice. */
+    async function upgradeFrom(old: boolean, next: boolean, settle = "0") {
+      const dir = await tempDir();
+      const calls = join(dir, "calls");
+      const [first, second] = [join(dir, "a"), join(dir, "b")];
+      await mkdir(first);
+      await mkdir(second);
+      const older = await fakeRelease(first, scripted("0.1.0", calls, old), "0.1.0");
+      const newer = await fakeRelease(second, scripted("0.2.0", calls, next), "0.2.0");
+      const home = join(dir, "home");
+      await mkdir(home);
+      const install = (release: { file: string; sha256: string }) =>
+        run("sh", [INSTALLER, "--tarball", release.file, "--sha256", release.sha256], {
+          env: { HOME: home, PATH: "/usr/bin:/bin", UKT_TEST_SETTLE: settle },
+        }).then(
+          (ran) => ({ code: 0, ...ran }),
+          (error: { code: number; stdout: string; stderr: string }) => error,
+        );
+      const fresh = await install(older);
+      const upgraded = await install(newer);
+      const lib = join(home, ".local", "lib", "uketsugi");
+      return { fresh, upgraded, lib, calls: await readFile(calls, "utf8").catch(() => "") };
+    }
 
-    expect(fresh.stdout).not.toContain("replaced");
-    expect(byHand.stdout).toContain(
-      "If `ukt serve` is running, stop it and start it again: it still runs the release this one replaced.",
-    );
-    // The script and `ukt setup` name the unit alike: the script restarts the one set-up wrote.
-    expect(upgraded.stdout).toContain(
-      `Restarted your service (${UNIT}) on this release. \`ukt doctor\` checks that it answers.`,
-    );
-    expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([
-      `--user show ${UNIT}`,
-      `--user is-active --quiet ${UNIT}`,
-      `--user restart ${UNIT}`,
-    ]);
+    test("says what it will do first, keeps the release it replaced, and has the new one settle the service", async () => {
+      const { fresh, upgraded, lib, calls } = await upgradeFrom(true, true);
+
+      expect(fresh.stdout).not.toContain("Upgrading");
+      expect(upgraded.stdout.split("\n").slice(0, 3)).toEqual([
+        `Upgrading uketsugi 0.1.0 to 0.2.0 in ${lib}.`,
+        `The release you have is kept at ${lib}.previous. If your service (uketsugi.service) is this install's and running, it is restarted on the new release, and`,
+        "if its server does not answer, the release you have is put back and started again.",
+      ]);
+      expect(upgraded.stdout).toContain("settled by 0.2.0");
+      expect(upgraded.stdout).toContain("Installed uketsugi 0.2.0");
+      expect(upgraded.stdout).not.toContain("Next: ukt setup");
+      expect(upgraded.stdout).not.toContain("Restarted");
+      expect(calls.trim()).toBe(`0.2.0 settle ${lib}`);
+      expect(await readFile(join(`${lib}.previous`, "VERSION"), "utf8")).toBe("uketsugi 0.1.0\n");
+    });
+
+    test("ends without claiming an install when the settling says the new server did not start", async () => {
+      const { upgraded } = await upgradeFrom(true, true, "1");
+
+      expect(upgraded.code).toBe(1);
+      expect(upgraded.stdout).not.toContain("Installed uketsugi");
+      expect(upgraded.stderr).toContain(
+        "Nothing was installed: the release you had is the one that runs.",
+      );
+    });
+
+    test("leaves the settling to the release it replaced when the new one predates the verb, and says so when neither has it", async () => {
+      const older = await upgradeFrom(true, false);
+      const neither = await upgradeFrom(false, false);
+
+      expect(older.upgraded.stdout).toContain("settled by 0.1.0");
+      expect(older.calls.trim()).toBe(`0.1.0 settle ${older.lib}`);
+      expect(neither.upgraded.stdout).toContain(
+        "Neither release can restart or check your service. If it is running, restart it: systemctl --user restart uketsugi",
+      );
+      expect(neither.upgraded.stdout).not.toContain("Restarted");
+      expect(neither.upgraded.code).toBe(0);
+    });
   });
 });

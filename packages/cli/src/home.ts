@@ -28,6 +28,8 @@ export interface Home {
   readonly recordFile: string;
   /** Why the last start of the server failed, written by `ukt serve` and gone once a start succeeds. */
   readonly startFailureFile: string;
+  /** What the last upgrade did, written by `ukt upgrade`: see `upgrade-record.ts`. */
+  readonly upgradeFile: string;
   /** How the server is set to run: what `ukt setup` was told, and where the store is when it is elsewhere. */
   readonly settingsFile: string;
   /** Written by `ukt setup --llm`: the language model the host was given, with its provider's key. */
@@ -90,6 +92,7 @@ export function resolveHome(dataDir: string | undefined, env: NodeJS.ProcessEnv)
     hostKeyFile: join(dir, "host.key"),
     recordFile: join(dir, "server.json"),
     startFailureFile: join(dir, "last-start-failure"),
+    upgradeFile: join(dir, "upgrade.json"),
     settingsFile: join(dir, "settings.json"),
     llmFile: join(dir, "llm.json"),
     modelDir: external ? resolve(given) : join(dir, "model"),
@@ -257,8 +260,9 @@ export async function removeRecord(home: Home): Promise<void> {
 /** The most bytes of a start's failure that are kept. */
 const START_FAILURE_BYTES = 2000;
 
-/** Replaces what is kept of why the last start failed. */
+/** Replaces what is kept of why the last start failed. A start that failed before the data directory existed makes it: the reason is kept all the same. */
 export async function keepStartFailure(home: Home, text: string): Promise<void> {
+  await ensureDataDir(home);
   const kept = Buffer.from(text).subarray(0, START_FAILURE_BYTES).toString();
   await writePrivate(home.startFailureFile, `${kept}\n`);
 }
@@ -280,6 +284,48 @@ export async function readRecord(home: Home): Promise<ServerRecord | null> {
   if (typeof record?.url !== "string") return null;
   const { url, pid, host } = record;
   return typeof pid === "number" && typeof host === "string" ? { url, pid, host } : { url };
+}
+
+/**
+ * What the last upgrade did, kept so that `ukt rollback` and `ukt doctor` can say it. A release that
+ * started is kept with the release before it (`previous`) and the copy of the store that the
+ * migration made before it changed anything (`snapshot`, null where no migration ran); one that
+ * did not start was put back, and says why.
+ */
+export interface UpgradeRecord {
+  readonly from: string;
+  readonly to: string;
+  /** ISO 8601, UTC. */
+  readonly at: string;
+  readonly previous: string | null;
+  readonly snapshot: string | null;
+  /** Set where the new release's server did not start and the release before it was put back. */
+  readonly failed?: string;
+}
+
+export async function writeUpgrade(home: Home, record: UpgradeRecord): Promise<void> {
+  await mkdir(home.dataDir, { recursive: true, mode: 0o700 });
+  await writePrivate(home.upgradeFile, `${JSON.stringify(record)}\n`);
+}
+
+export async function removeUpgrade(home: Home): Promise<void> {
+  await rm(home.upgradeFile, { force: true });
+}
+
+/** The last upgrade's record, or null where there is none or it is unreadable. */
+export async function readUpgrade(home: Home): Promise<UpgradeRecord | null> {
+  const kept = (await readJson(home.upgradeFile)) as Partial<UpgradeRecord> | null;
+  if (typeof kept?.from !== "string" || typeof kept.to !== "string" || typeof kept.at !== "string")
+    return null;
+  const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+  return {
+    from: kept.from,
+    to: kept.to,
+    at: kept.at,
+    previous: text(kept.previous),
+    snapshot: text(kept.snapshot),
+    ...(typeof kept.failed === "string" ? { failed: kept.failed } : {}),
+  };
 }
 
 /** The language model a host was given: `provider/model`, its provider's key, and its address where it has one of its own. */

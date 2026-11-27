@@ -45,6 +45,7 @@ import {
   projectContents,
   redactFact,
   removeNote,
+  removePerson,
   replaceTokens,
   revertRuling,
   revokeToken,
@@ -260,6 +261,10 @@ function operatorRoutes(api: Hono<AuthEnv>, deps: ApiDeps): void {
   });
   // Asks the provider one small question, which costs its operator a few tokens: theirs to ask.
   api.post("/model-check", fromOperator, async (c) => c.json(await checkModel(ports)));
+  api.post("/people/:id/remove", fromOperator, async (c) => {
+    const gone = await removePerson(ports, c.get("caller"), c.req.param("id"));
+    return c.json(gone);
+  });
   api.get("/people", fromOperator, async (c) => c.json(await listPeople(ports, c.get("caller"))));
   api.post("/people", fromOperator, body("InviteRequest"), async (c) =>
     c.json(await invitePerson(ports, c.get("caller"), c.req.valid("json")), 201),

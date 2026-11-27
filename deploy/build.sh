@@ -26,7 +26,14 @@ fi
 node_bin=$(node -p 'process.execPath')
 node_version=$(node -p 'process.version')
 version=$(node -p 'require(process.argv[1]).version' "$root/packages/cli/package.json")
-name="uketsugi-$version-linux-x64"
+# A release is built from the commit the tag v<version> names, and says only <version>. Any other
+# build (a candidate, a tree with edits, a copy with no git to ask) says <version>+<commit>, so
+# that `ukt --version` never takes it for the release, and its files are named so as well.
+label=$version
+if ! git -C "$root" diff --quiet HEAD -- 2>/dev/null || [ "$(git -C "$root" rev-parse HEAD 2>/dev/null)" != "$(git -C "$root" rev-parse "v$version^{commit}" 2>/dev/null || echo none)" ]; then
+  label="$version+$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || echo local)"
+fi
+name="uketsugi-$label-linux-x64"
 stage="$out/$name"
 
 rm -rf "$stage" "$out/$name.tar.gz" "$out/$name.tar.gz.sha256" "$out/install.sh"
@@ -65,7 +72,9 @@ if [ -f "$node_license" ]; then cp "$node_license" "$stage/node/LICENSE"; fi
 # The licence travels with every copy, and the notice with it: the build stops where either is missing.
 cp "$root/LICENSE" "$root/NOTICE" "$stage/"
 install -m 755 "$root/deploy/ukt" "$stage/bin/ukt"
-printf 'uketsugi %s\nnode %s\nplatform linux-x64\n' "$version" "$node_version" >"$stage/VERSION"
+printf 'uketsugi %s\nnode %s\nplatform linux-x64\n' "$label" "$node_version" >"$stage/VERSION"
+# Where `ukt upgrade` fetches this release's install script: where the build was told it is served.
+if [ -n "${UKT_RELEASE_URL:-}" ]; then printf '%s\n' "${UKT_RELEASE_URL%/}" >"$stage/INSTALL_URL"; fi
 
 # The launcher must start on the shipped runtime before anything is packed.
 "$stage/bin/ukt" --version >/dev/null

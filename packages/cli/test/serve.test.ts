@@ -93,6 +93,7 @@ describe("ukt serve on a temporary data directory", () => {
       },
       expect.objectContaining({ check: "jobs", state: "ok" }),
       expect.objectContaining({ check: "harnesses", state: "ok" }),
+      expect.objectContaining({ check: "calls", state: "ok" }),
     ]);
   });
 
@@ -102,7 +103,7 @@ describe("ukt serve on a temporary data directory", () => {
     const report = await doctor(fakeIo(), { dataDir }, {}).finally(() => chmod(dataDir, 0o700));
 
     expect(report.failure).toEqual({
-      what: "1 of 9 checks failed.",
+      what: "1 of 10 checks failed.",
       meaning:
         "Agents reach their memory all the same: what failed is how it is kept on this machine.",
       next: "Apply each fix above, then run `ukt doctor` again.",

@@ -19,12 +19,12 @@ import { connectAsHost, servingNow, snapshot } from "./server-client.ts";
 import { pauseFor } from "./service.ts";
 
 /** The UTC time to the second, as a file name carries it: `20261113T152233Z`. */
-function stamp(now: Date): string {
+export function stamp(now: Date): string {
   return now.toISOString().replace(/[-:]|\.\d+/g, "");
 }
 
 /** Opens the store nobody is serving, writes a snapshot of it to `file` and closes it. Returns the snapshot's size. */
-async function snapshotTo(home: Home, file: string): Promise<number> {
+export async function snapshotTo(home: Home, file: string): Promise<number> {
   const store = await openEmbeddedStore({ dataDir: home.dataDir }).catch((error: unknown) => {
     throw storeFailure(error, "No snapshot was written.") ?? error;
   });
@@ -102,10 +102,12 @@ export async function restore(
   const replace = async (): Promise<void> => {
     if (keep) {
       await snapshotTo(home, kept).catch((error: unknown) => {
+        // A store a newer release made says so, with what to do about it: replacing it is the last resort.
+        const way = error instanceof CliFailure ? `${error.failure.next} Or, ` : "To ";
         throw new CliFailure({
           what: `The store as it is now could not be saved first: ${describe(error)}`,
           meaning: "Nothing was replaced.",
-          next: "To replace it without keeping a copy, run the command again with --discard-current.",
+          next: `${way}replace it without keeping a copy, run the command again with --discard-current.`,
         });
       });
     }

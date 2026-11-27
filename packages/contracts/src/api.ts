@@ -38,6 +38,7 @@
  * | GET    | `/api/people`             | host, loopback     | none                   | `PeopleList`           |
  * | POST   | `/api/people`             | host, loopback     | `InviteRequest`        | `Invitation`           |
  * | POST   | `/api/tokens/:id/revoke`  | host, loopback     | none                   | `TokenRevoked`         |
+ * | POST   | `/api/people/:id/remove`  | host, loopback     | none                   | `PersonRemoved`        |
  * | POST   | `/api/token/rotate`       | host, loopback     | none                   | `TokenReplaced`        |
  *
  * Three credentials sign a request in, and none does another's work.

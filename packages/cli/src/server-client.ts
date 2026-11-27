@@ -4,6 +4,7 @@
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
+  type ActivityReport,
   isApiError,
   type CapabilityDescriptor,
   type ConnectInfo,
@@ -13,6 +14,7 @@ import {
   type InviteRequest,
   type ModelCheck,
   type PeopleList,
+  type PersonRemoved,
   type ProjectList,
   type SignInCode,
   type TokenReplaced,
@@ -294,6 +296,13 @@ export async function projects(server: Running): Promise<ProjectList> {
   return (await (await request(server, "/api/projects", signed(server))).json()) as ProjectList;
 }
 
+/** What the person's harnesses have done on this server in the last `days` days: sessions by client, and the newest. */
+export async function activity(server: Running, days: number): Promise<ActivityReport> {
+  return (await (
+    await request(server, `/api/activity?days=${days}`, signed(server))
+  ).json()) as ActivityReport;
+}
+
 /** What the server answers to a body-less POST from whoever runs it. */
 async function post<T>(server: Running, path: string, within?: number): Promise<T> {
   const init = { ...signed(server), method: "POST" };
@@ -341,6 +350,11 @@ export async function invite(server: Running, input: InviteRequest): Promise<Inv
     body: JSON.stringify(input),
   };
   return (await (await request(server, "/api/people", init)).json()) as Invitation;
+}
+
+/** Removes a person: they leave the server's people and every credential of theirs ends. */
+export async function removePerson(server: Running, personId: string): Promise<PersonRemoved> {
+  return post(server, `/api/people/${encodeURIComponent(personId)}/remove`);
 }
 
 /** Ends one token; the others go on working. */

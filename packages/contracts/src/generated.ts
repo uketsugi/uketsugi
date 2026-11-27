@@ -256,6 +256,7 @@ export interface ContractTypes {
   ProjectChoice?: ProjectChoice;
   PeopleList?: PeopleList;
   Invitation?: Invitation;
+  PersonRemoved?: PersonRemoved;
   TokenRevoked?: TokenRevoked;
   TokenReplaced?: TokenReplaced;
   ModelCheck?: ModelCheck;
@@ -1632,6 +1633,17 @@ export interface Invitation {
      */
     secret: string;
   }[];
+}
+/**
+ * `POST /api/people/:id/remove`.
+ */
+export interface PersonRemoved {
+  id: string;
+  name: string;
+  /**
+   * How many of their credentials were live and are ended.
+   */
+  credentials_ended: number;
 }
 /**
  * `POST /api/tokens/:id/revoke`.

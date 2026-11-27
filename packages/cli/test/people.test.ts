@@ -6,7 +6,7 @@ import { connectMcp } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { token } from "../src/host-verbs.ts";
 import { main } from "../src/index.ts";
-import { invitePerson, listPeople, revokeToken } from "../src/people-verbs.ts";
+import { invitePerson, listPeople, removeOne, revokeToken } from "../src/people-verbs.ts";
 import { ui } from "../src/remote-verbs.ts";
 import { CliFailure } from "../src/report.ts";
 import { serve, type Serving } from "../src/serve.ts";
@@ -155,6 +155,59 @@ describe("the verbs of whoever runs a server several people use", () => {
     expect(listed.find((line) => line.includes(laptop ?? "x"))).toContain("revoked ");
     expect(listed.find((line) => line.includes(desktop ?? "x"))).toContain("last used never");
     await expect(revokeToken("0000", { dataDir }, {})).rejects.toThrow("No token 0000");
+  });
+
+  test("ukt remove takes a person off, ends their credentials, and a server with one person left needs no token again", async () => {
+    const harness = (await invitePerson("dave", { dataDir }, {})).lines;
+    const [daveToken, daveKey] = [
+      secretAfter(harness, "Harness token:"),
+      secretAfter(harness, "Dashboard key:"),
+    ];
+    const asked = fakeIo();
+    const refused = await removeOne(asked, "dave", { dataDir }, {}).catch(
+      (error: unknown) => error,
+    );
+
+    expect(refused).toMatchObject({ failure: { meaning: "Nothing was changed." } });
+    expect(asked.errLines.join("\n")).toContain(
+      "What they shared stays, under their name. What was private to them stays and nobody can reach it.",
+    );
+    await expect(removeOne(fakeIo(), "ann", { dataDir, yes: true }, {})).rejects.toThrow(
+      "Whoever runs this server cannot be removed from it.",
+    );
+    await expect(removeOne(fakeIo(), "nobody", { dataDir, yes: true }, {})).rejects.toThrow(
+      "Nobody called nobody is on this server.",
+    );
+    // Three people: removing one leaves two, and every harness still sends a token.
+    const first = await removeOne(fakeIo(), "dave", { dataDir, yes: true }, {});
+    expect(first.lines[0]).toBe("Removed dave. 2 credentials ended.");
+    expect(first.lines[1]).toBe("2 people are on this server: every harness still sends a token.");
+    expect((await fetch(`${url}/api/facts`)).status).toBe(401);
+    const signIn = (key: string) =>
+      fetch(`${url}/sign-in`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+    expect((await signIn(daveKey)).status).toBe(401);
+
+    const last = await removeOne(fakeIo(), "bob", { dataDir, yes: true }, {});
+
+    expect(last.lines[1]).toBe(
+      "Nobody else is on this server: a harness on this machine needs no token again.",
+    );
+    expect(
+      (await listPeople({ dataDir }, {})).lines.filter((line) => !line.startsWith("  ")),
+    ).toEqual(["ann", expect.stringContaining("Nobody else is on this server") as string]);
+    expect((await fetch(`${url}/api/facts`)).status).toBe(200);
+    // A removed person's name stays theirs: shared facts still carry it.
+    await expect(invitePerson("Dave", { dataDir }, {})).rejects.toThrow(
+      "dave was on this server and was removed.",
+    );
+    const asDave = await fetch(`${url}/api/facts`, {
+      headers: { authorization: `Bearer ${daveToken}` },
+    });
+    expect(asDave.status).toBe(401);
   });
 });
 

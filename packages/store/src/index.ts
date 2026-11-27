@@ -2,6 +2,7 @@
 export { openEmbeddedStore, type EmbeddedStore } from "./embedded.ts";
 export { describeRecovery, type RecoveryPhase, type RecoveryProgress } from "./recovery.ts";
 export { openServerStore, serverStoreName, StoreUnavailableError } from "./server-postgres.ts";
+export { StoreNewerError } from "./migrations.ts";
 export { backupEmbeddedStore, restoreEmbeddedStore } from "./backup.ts";
 export {
   BACKUPS_DIR,

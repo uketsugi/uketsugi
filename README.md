@@ -327,9 +327,21 @@ flag. `UKT_DATABASE_URL` does the same as the flag. One data directory has one s
 different address is refused. `ukt backup` and `ukt restore` do not apply to it: use `pg_dump` and
 `pg_restore`.
 
-**Upgrading.** Run the install line of the newer release. It replaces the one installed and,
-without asking, restarts your service on the new one: your harnesses lose their connection for a
-moment. A `ukt serve` you started yourself you stop and start again.
+**Upgrading, and going back.** `ukt upgrade` fetches the newer release's install script from the
+address your release was built with and runs it (the install line of the newer release does the
+same). It says what it will do first: replace `~/.local/lib/uketsugi` with the new release, keep the
+one you had at `~/.local/lib/uketsugi.previous` (about 60 MB), restart your service if it is this
+install's and running, and wait until the new server answers. If the new server does not answer, the
+release you had is put back and started again, the reason is shown and kept for `ukt doctor`, and
+nothing in the store is changed. A newer release may change the store's format; it then saves the
+store as it was to `backups/before-<migration>.tgz` first, and the upgrade names that file.
+`ukt rollback` goes back after an upgrade that went well: it puts back the release you had and, if
+the upgrade migrated the store, the store as that copy had it. It shows what is lost (everything
+stored since) and keeps the store as it is now in `backups/before-rollback-<time>.tgz` before it
+asks. A `ukt serve` you started yourself you stop first and start again afterwards; so does a
+service this shell cannot reach (one entered with `su`). An older release over a store a newer one
+made is refused with the reason, and the release you had keeps running. `ukt --version` says
+`0.2.0` for a release and `0.2.0+<commit>` for any other build.
 
 ## Your data
 
@@ -338,7 +350,7 @@ Everything is on your machine:
 | Path                                      | What it holds                                                                                                                                                                                                                                         |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `~/.local/share/uketsugi`                 | The store, the token, how the server is set to run (`settings.json`), the embedding model, `backups/` and, where you named a language model, its key. It is `$XDG_DATA_HOME/uketsugi` where that is set, and `--data-dir` or `UKT_DATA_DIR` moves it. |
-| `~/.local/lib/uketsugi`                   | The installed release.                                                                                                                                                                                                                                |
+| `~/.local/lib/uketsugi`                   | The installed release, and beside it `uketsugi.previous`, the one before it, which `ukt rollback` puts back.                                                                                                                                          |
 | `~/.local/bin/ukt`                        | The command.                                                                                                                                                                                                                                          |
 | `~/.config/systemd/user/uketsugi.service` | The service's unit, where set-up installed one (under `$XDG_CONFIG_HOME` where that is set). It names the release's launcher and the data directory, and nothing else.                                                                                |
 
@@ -390,7 +402,10 @@ your own name as the others will see it, needed before the first person is added
 person's agents publish is private to that person until they share the project, which they do
 themselves on the dashboard's Projects page. Sharing shows the others their facts there that
 carry a citation that can be looked up, and their tasks, under their name. `ukt people` lists who
-is on the server and `ukt revoke <id>` ends one token or key.
+is on the server, `ukt revoke <id>` ends one token or key, and `ukt remove <name>` takes a person off
+the server and ends every credential of theirs: what they shared stays under their name, what was
+private to them stays and nobody can reach it. Once you are the only person left, the harnesses on
+the server's own machine need no token again.
 
 **Who needs a token.** A server that listens only on its own machine takes its one person's
 harnesses there by their address alone, and `ukt setup`, `ukt doctor` and the Connect page say
