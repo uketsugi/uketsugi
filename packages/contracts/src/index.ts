@@ -25,9 +25,6 @@ export const TOOLS = document.tools as readonly ToolDefinition[];
 export const API_REQUEST_SCHEMAS: Readonly<Record<keyof ApiRequests, Schema>> =
   document.api.requests;
 
-/** The version of this contract, for the capability descriptor. */
-export const CONTRACT_VERSION: string = document.contractVersion;
-
 /**
  * The limits a schema keyword cannot state. `citations_chars` bounds a call's whole `citations`
  * argument as sent; `closing_note_chars` is how much of a session's note is kept, from its start;

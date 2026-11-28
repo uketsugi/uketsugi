@@ -7,6 +7,14 @@ const STRIPE = `sk_live_${"4eC39HqLyjWDarjtT1zdp7dc"}`;
 const SENDGRID = `SG.${"aB3dE6gH9jK2mN5pQ8sT1v"}.${"Zx4cV7bN0mQ3wE6rT9yU2iO5pA8sD1fG4hJ7kL0zXcV"}`;
 
 describe("the scanner", () => {
+  test("takes an AWS access key id by its real alphabet, which is A-Z and 2-7, and not a string that has a 9", () => {
+    // An id is a four-letter prefix and sixteen characters of base32: one with 0, 1, 8 or 9 in it is no key AWS issued.
+    const real = `AKIA${"Q3Z7XK2P2LM4TW6R"}`;
+    const never = `AKIA${"Q3Z7XK9P2LM4TW6R"}`;
+    expect(scanText(`The deploy key is ${real}.`).rules).toEqual(["aws-access-key"]);
+    expect(scanText(`The deploy key is ${never}.`).rules).toEqual([]);
+  });
+
   test.each([
     [
       `The deploy token is ${GITHUB}.`,

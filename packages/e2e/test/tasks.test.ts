@@ -120,6 +120,10 @@ describe("tasks over /mcp on a real server: two clients hand one task over", () 
       `handoff note (you via claude-code, ${clock.now().toISOString()})`,
     );
     expect(ok(await call(second, "search_tasks", {})).tasks).toEqual(ok(listed).tasks);
+    // The brief lists what was handed off with the open work, and so does asking for the open tasks.
+    expect(
+      ok(await call(second, "search_tasks", { status: "open" })).tasks.map((task) => task.id),
+    ).toEqual([taskId, runbookId]);
 
     const claimed = ok(await call(second, "claim_task", { id: taskId }));
     expect(claimed).toMatchObject({

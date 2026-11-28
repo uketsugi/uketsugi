@@ -21,6 +21,7 @@ export interface Tree {
 }
 
 export const VERSION_SOURCE = "packages/cli/package.json";
+const GENERATED_FROM_VERSION = "packages/contracts/src/generated.ts";
 const PLUGIN_FILES = "packages/server/plugins/";
 const DOCUMENT = /\.(md|markdown|txt|rst|adoc|docx?|pdf|odt)$/i;
 const BUILT =
@@ -64,23 +65,22 @@ function versionFaults(tree: Tree): string[] {
   return tree.files.flatMap((path) => {
     if (
       path === VERSION_SOURCE ||
+      // Derived from it by `pnpm generate`, which a contracts test holds current.
+      path === GENERATED_FROM_VERSION ||
       path === "pnpm-lock.yaml" ||
       /(^|\/)test\/|\.test\.ts$/.test(path)
     )
       return [];
     const bytes = tree.read(path);
     if (!isText(bytes)) return [];
-    return (
-      bytes
-        .toString("utf8")
-        .split("\n")
-        // The contract has a version of its own, which moves only when the contract does.
-        .filter((line) => own.test(line) && !/contract_?version/i.test(line))
-        .map(
-          (line) =>
-            `${path} states the version (${version}), which ${VERSION_SOURCE} alone does: ${line.trim().slice(0, 80)}`,
-        )
-    );
+    return bytes
+      .toString("utf8")
+      .split("\n")
+      .filter((line) => own.test(line))
+      .map(
+        (line) =>
+          `${path} states the version (${version}), which ${VERSION_SOURCE} alone does: ${line.trim().slice(0, 80)}`,
+      );
   });
 }
 

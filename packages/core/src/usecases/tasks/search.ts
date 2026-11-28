@@ -19,11 +19,12 @@ const READ_LIMIT = 500;
 
 /**
  * The stored states a filter can be found in. A lease that ran out is stored as `claimed` and
- * shown as `open`, so both filters read the claimed tasks and the clock decides.
+ * shown as `open`, so both filters read the claimed tasks and the clock decides. What was handed
+ * off is open too, as the brief lists it: it can be claimed as an open task can.
  */
 const STORED: Record<TaskState | "unfinished", readonly TaskState[]> = {
   unfinished: ["open", "claimed", "handed_off"],
-  open: ["open", "claimed"],
+  open: ["open", "claimed", "handed_off"],
   claimed: ["claimed"],
   handed_off: ["handed_off"],
   done: ["done"],
@@ -60,11 +61,13 @@ async function matching(
   const scope = scopeOf(reader.caller);
   const read = await ports.store.tasks.list(scope, { ...query, limit: READ_LIMIT });
   const wanted = filter.status;
-  const shownAs = (task: Task): TaskState => {
+  const matches = (task: Task, status: TaskState): boolean => {
     const standing = leaseStanding(task, now);
-    return standing === "lapsed" ? "open" : standing;
+    if (status === "open")
+      return standing === "lapsed" || standing === "open" || standing === "handed_off";
+    return standing === status;
   };
-  const tasks = wanted === undefined ? read : read.filter((task) => shownAs(task) === wanted);
+  const tasks = wanted === undefined ? read : read.filter((task) => matches(task, wanted));
   // Past the read limit only the store can count, and it cannot tell a lapsed lease from a live one.
   const beyond = read.length === READ_LIMIT ? await ports.store.tasks.count(scope, query) : 0;
   return { tasks: inPickUpOrder(tasks, now), matched: Math.max(tasks.length, beyond) };

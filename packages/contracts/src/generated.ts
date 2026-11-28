@@ -427,7 +427,7 @@ export interface SearchTasksInput {
    */
   id?: string;
   /**
-   * Only tasks in this state. Without it, every task that is not done.
+   * Only tasks in this state; `open` also takes what was handed off, as the brief lists it. Without it, every task that is not done.
    */
   status?: "open" | "claimed" | "handed_off" | "done";
   /**
@@ -2057,6 +2057,8 @@ export interface MyData {
   }[];
 }
 
+/** The version of this contract: the release's, from `packages/cli/package.json`. */
+export const CONTRACT_VERSION = "0.3.0";
 export const TOOL_NAMES = ["search_facts","publish_fact","update_fact","search_tasks","publish_task","claim_task","update_task"] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 /** Each tool's arguments, once validated. */

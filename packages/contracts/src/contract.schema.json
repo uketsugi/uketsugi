@@ -1,7 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:uketsugi:contract",
-  "contractVersion": "0.2.0",
   "limits": {
     "citations_chars": 20000,
     "closing_note_chars": 4000,
@@ -220,7 +219,7 @@
           "status": {
             "type": "string",
             "enum": ["open", "claimed", "handed_off", "done"],
-            "description": "Only tasks in this state. Without it, every task that is not done."
+            "description": "Only tasks in this state; `open` also takes what was handed off, as the brief lists it. Without it, every task that is not done."
           },
           "mine": {
             "type": "boolean",

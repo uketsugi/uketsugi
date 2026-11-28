@@ -11,6 +11,8 @@ import type { Report } from "../src/report.ts";
 import { serve, type Serving } from "../src/serve.ts";
 import { servingNow } from "../src/server-client.ts";
 import { setup } from "../src/setup.ts";
+import { migrate, MIGRATIONS } from "../../store/src/migrations.ts";
+import { startEngine } from "../../store/src/embedded.ts";
 import { backup, restore } from "../src/store-verbs.ts";
 import { account, Machine } from "./machine.ts";
 import { fakeIo } from "./support.ts";
@@ -196,6 +198,25 @@ describe("a server that runs as the service", () => {
     await setup(io(), { ...options, yes: true }, env);
     await started?.close();
     await expect(stat(join(dataDir, "last-start-failure"))).rejects.toThrow();
+  });
+
+  test("a server that a newer release's store refuses is told, by `ukt doctor`, to be so, in words that name the way out", async () => {
+    const { dataDir, machine, env, io, options } = await account({ manager: true });
+    const listen = { dataDir, host: "127.0.0.1", port: options.port };
+    let started: Serving | undefined;
+    machine.onStart = async () => void (started = await serve(fakeIo(), listen, env));
+    await setup(io(), { ...options, yes: true }, env);
+    await started?.close();
+    machine.running = false;
+    // An older release is started over the store a newer one made: the store holds a migration this one lacks.
+    const engine = await startEngine(join(dataDir, "pg"));
+    await migrate(engine.db, { ...MIGRATIONS, "9998_newer": { up: () => Promise.resolve() } });
+    await engine.close();
+    await serve(fakeIo(), listen, env).catch(() => null);
+    const checked = (await doctor(io(), { dataDir }, env)).lines.join("\n");
+
+    expect(checked).toContain("This store was made by another build of uketsugi");
+    expect(checked).toContain("`ukt rollback` brings back the one before");
   });
 
   test("keeps no more than 2000 bytes of a start's failure, whatever the failure holds", async () => {

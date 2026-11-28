@@ -54,6 +54,8 @@ pnpm -C "$root" --filter @uketsugi/cli deploy --prod "$stage/app" >/dev/null
 server_package=$(cd "$stage/app/node_modules/@uketsugi/server" && pwd -P)
 mv "$server_package/plugins" "$stage/plugins"
 ln -s "$(realpath --relative-to="$server_package" "$stage/plugins")" "$server_package/plugins"
+# Claude Code shows a plugin's version in `claude plugin list`, and "unknown" where the manifest has none.
+node "$root/scripts/stamp-plugin.ts" "$stage/plugins" "$label"
 
 # What a running server never reads: sources and tests of our own packages, and the source maps
 # and type declarations of everyone's.

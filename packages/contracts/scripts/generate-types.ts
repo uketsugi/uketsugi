@@ -21,8 +21,14 @@ interface Contract {
 }
 
 const SCHEMA_URL = new URL("../src/contract.schema.json", import.meta.url);
+const RELEASE_URL = new URL("../../cli/package.json", import.meta.url);
 const OUTPUT_URL = new URL("../src/generated.ts", import.meta.url);
 const BANNER = "// Generated from contract.schema.json by scripts/generate-types.ts. Do not edit.";
+
+/** The release's version, which the contract carries: its one source is the cli's manifest. */
+function releaseVersion(): string {
+  return (JSON.parse(readFileSync(RELEASE_URL, "utf8")) as { version: string }).version;
+}
 
 function pascal(name: string): string {
   return name.replace(/(^|_)([a-z])/g, (_match, _sep, letter: string) => letter.toUpperCase());
@@ -81,6 +87,7 @@ export async function generateTypes(contract: Contract): Promise<string> {
   const requests = Object.keys(contract.api.requests).map((name) => [name, name] as const);
   return [
     types,
+    `/** The version of this contract: the release's, from \`packages/cli/package.json\`. */\nexport const CONTRACT_VERSION = ${JSON.stringify(releaseVersion())};`,
     `export const TOOL_NAMES = ${JSON.stringify(tools)} as const;`,
     "export type ToolName = (typeof TOOL_NAMES)[number];",
     table("ToolInputs", "Each tool's arguments, once validated.", typed("Input")),
