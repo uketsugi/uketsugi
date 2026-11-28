@@ -2753,6 +2753,10 @@
                 }
               },
               "required": ["at", "reason"]
+            },
+            "waiting": {
+              "type": ["string", "null"],
+              "description": "In words, why what the session left has not been read yet, when a limit on what the model may spend in a day held it back; absent or null when no limit has."
             }
           },
           "required": ["at", "input_tokens", "output_tokens"]

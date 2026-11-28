@@ -136,8 +136,14 @@ export interface ModelRunner {
    * sessions of the person who runs it and configured it, and nobody else's.
    */
   serves(person: Pick<Caller, "orgId" | "principalId">): boolean;
-  /** The most tokens, input and output together, the server may spend on this model in a day: what its operator set. Readings that would pass it wait. */
+  /**
+   * The most tokens, input and output together, an organization may spend on this model in a day:
+   * what its operator set, and on a person's own server, where the organization is one, the
+   * server's. Readings that would pass it wait.
+   */
   readonly dailyTokens: number;
+  /** The most one person may spend in a day, where the operator set one: their next reading waits, and nobody else's does. Left out, a person is bound by the organization's alone. */
+  readonly personDailyTokens?: number;
   /** Rejects with `ModelError`; aborts when `signal` does. */
   run(chore: Chore, signal?: AbortSignal): Promise<ModelAnswer>;
 }

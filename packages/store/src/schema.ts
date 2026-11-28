@@ -103,10 +103,12 @@ export interface Database {
     modelOutputTokens: Generated<number>;
     digestFailedAt: Date | null;
     digestFailure: string | null;
+    digestWaiting: string | null;
     briefPicks: ColumnType<string[] | null, string | null, string | null>;
   };
   modelSpend: {
     orgId: string;
+    principalId: string | null;
     at: Date;
     tokens: number;
   };

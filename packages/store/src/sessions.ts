@@ -14,6 +14,7 @@ import {
   type SessionMark,
   type SessionNote,
   type SessionsRepo,
+  type Spent,
   type Turn,
 } from "@uketsugi/core";
 import { sql, type Selectable } from "kysely";
@@ -68,6 +69,7 @@ const COLUMNS = [
   "modelOutputTokens",
   "digestFailedAt",
   "digestFailure",
+  "digestWaiting",
 ] as const;
 
 function toSession(row: Pick<Selectable<Database["sessions"]>, (typeof COLUMNS)[number]>): Session {
@@ -79,6 +81,7 @@ function toSession(row: Pick<Selectable<Database["sessions"]>, (typeof COLUMNS)[
     modelOutputTokens,
     digestFailedAt,
     digestFailure,
+    digestWaiting,
     ...session
   } = row;
   const noted = noteText !== null && noteFinal !== null && noteAt !== null;
@@ -90,6 +93,7 @@ function toSession(row: Pick<Selectable<Database["sessions"]>, (typeof COLUMNS)[
       digestFailedAt === null || digestFailure === null
         ? null
         : { at: digestFailedAt, reason: digestFailure },
+    digestWaiting,
   };
 }
 
@@ -335,7 +339,13 @@ export class SqlSessions extends Repo implements SessionsRepo {
         await this.deleteTurns(trx, orgId, id).where("id", "in", turns).execute();
       }
       await this.one(orgId, id, trx)
-        .set({ digestedAt: read.at, digestFailedAt: null, digestFailure: null, ...picks })
+        .set({
+          digestedAt: read.at,
+          digestFailedAt: null,
+          digestFailure: null,
+          digestWaiting: null,
+          ...picks,
+        })
         .execute();
     });
   }
@@ -346,21 +356,34 @@ export class SqlSessions extends Repo implements SessionsRepo {
         // The time stays that of the first failure of a run of them: what waits is counted from it.
         digestFailedAt: sql<Date>`coalesce(digest_failed_at, ${failure.at})`,
         digestFailure: failure.reason,
+        // What holds the reading back now is the provider's, not a limit's.
+        digestWaiting: null,
       })
       .execute();
   }
 
+  async digestWaits(orgId: string, id: string, words: string): Promise<void> {
+    await this.one(orgId, id).set({ digestWaiting: words }).execute();
+  }
+
   async spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
-      await this.one(orgId, id, trx)
+      // A session deleted while it was read (its person deleted their account) still cost, in no person's name.
+      const session = await this.one(orgId, id, trx)
         .set((eb) => ({
           modelInputTokens: eb("modelInputTokens", "+", tokens.input),
           modelOutputTokens: eb("modelOutputTokens", "+", tokens.output),
         }))
-        .execute();
+        .returning("principalId")
+        .executeTakeFirst();
       await trx
         .insertInto("modelSpend")
-        .values({ orgId, at, tokens: tokens.input + tokens.output })
+        .values({
+          orgId,
+          principalId: session?.principalId ?? null,
+          at,
+          tokens: tokens.input + tokens.output,
+        })
         .execute();
       // A week is more than any budget looks back over.
       await trx
@@ -377,6 +400,22 @@ export class SqlSessions extends Repo implements SessionsRepo {
       .where("at", ">", since)
       .executeTakeFirstOrThrow();
     return Number(total);
+  }
+
+  async spentBy(orgId: string, principalId: string, since: Date): Promise<Spent> {
+    const total = sql<number>`coalesce(sum(tokens), 0)::int`;
+    const { organization, person } = await this.db
+      .selectFrom("modelSpend")
+      .select([
+        total.as("organization"),
+        sql<number>`coalesce(sum(tokens) filter (where principal_id = ${principalId}), 0)::int`.as(
+          "person",
+        ),
+      ])
+      .where("orgId", "=", orgId)
+      .where("at", ">", since)
+      .executeTakeFirstOrThrow();
+    return { organization: Number(organization), person: Number(person) };
   }
 
   async runningTurn(orgId: string, sessionId: string, since: Date): Promise<boolean> {

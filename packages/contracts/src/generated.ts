@@ -1574,6 +1574,10 @@ export interface ActivitySession {
        */
       reason: string;
     } | null;
+    /**
+     * In words, why what the session left has not been read yet, when a limit on what the model may spend in a day held it back; absent or null when no limit has.
+     */
+    waiting?: string | null;
   } | null;
   /**
    * What the session left as its note, kept private to the person; null when it left none or it was removed.

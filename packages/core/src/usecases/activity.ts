@@ -20,10 +20,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_SESSIONS = 20;
 
 function sessionRow(session: Session): ActivitySession {
-  const { digestedAt, modelTokens, digestFailure } = session;
-  // A session no model was ever given anything of, and that no reading failed on, has none to show.
+  const { digestedAt, modelTokens, digestFailure, digestWaiting } = session;
+  // A session no model was ever given anything of, and that no reading failed on or waits for, has none to show.
   const unread =
-    digestedAt === null && modelTokens.input + modelTokens.output === 0 && digestFailure === null;
+    digestedAt === null &&
+    modelTokens.input + modelTokens.output === 0 &&
+    digestFailure === null &&
+    digestWaiting === null;
   return {
     session: session.displayId,
     client: session.clientName,
@@ -52,6 +55,7 @@ function sessionRow(session: Session): ActivitySession {
             digestFailure === null
               ? null
               : { at: digestFailure.at.toISOString(), reason: digestFailure.reason },
+          waiting: digestWaiting,
         },
   };
 }

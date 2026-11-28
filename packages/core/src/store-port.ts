@@ -456,6 +456,12 @@ export interface JobsRepo {
   hastenDigest(orgId: string, sessionId: string, now: Date): Promise<void>;
 }
 
+/** What model calls have cost, input and output together: in an organization, and in one person's sessions of it. */
+export interface Spent {
+  readonly organization: number;
+  readonly person: number;
+}
+
 /** Inferred sessions, each with its note. A session write takes no audience lock and writes no event. */
 export interface SessionsRepo {
   /** The session with this key whose last call is the most recent. Whether it is still open is the reader's to judge. */
@@ -546,6 +552,13 @@ export interface SessionsRepo {
   spent(orgId: string, id: string, tokens: ModelTokens, at: Date): Promise<void>;
   /** What model calls have cost, input and output together, since `since`, across everyone the server serves. */
   spentSince(since: Date): Promise<number>;
+  /**
+   * What model calls have cost since `since`: in the person's organization, and in the person's
+   * own sessions. A spend recorded before spend named a person is in the organization's only.
+   */
+  spentBy(orgId: string, principalId: string, since: Date): Promise<Spent>;
+  /** Records that what the session left waits for a limit on what the model may spend, in words its person reads. A finished reading clears it. */
+  digestWaits(orgId: string, id: string, words: string): Promise<void>;
   /**
    * Whether the session has a turn that was asked after `since` and has no answer yet: the agent
    * is working on it, and what it will say is not there to be read.

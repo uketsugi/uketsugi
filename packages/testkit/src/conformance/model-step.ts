@@ -178,6 +178,57 @@ export function describeModelStepConformance(name: string, harness: StoreHarness
       });
     });
 
+    test("what is spent is counted for the person whose session was read, for their organization, and for nobody else's", async () => {
+      // A second person of Alice's organization, and a time of this test's own to count from.
+      const carol = await store.directory.ensurePrincipal({
+        subject: "test:carol",
+        displayName: "carol",
+        orgId: alice.orgId,
+        principalId: ids.uuid(),
+        audienceId: ids.uuid(),
+      });
+      // Far ahead of what the other tests spent, which this one is counted apart from.
+      const since = new Date("2100-01-01T00:00:00Z");
+      const at = new Date(since.getTime() + MINUTE);
+      const [hers, theirs, elsewhere] = [await open(alice), await open(carol), await open(bob)];
+      await store.sessions.spent(alice.orgId, hers.id, { input: 100, output: 20 }, at);
+      await store.sessions.spent(alice.orgId, theirs.id, { input: 300, output: 30 }, at);
+      await store.sessions.spent(bob.orgId, elsewhere.id, { input: 7, output: 7 }, at);
+      expect(await store.sessions.spentBy(alice.orgId, alice.principalId, since)).toEqual({
+        organization: 450,
+        person: 120,
+      });
+      expect(await store.sessions.spentBy(alice.orgId, carol.principalId, since)).toEqual({
+        organization: 450,
+        person: 330,
+      });
+      expect(await store.sessions.spentBy(bob.orgId, bob.principalId, since)).toEqual({
+        organization: 14,
+        person: 14,
+      });
+      // Only what is after `since` counts.
+      expect(
+        await store.sessions.spentBy(
+          alice.orgId,
+          alice.principalId,
+          new Date(at.getTime() + MINUTE),
+        ),
+      ).toEqual({
+        organization: 0,
+        person: 0,
+      });
+    });
+
+    test("why a session waits is kept on it until a reading finishes", async () => {
+      const session = await open(alice);
+      await store.sessions.digestWaits(alice.orgId, session.id, "Waiting: the limit is used up.");
+      expect(await stored(session)).toMatchObject({
+        digestWaiting: "Waiting: the limit is used up.",
+      });
+      await store.sessions.digested(alice.orgId, session.id, { at: clock.now(), turns: [] });
+      expect(await stored(session)).toMatchObject({ digestWaiting: null });
+    });
+
     test("a failed reading is kept on the session with the latest reason and the time of the first failure, and cleared by a reading that finishes", async () => {
       const session = await open(alice);
       const first = { at: new Date("2026-11-14T10:00:00Z"), reason: "status 402: no credit" };

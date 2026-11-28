@@ -419,6 +419,8 @@ export interface Session extends SessionKey {
   readonly modelTokens: ModelTokens;
   /** The last reading that failed and has not been followed by one that finished: when, and the provider's reason, without any key. */
   readonly digestFailure: DigestFailure | null;
+  /** In words a person reads: why what the session left waits to be read, when a limit on what the model may spend held it back; null when nothing waits on one. */
+  readonly digestWaiting: string | null;
 }
 
 /** A model's reading of a session that failed. */

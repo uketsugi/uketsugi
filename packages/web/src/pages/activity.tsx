@@ -78,13 +78,15 @@ const readColumns = readColumn.columns([
     id: "provider",
     header: "Provider",
     cell: ({ row }) => {
-      const failure = row.original.digest.failure;
-      if (failure === null || failure === undefined) return "";
-      return (
-        <>
-          Failed or refused <Ago at={failure.at} />: {failure.reason}
-        </>
-      );
+      const { failure, waiting } = row.original.digest;
+      if (failure !== null && failure !== undefined) {
+        return (
+          <>
+            Failed or refused <Ago at={failure.at} />: {failure.reason}
+          </>
+        );
+      }
+      return waiting ?? "";
     },
   }),
 ]);

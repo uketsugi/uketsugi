@@ -31,9 +31,12 @@ import {
   BUDGET_WINDOW_MS,
   costOf,
   countedFor,
+  dayLimit,
   RESERVE_TOKENS,
   SESSION_TOKENS,
+  waitingWords,
   WAIT_MS,
+  type DayLimit,
 } from "../digest/budget.ts";
 import type { Actor, ClaimedJob, FactContent, ModelTokens, Session, Turn } from "../domain.ts";
 import { draftOf, type Reading, type Refusal } from "../digest/candidates.ts";
@@ -330,12 +333,23 @@ async function keepFailure(run: Run): Promise<void> {
   });
 }
 
-/** Leaves the session for a later look, due again after `WAIT_MS`, with the failure that made it wait, if one did. */
-async function waitWhole(run: Run, startedAt: Date): Promise<void> {
+/**
+ * Leaves the session for a later look, due again after `WAIT_MS`, with the failure that made it
+ * wait, if one did, or the words of the limit that did.
+ */
+async function waitWhole(run: Run, startedAt: Date, limit?: DayLimit): Promise<void> {
   const { session } = run.reading;
   const dueAt = new Date(startedAt.getTime() + WAIT_MS);
   await run.ports.store.jobs.armDigest(session.orgId, session.id, dueAt);
   await keepFailure(run);
+  if (limit !== undefined) {
+    const used = limit.used + run.spent.input + run.spent.output;
+    await run.ports.store.sessions.digestWaits(
+      session.orgId,
+      session.id,
+      waitingWords(limit, used),
+    );
+  }
 }
 
 /** Whether something the provider's failure kept from being read is still there: a turn, or a note, from before it began. */
@@ -375,11 +389,12 @@ async function closeReading(
     turnsRead: number;
     stoppedBy: Extracted["stoppedBy"];
     picks: readonly string[] | null;
+    day: DayLimit;
   },
 ): Promise<number> {
   const { ports, reading } = run;
   const { session } = reading;
-  const { startedAt, turnsRead, stoppedBy, picks } = done;
+  const { startedAt, turnsRead, stoppedBy, picks, day } = done;
   const waits = stoppedBy === "day" || stoppedBy === "provider";
   const waiting = waits ? turns.answered.slice(turnsRead) : [];
   const finished = turns.answered.slice(0, turns.answered.length - waiting.length);
@@ -390,7 +405,7 @@ async function closeReading(
     ...(picks === null ? {} : { picks }),
   });
   // A failure is kept only while a reading waits on it: one that left nothing unread is no news.
-  if (waiting.length > 0) await waitWhole(run, startedAt);
+  if (waiting.length > 0) await waitWhole(run, startedAt, stoppedBy === "day" ? day : undefined);
   if (turns.running.length > 0) await armDigest(ports, session, "quiet");
   return waiting.length;
 }
@@ -454,13 +469,13 @@ async function read(run: Run): Promise<DigestReport> {
   const pieces = piecesOf(said);
   // Nothing is asked of a session that left nothing, or whose room is spent.
   const asking = worthAsking(said, published, room);
-  const limit = ports.runner.dailyTokens;
-  const used = await sessions.spentSince(new Date(startedAt.getTime() - BUDGET_WINDOW_MS));
+  const day = await dayLimit(ports, session, new Date(startedAt.getTime() - BUDGET_WINDOW_MS));
+  const { used, limit } = day;
   const nothing = { written: 0, merged: 0, flagged: 0 };
   const refused: Refused = { invalid: 0, uncited: 0, repeat: 0 };
   const report = reporting(run, refused, { used, limit });
   const waited = async (): Promise<DigestReport> => {
-    await waitWhole(run, startedAt);
+    await waitWhole(run, startedAt, day);
     return report({ waited: true });
   };
   if (asking && used + estimatedCost(pieces, room) + RESERVE_TOKENS > limit) return waited();
@@ -478,14 +493,17 @@ async function read(run: Run): Promise<DigestReport> {
   if (stoppedBy === "day" && turnsRead === 0) return waited();
   const written = asking ? await judgeAndWrite(run, drafts, published, refused) : nothing;
   // The provider failed before the reading had cost anything: nothing was read, and it waits as a whole.
-  if (run.failure !== null && run.spent.input + run.spent.output === 0) return waited();
+  if (run.failure !== null && run.spent.input + run.spent.output === 0) {
+    await waitWhole(run, startedAt);
+    return report({ waited: true });
+  }
   const stopped = said.at(-1)?.answer ?? lastWord(session);
   const picks = asking
     ? ((await attempt(run, () =>
         choosePicks(ports, reading, stopped, (chore) => ask(run, chore)),
       )) ?? null)
     : null;
-  const kept = await closeReading(run, turns, { startedAt, turnsRead, stoppedBy, picks });
+  const kept = await closeReading(run, turns, { startedAt, turnsRead, stoppedBy, picks, day });
   return report({
     read: turnsRead,
     unread: stoppedBy === "session" ? said.length - turnsRead : 0,

@@ -111,6 +111,8 @@ export class FakeRunner implements ModelRunner {
   readonly name = "fake · scripted";
   /** What the server may spend in a day; a test lowers it to see readings wait. */
   dailyTokens = Number.MAX_SAFE_INTEGER;
+  /** What one person may spend in a day, where a test sets it. */
+  personDailyTokens: number | undefined = undefined;
   /** Every chore asked, in order. */
   readonly asked: Chore[] = [];
   readonly serves: ModelRunner["serves"];

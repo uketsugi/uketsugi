@@ -58,6 +58,7 @@ export function previous(change: Partial<Session> = {}): Session {
     digestedAt: null,
     modelTokens: { input: 0, output: 0 },
     digestFailure: null,
+    digestWaiting: null,
     ...change,
   };
 }

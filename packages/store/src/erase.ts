@@ -43,6 +43,13 @@ export async function eraseResidue(db: Db, orgId: string, id: string): Promise<E
     .where("person", "=", id)
     .execute();
   await db.deleteFrom("taskNotes").where("orgId", "=", orgId).where("author", "=", id).execute();
+  // What the person's sessions cost still counts for their organization, with no name to it.
+  await db
+    .updateTable("modelSpend")
+    .set({ principalId: null })
+    .where("orgId", "=", orgId)
+    .where("principalId", "=", id)
+    .execute();
   for (const table of ["sessions", "projectChoices", "projectNames"] as const) {
     await db.deleteFrom(table).where("orgId", "=", orgId).where("principalId", "=", id).execute();
   }

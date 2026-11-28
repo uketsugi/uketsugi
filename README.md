@@ -414,7 +414,7 @@ Each kind of record is kept as follows.
 - **What you and an agent said, kept for a language model to read.** Deleted once the model has read it, or when you remove the session's note.
 - **The log of who did what.** Holds ids, kinds and hashes and no text. The entries about a record are deleted with it.
 - **Tokens.** Only a token's hash is kept, until the account is deleted.
-- **Totals of language-model use.** Counts of tokens with no person and no text in them, kept for seven days.
+- **Totals of language-model use.** Counts of tokens, each with the id of the person whose session it was for and no text, kept for seven days. Deleting the account takes the id off them.
 
 A backup is a file you make with `ukt backup` and keep on your own disk. Deleting a project or a fact does not reach it, and restoring one brings back what it held.
 
@@ -560,6 +560,10 @@ The server spends on the model only within bounds you can see and set:
   the budget, and are read when the provider answers. A provider that fails before a reading has
   cost anything, or refuses your key or account, makes the whole reading wait the same way, and
   `ukt doctor` says so. What waits is dropped after twelve hours.
+- Where an operator serves several people with one key, as the hosted edition does, the same readings
+  are also held to a limit on each person and one on each organization over its people together. A
+  person over theirs has their next reading wait, and the Activity page says so in words; the
+  others go on.
 - `ukt serve` prints a line for every session it read, with the tokens the model took in and gave
   out, and the dashboard's Activity page lists them. `ukt doctor` shows what the last 24 hours cost
   against the budget.

@@ -11,7 +11,7 @@ import {
   type ProviderRequest,
 } from "@uketsugi/testkit";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { createModelRunner, type ModelProvider } from "../src/model-runner.ts";
+import { createModelRunner, servesOnly, type ModelProvider } from "../src/model-runner.ts";
 
 const KEY = "sk-test-0123456789";
 const CHORE: Chore = {
@@ -120,7 +120,7 @@ describe("the model runner", () => {
 
   const OPERATOR = { orgId: "org-1", principalId: "person-1" };
   const runnerOn = (provider: ModelProvider, model: string) =>
-    createModelRunner({ provider, model, apiKey: KEY, baseUrl: base }, OPERATOR);
+    createModelRunner({ provider, model, apiKey: KEY, baseUrl: base }, servesOnly(OPERATOR));
   const models: [ModelProvider, string][] = [
     ["google", "gemini-test"],
     ["openai", "gpt-test"],

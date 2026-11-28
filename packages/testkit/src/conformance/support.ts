@@ -36,6 +36,7 @@ export const UNREAD = {
   digestedAt: null,
   modelTokens: { input: 0, output: 0 },
   digestFailure: null,
+  digestWaiting: null,
 } as const;
 
 /** An event a person appends about a record. */

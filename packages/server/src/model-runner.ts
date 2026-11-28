@@ -83,8 +83,10 @@ export interface ModelConfig {
   readonly apiKey: string;
   /** Where the provider is reached. Needed for `openai-compatible`; the others have their own. */
   readonly baseUrl?: string;
-  /** The most tokens the server may spend on it in a day. Left out, `DEFAULT_DAILY_TOKENS`. */
+  /** The most tokens the server may spend on it in a day, or an organization of a hosted one. Left out, `DEFAULT_DAILY_TOKENS`. */
   readonly dailyTokens?: number;
+  /** The most one person may spend in a day, where the operator limits each. Left out, only the organization's limit binds. */
+  readonly personDailyTokens?: number;
 }
 
 /**
@@ -162,13 +164,19 @@ export function parseModel(spec: string): Pick<ModelConfig, "provider" | "model"
   return provider === undefined || model === "" ? null : { provider, model };
 }
 
+/** Whom a person's own server's model serves: the one person who configured it, whose text is the only text it is sent. */
+export function servesOnly(agreedBy: Pick<Caller, "orgId" | "principalId">): ModelRunner["serves"] {
+  return (person) => person.orgId === agreedBy.orgId && person.principalId === agreedBy.principalId;
+}
+
 /**
- * The runner for a configured model. It serves the one person who configured it, `agreedBy`:
- * theirs is the only text it is ever sent. It makes no request until a chore is run.
+ * The runner for a configured model. It serves whom `serves` says has agreed to their text being
+ * sent: on a person's own server the one person who configured it, on a hosted one everyone it
+ * signs in. It makes no request until a chore is run.
  */
 export async function createModelRunner(
   config: ModelConfig,
-  agreedBy: Pick<Caller, "orgId" | "principalId">,
+  serves: ModelRunner["serves"],
 ): Promise<ModelRunner> {
   const sdk = await import("ai");
   // The SDK's notes on how it fitted a setting to a model go to standard error unless told not
@@ -179,8 +187,10 @@ export async function createModelRunner(
     kind: "endpoint",
     name: modelName(config),
     dailyTokens: config.dailyTokens ?? DEFAULT_DAILY_TOKENS,
-    serves: (person) =>
-      person.orgId === agreedBy.orgId && person.principalId === agreedBy.principalId,
+    ...(config.personDailyTokens === undefined
+      ? {}
+      : { personDailyTokens: config.personDailyTokens }),
+    serves,
     async run(chore: Chore, signal?: AbortSignal) {
       try {
         const answer = await sdk.generateText({

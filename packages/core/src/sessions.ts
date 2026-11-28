@@ -103,6 +103,7 @@ export function newSession(
     digestedAt: null,
     modelTokens: { input: 0, output: 0 },
     digestFailure: null,
+    digestWaiting: null,
   };
 }
 

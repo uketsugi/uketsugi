@@ -3,15 +3,17 @@
  * bounds hold at once, each for its own harm:
  * - a session's readings together never pass `SESSION_TOKENS`, so one session, however long or
  *   however many turns it holds, cannot cost without limit;
- * - what a server spends in a day stays within what its operator set (`ModelRunner.dailyTokens`):
- *   a reading that would pass it waits;
+ * - what an organization spends in a day stays within what its operator set (`ModelRunner.dailyTokens`,
+ *   the server's on a person's own server), and, where the operator set one, what a person
+ *   spends stays within `personDailyTokens`: a reading that would pass either waits, and says why;
  * - a reading that fails after it has cost something is not asked again for what it read: those turns
  *   are deleted, the facts drawn from them written, and the rest waits for the provider.
  * `costOf` is an estimate made before a call, taken high. The provider's own count is what is
  * kept and added up, and a call is asked only while that count so far plus this estimate for the
  * call stays within the bound: the estimate guards the call about to be made, never the total.
  */
-import type { Chore, ModelAnswer } from "../ports.ts";
+import type { Session } from "../domain.ts";
+import type { Chore, CorePorts, ModelAnswer, ModelRunner } from "../ports.ts";
 
 /** The most all the readings of one session may cost, input and output together: about eight chores of the largest size. */
 export const SESSION_TOKENS = 150_000;
@@ -49,4 +51,45 @@ export function countedFor(
     input: answer.inputTokens > 0 ? answer.inputTokens : costOf(chore) - ANSWER_TOKENS,
     output: answer.outputTokens > 0 ? answer.outputTokens : ANSWER_TOKENS,
   };
+}
+
+/** The day's limit that binds a reading: the person's own or the organization's, whichever has less room. */
+export interface DayLimit {
+  readonly whose: "person" | "organization";
+  readonly used: number;
+  readonly limit: number;
+}
+
+/** What the model has been asked for in the day, against the limits that apply, as the tighter of the two. */
+export async function dayLimit(
+  ports: Pick<CorePorts, "store"> & { readonly runner: ModelRunner },
+  session: Pick<Session, "orgId" | "principalId">,
+  since: Date,
+): Promise<DayLimit> {
+  const { organization, person } = await ports.store.sessions.spentBy(
+    session.orgId,
+    session.principalId,
+    since,
+  );
+  const ofOrganization = {
+    whose: "organization",
+    used: organization,
+    limit: ports.runner.dailyTokens,
+  } as const;
+  const own = ports.runner.personDailyTokens;
+  if (own === undefined) return ofOrganization;
+  const ofPerson = { whose: "person", used: person, limit: own } as const;
+  return own - person <= ports.runner.dailyTokens - organization ? ofPerson : ofOrganization;
+}
+
+/** Why a reading waits, in words its person reads on the dashboard. It holds counts, never text. */
+export function waitingWords(day: DayLimit, used: number): string {
+  const share =
+    day.whose === "person"
+      ? "your own limit"
+      : "the limit for everyone in your organization together";
+  return (
+    `Waiting: ${share} on what the model reads in a day is used up (${used} of ${day.limit} tokens). ` +
+    "This is read once earlier use is more than a day old."
+  );
 }

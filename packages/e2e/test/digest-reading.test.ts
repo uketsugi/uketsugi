@@ -63,6 +63,7 @@ describeUseCases("when and what the model step reads", (w) => {
       input_tokens: read.modelTokens.input,
       output_tokens: read.modelTokens.output,
       failure: null,
+      waiting: null,
     });
   });
 
@@ -204,6 +205,7 @@ describeUseCases("when and what the model step reads", (w) => {
       input_tokens: 0,
       output_tokens: 0,
       failure: { at: failedAt, reason: refused.message },
+      waiting: null,
     });
 
     // The next reading that finishes takes the failure away.

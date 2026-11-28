@@ -27,12 +27,14 @@ export type {
   PortsOptions,
 } from "./local.ts";
 export {
+  createModelRunner,
   DEFAULT_DAILY_TOKENS,
   MODEL_PROVIDERS,
   modelName,
   modelSpec,
   parseModel,
   PROVIDERS,
+  servesOnly,
 } from "./model-runner.ts";
 export type { ModelConfig, ModelProvider } from "./model-runner.ts";
 

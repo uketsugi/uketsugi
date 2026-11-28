@@ -23,7 +23,7 @@ import {
 import { openEmbeddedStore, openServerStore, type RecoveryProgress } from "@uketsugi/store";
 import { v7 as uuidv7 } from "uuid";
 import { composeServer, listenStarting, type StartingListener } from "./compose.ts";
-import { createModelRunner, type ModelConfig } from "./model-runner.ts";
+import { createModelRunner, servesOnly, type ModelConfig } from "./model-runner.ts";
 import type { Starting } from "./starting.ts";
 
 /** The system's clock, in whole milliseconds. */
@@ -112,7 +112,8 @@ export async function openLocalPorts(options: LocalPortsOptions): Promise<LocalP
   try {
     const base = opened.ports;
     const owner = await ensureOwner(base);
-    const runner = model === undefined ? {} : { runner: await createModelRunner(model, owner) };
+    const runner =
+      model === undefined ? {} : { runner: await createModelRunner(model, servesOnly(owner)) };
     const identity = createTokenIdentity(base, { requireToken });
     return { ...opened, ports: { ...base, ...runner, identity }, owner };
   } catch (error) {

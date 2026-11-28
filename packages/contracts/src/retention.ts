@@ -32,7 +32,7 @@ export const RETENTION = [
   },
   {
     what: "Totals of language-model use",
-    kept: "Counts of tokens with no person and no text in them, kept for seven days.",
+    kept: "Counts of tokens, each with the id of the person whose session it was for and no text, kept for seven days. Deleting the account takes the id off them.",
   },
 ] as const;
 
