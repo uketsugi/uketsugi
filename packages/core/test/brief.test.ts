@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { BriefFact } from "@uketsugi/contracts";
 import { describe, expect, test } from "vitest";
+import { BRIEF_FIXED_LINES } from "../src/brief-lines.ts";
 import { BRIEF_CLAIM_CHARS, BRIEF_MAX_CHARS, composeBrief } from "../src/brief.ts";
 import {
   fact,
@@ -320,4 +321,52 @@ describe("the brief shows a claim whole", () => {
     expect(text).toContain(`${"a".repeat(BRIEF_CLAIM_CHARS - 1)}…`);
     expect(text).not.toContain("a".repeat(BRIEF_CLAIM_CHARS));
   });
+});
+
+describe("the brief's fixed lines", () => {
+  const written = (n: number, claim: string): BriefFact => ({
+    ...fact(n, claim),
+    from_session: "s-0800",
+  });
+  const published = [fact(20, "The retry queue caps at five attempts")];
+  const digested = [written(30, "Deliveries are deduplicated on the event id")];
+  const cases = {
+    "an empty project": sources(),
+    "a notice and every task group": sources({
+      notice: "A notice",
+      tasks: [
+        task(1, "Held", { state: "claimed", lease: lease(ME, minutes(10)) }),
+        task(2, "Open"),
+        task(3, "Lapsed", { state: "claimed", lease: lease(ME, minutes(-30)) }),
+      ],
+      notes: [note(2, "A note")],
+    }),
+    "a closed session, what it published and a model wrote": sources({
+      previous: {
+        session: previous({ note: noted("Done.", minutes(-235)) }),
+        published,
+        digested,
+      },
+      facts: [...published, ...digested],
+      factCount: 2,
+    }),
+    "a session still open": sources({
+      previous: { session: previous({ lastCallAt: minutes(-1) }), published: [], digested: [] },
+    }),
+    "a session that never closed": sources({
+      previous: { session: previous(), published: [], digested: [] },
+    }),
+  };
+
+  test.each(Object.entries(cases))(
+    "every line of a brief of %s is a listed one or an item the project holds",
+    (_name, given) => {
+      const unlisted = composeBrief(given)
+        .text.split("\n")
+        .filter((line) => !/^(- |\s)/.test(line))
+        .filter((line) => !BRIEF_FIXED_LINES.some((start) => line.includes(start)));
+      // The notice is the contracts' own text, listed there.
+      expect(unlisted.filter((line) => line !== "A notice")).toEqual([]);
+    },
+  );
 });
